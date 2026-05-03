@@ -29,16 +29,13 @@ pub struct OptimizeRequest {
     pub oneway_mode: OnewayMode,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum OnewayMode {
     Ignore,
     #[default]
     Respect,
     Reverse,
 }
-
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizeResult {
@@ -307,7 +304,7 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
 
     // Sort odd vertices by latitude for spatial pruning
     let mut sorted_odd = odd_vertices.clone();
-    sorted_odd.sort_by(|&a, &b| nodes[a].lat.partial_cmp(&nodes[b].lat).unwrap_or(std::cmp::Ordering::Equal));
+    sorted_odd.sort_by(|&a, &b| nodes[a].lat.total_cmp(&nodes[b].lat));
 
     // Map each node index to its position in the sorted_odd list
     let mut pos_in_sorted = vec![0usize; n];
@@ -433,15 +430,15 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         let v = v_u32 as usize;
         if let Some(edge) = adj_clone[v].pop() {
             // Remove reverse edge
-            if let Some(pos) = adj_clone[edge.to as usize].iter().position(|e| {
+            let to_idx = edge.to as usize;
+            if let Some(pos) = adj_clone[to_idx].iter().position(|e| {
                 e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m
             }) {
-                adj_clone[edge.to as usize].swap_remove(pos);
+                adj_clone[to_idx].swap_remove(pos);
             }
             stack.push((edge.to, Some(edge)));
-        } else {
-            let (v_u32, edge_opt) = stack.pop().unwrap();
-            circuit_with_edges.push((v_u32, edge_opt));
+        } else if let Some(node_data) = stack.pop() {
+            circuit_with_edges.push(node_data);
         }
     }
 

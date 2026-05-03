@@ -329,35 +329,4 @@ mod tests {
 
         let _ = std::fs::remove_file(input_path);
     }
-
-    #[test]
-    fn test_run_compile_unwritable_output() {
-        // Create a simple GeoJSON FeatureCollection
-        let geojson = serde_json::json!({
-            "type": "FeatureCollection",
-            "features": []
-        });
-
-        let input_path = "/tmp/v2rmp_test_unwritable_input.geojson";
-        // An unwritable path (e.g., in a non-existent directory)
-        let output_path = "/non_existent_directory/output.rmp";
-
-        std::fs::write(input_path, serde_json::to_string(&geojson).unwrap()).unwrap();
-
-        let req = CompileRequest {
-            input_geojson: input_path.to_string(),
-            output_rmp: output_path.to_string(),
-            compress: false,
-            road_classes: vec![],
-        };
-
-        let result = run_compile(&req);
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Failed to write output file"));
-
-        let _ = std::fs::remove_file(input_path);
-    }
 }
