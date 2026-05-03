@@ -1,24 +1,20 @@
 [package]
 name = "v2rmp"
-version = "0.3.6"
+version = "0.3.7"
 edition = "2021"
-authors = ["Spacial Glacier Lab"]
-description = "A powerful Terminal User Interface (TUI) for route optimization using the Chinese Postman Problem algorithm"
-documentation = "https://docs.rs/v2rmp"
-homepage = "https://github.com/spacialglaciercom-lab/v2rmp"
-repository = "https://github.com/spacialglaciercom-lab/v2rmp"
+description = "rmpca — Route Optimization TUI"
 license = "MIT OR Apache-2.0"
-keywords = ["route", "optimization", "tui", "cpp", "graph"]
-categories = ["command-line-utilities", "algorithms", "visualization"]
+repository = "https://github.com/spacialglaciercom-lab/v2rmp"
+homepage = "https://github.com/spacialglaciercom-lab/v2rmp"
 readme = "README.md"
+keywords = ["route", "optimization", "tui", "gis", "osm"]
+categories = ["command-line-utilities", "visualization"]
 exclude = [
+    "monaco.osm.pbf",
     "target/",
-    ".git/",
-    ".github/",
-    "*.rmp",
-    "*.geojson",
-    "route_*.json",
-    "extract_*.geojson",
+    ".bob/",
+    "vector_clean.py",
+    "*_patch.diff",
 ]
 
 [[bin]]
@@ -33,7 +29,6 @@ path = "src/bin/extract.rs"
 # TUI
 ratatui = "0.29"
 crossterm = "0.28"
-arboard = "3.4"
 
 # Core
 serde = { version = "1", features = ["derive"] }
@@ -41,14 +36,17 @@ serde_json = "1"
 chrono = "0.4"
 anyhow = "1"
 clap = { version = "4.5", features = ["derive"] }
+dirs = "5.0"
+shellexpand = "3.1"
 
-# Extraction - Overture Maps (object_store + parquet + geo)
+# Extraction (object_store + parquet + geo)
 object_store = { version = "0.11", features = ["aws"] }
 parquet = { version = "54", features = ["async"] }
 arrow = "54"
 futures-util = "0.3"
 geo-types = "0.7"
 geo-traits = "0.2"
+geo = "0.28"
 geojson = "0.24"
 wkb = "0.8"
 tokio = { version = "1", features = ["full"] }
@@ -57,19 +55,12 @@ hex = "0.4"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 crc32fast = "1.4"
-
-# Extraction - OpenStreetMap PBF
-osmpbf = "0.3"
-
-[dev-dependencies]
-# Add test dependencies here when tests are implemented
+petgraph = "0.6"
+rstar = "0.12"
+ordered-float = "4.2"
 
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
-
-[package.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["--cfg", "docsrs"]

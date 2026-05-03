@@ -1,13 +1,21 @@
 //! Overture Maps S3 extractor
+//!
+//! Queries Overture Maps transportation segments from S3 Parquet files,
+//! filters by bounding box and road class, and builds a road network graph.
 
 use anyhow::Result;
+use arrow::array::{Array, BinaryArray, BooleanArray, StringArray, StructArray};
 use futures_util::stream::{self, StreamExt};
-use geo_traits::{CoordTrait, GeometryTrait, GeometryType, LineStringTrait, MultiLineStringTrait};
+use geo_traits::{
+    CoordTrait, GeometryTrait, GeometryType, LineStringTrait, MultiLineStringTrait,
+    MultiPointTrait, PointTrait,
+};
 use object_store::aws::AmazonS3Builder;
 use object_store::path::Path;
 use object_store::ObjectStore;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use std::sync::Arc;
+use wkb::reader::read_wkb;
 
 /// Overture Maps S3 configuration
 pub const OVERTURE_S3_BUCKET: &str = "overturemaps-us-west-2";
@@ -22,6 +30,7 @@ pub fn segment_path() -> String {
 }
 
 /// Supported road classes for extraction
+#[allow(dead_code)]
 pub const ROAD_CLASSES: &[&str] = &[
     "residential",
     "tertiary",
@@ -49,6 +58,7 @@ pub struct BBox {
 
 impl BBox {
     /// Check if a point is within the bounding box
+    #[allow(dead_code)]
     pub fn contains(&self, lon: f64, lat: f64) -> bool {
         lon >= self.min_lon && lon <= self.max_lon && lat >= self.min_lat && lat <= self.max_lat
     }
@@ -62,6 +72,7 @@ impl BBox {
     }
 
     /// Calculate area in degrees squared (approximate)
+    #[allow(dead_code)]
     pub fn area(&self) -> f64 {
         (self.max_lon - self.min_lon) * (self.max_lat - self.min_lat)
     }
@@ -74,6 +85,7 @@ pub struct OvertureSegment {
     pub name: Option<String>,
     pub class: Option<String>,
     pub subtype: Option<String>,
+    #[allow(dead_code)]
     pub subclass: Option<String>,
     pub surface: Option<String>,
     pub geometry: Geometry,
@@ -144,6 +156,7 @@ impl OvertureExtractor {
     }
 
     /// Create a new extractor with custom credentials (for testing)
+    #[allow(dead_code)]
     pub fn with_credentials(
         access_key_id: Option<String>,
         secret_access_key: Option<String>,
@@ -164,121 +177,198 @@ impl OvertureExtractor {
         })
     }
 
-    /// Extract segments from S3 for the given bounding box.
+    /// Extract segments within a bounding box
     pub async fn extract_bbox(&self, bbox: &BBox) -> Result<Vec<OvertureSegment>> {
-        let prefix = segment_path();
-        let path = Path::from(prefix.as_str());
+        // List all parquet files in the segment directory
+        let prefix = Path::from(segment_path());
+        let mut files = Vec::new();
 
-        let list_stream = self.store.list(Some(&path));
-        let objects: Vec<_> = list_stream.collect().await;
-        let objects: Vec<_> = objects.into_iter().filter_map(|r| r.ok()).collect();
+        let mut stream = self.store.list(Some(&prefix));
 
-        tracing::info!("Found {} S3 objects to process", objects.len());
+        while let Some(item) = stream.next().await {
+            let meta = item?;
+            if meta.location.to_string().ends_with(".parquet") {
+                files.push(meta.location);
+            }
+        }
 
-        let segments = stream::iter(objects)
-            .map(|meta| async move {
-                let location = meta.location;
-                self.process_parquet_file(&location, bbox).await
+        tracing::info!(
+            "Found {} parquet files in Overture segment directory",
+            files.len()
+        );
+
+        let mut segments = Vec::new();
+
+        // Process files in parallel
+        let file_results = stream::iter(files)
+            .map(|path| {
+                let store = Arc::clone(&self.store);
+                let bbox = *bbox;
+                async move { Self::extract_from_file(store.as_ref(), &path, &bbox).await }
             })
-            .buffer_unordered(10)
+            .buffer_unordered(10) // Process up to 10 files concurrently
             .collect::<Vec<_>>()
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
+            .await;
 
+        for result in file_results {
+            match result {
+                Ok(mut file_segments) => segments.append(&mut file_segments),
+                Err(e) => {
+                    tracing::warn!("Failed to extract from file: {}", e);
+                }
+            }
+        }
+
+        tracing::info!("Extracted {} total segments from S3", segments.len());
         Ok(segments)
     }
 
-    /// Process a single Parquet file from S3.
-    async fn process_parquet_file(
-        &self,
-        location: &Path,
+    /// Convert a WKB geometry (via geo_traits GeometryTrait) into our Geometry enum.
+    ///
+    /// Returns `None` for unsupported geometry types (Polygon, MultiPolygon, etc.)
+    fn convert_wkb_geometry(geom: &impl GeometryTrait<T = f64>) -> Option<Geometry> {
+        match geom.as_type() {
+            GeometryType::Point(pt) => {
+                let coord = pt.coord()?;
+                Some(Geometry::Point(coord.x(), coord.y()))
+            }
+            GeometryType::LineString(ls) => {
+                let coords: Vec<(f64, f64)> = (0..ls.num_coords())
+                    .map(|i| {
+                        let c = unsafe { ls.coord_unchecked(i) };
+                        (c.x(), c.y())
+                    })
+                    .collect();
+                Some(Geometry::LineString(coords))
+            }
+            GeometryType::MultiLineString(mls) => {
+                // Take first LineString from MultiLineString
+                if mls.num_line_strings() == 0 {
+                    return None;
+                }
+                let ls = unsafe { mls.line_string_unchecked(0) };
+                let coords: Vec<(f64, f64)> = (0..ls.num_coords())
+                    .map(|i| {
+                        let c = unsafe { ls.coord_unchecked(i) };
+                        (c.x(), c.y())
+                    })
+                    .collect();
+                Some(Geometry::LineString(coords))
+            }
+            GeometryType::MultiPoint(mpts) => {
+                if mpts.num_points() == 0 {
+                    return None;
+                }
+                let pt = unsafe { mpts.point_unchecked(0) };
+                let coord = pt.coord()?;
+                Some(Geometry::Point(coord.x(), coord.y()))
+            }
+            _ => None,
+        }
+    }
+
+    /// Extract segments from a single parquet file
+    async fn extract_from_file(
+        store: &dyn ObjectStore,
+        path: &Path,
         bbox: &BBox,
     ) -> Result<Vec<OvertureSegment>> {
-        let data = self.store.get(location).await?.bytes().await?;
+        // Download the file
+        let bytes = store.get(path).await?.bytes().await?;
 
-        let reader = ParquetRecordBatchReaderBuilder::try_new(data)?.build()?;
+        // Create parquet reader
+        let reader = ParquetRecordBatchReaderBuilder::try_new(bytes)?
+            .with_batch_size(1024)
+            .build()?;
 
         let mut segments = Vec::new();
 
         for batch in reader {
-            let batch = match batch {
-                Ok(b) => b,
-                Err(e) => {
-                    tracing::debug!("Error reading batch: {}", e);
+            let batch = batch?;
+            let num_rows = batch.num_rows();
+            if num_rows == 0 {
+                continue;
+            }
+
+            // Get columns by name
+            let id_col = batch.column_by_name("id");
+            let names_col = batch.column_by_name("names");
+            let class_col = batch.column_by_name("class");
+            let road_class_col = batch.column_by_name("road_class");
+            let subtype_col = batch.column_by_name("subtype");
+            let subclass_col = batch.column_by_name("subclass");
+            let surface_col = batch.column_by_name("surface");
+            let geometry_col = batch.column_by_name("geometry");
+            let oneway_col = batch.column_by_name("oneway");
+            let directed_col = batch.column_by_name("directed");
+            let junction_col = batch.column_by_name("junction");
+            let osm_id_col = batch.column_by_name("osm_id");
+            let sources_col = batch.column_by_name("sources");
+
+            // Cast columns to expected Arrow types
+            let id_arr = id_col.and_then(|c| c.as_any().downcast_ref::<StringArray>());
+            let class_arr = class_col.and_then(|c| c.as_any().downcast_ref::<StringArray>());
+            let road_class_arr =
+                road_class_col.and_then(|c| c.as_any().downcast_ref::<StringArray>());
+            let subtype_arr = subtype_col.and_then(|c| c.as_any().downcast_ref::<StringArray>());
+            let subclass_arr = subclass_col.and_then(|c| c.as_any().downcast_ref::<StringArray>());
+            let surface_arr = surface_col.and_then(|c| c.as_any().downcast_ref::<StringArray>());
+            let geometry_arr = geometry_col.and_then(|c| c.as_any().downcast_ref::<BinaryArray>());
+            let oneway_arr = oneway_col.and_then(|c| c.as_any().downcast_ref::<StringArray>());
+            let directed_str_arr =
+                directed_col.and_then(|c| c.as_any().downcast_ref::<StringArray>());
+            let directed_bool_arr =
+                directed_col.and_then(|c| c.as_any().downcast_ref::<BooleanArray>());
+            let junction_arr = junction_col.and_then(|c| c.as_any().downcast_ref::<StringArray>());
+            let osm_id_arr = osm_id_col.and_then(|c| c.as_any().downcast_ref::<StringArray>());
+
+            // Extract nested names.primary or names.primary.value
+            let name_values = names_col.and_then(|c| {
+                let struct_arr = c.as_any().downcast_ref::<StructArray>()?;
+                let primary = struct_arr.column_by_name("primary")?;
+                // Try names.primary.value first (doubly nested)
+                if let Some(primary_struct) = primary.as_any().downcast_ref::<StructArray>() {
+                    if let Some(value_col) = primary_struct.column_by_name("value") {
+                        return Some(value_col.clone());
+                    }
+                }
+                // Try names.primary directly as StringArray
+                Some(primary.clone())
+            });
+            let name_arr = name_values
+                .as_ref()
+                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
+
+            // Extract nested sources (for osm_id fallback)
+            let source_values = sources_col.and_then(|c| {
+                let struct_arr = c.as_any().downcast_ref::<StructArray>()?;
+                if let Some(dataset_col) = struct_arr.column_by_name("dataset") {
+                    return Some(dataset_col.clone());
+                }
+                None
+            });
+            let source_arr = source_values
+                .as_ref()
+                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
+
+            for row_idx in 0..num_rows {
+                // Extract id (required)
+                let Some(id_arr) = id_arr else { continue };
+                if id_arr.is_null(row_idx) {
                     continue;
                 }
-            };
+                let id = id_arr.value(row_idx).to_string();
 
-            use arrow::array::{Array, BinaryArray, BooleanArray, StringArray};
-
-            let id_arr = batch
-                .column_by_name("id")
-                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
-
-            let road_class_arr = batch
-                .column_by_name("road_class")
-                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
-
-            let class_arr = batch
-                .column_by_name("class")
-                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
-
-            let subtype_arr = batch
-                .column_by_name("subtype")
-                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
-
-            let subclass_arr = batch
-                .column_by_name("subclass")
-                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
-
-            let surface_arr = batch
-                .column_by_name("surface")
-                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
-
-            let oneway_arr = batch
-                .column_by_name("oneway")
-                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
-
-            let directed_str_arr = batch
-                .column_by_name("directed")
-                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
-
-            let directed_bool_arr = batch
-                .column_by_name("directed")
-                .and_then(|c| c.as_any().downcast_ref::<BooleanArray>());
-
-            let junction_arr = batch
-                .column_by_name("junction")
-                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
-
-            let osm_id_arr = batch
-                .column_by_name("osm_id")
-                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
-
-            let source_arr = batch
-                .column_by_name("source")
-                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
-
-            let geometry_arr = batch
-                .column_by_name("geometry")
-                .and_then(|c| c.as_any().downcast_ref::<BinaryArray>());
-
-            for row_idx in 0..batch.num_rows() {
-                let id = match id_arr {
-                    Some(arr) => {
-                        if arr.is_null(row_idx) {
-                            continue;
-                        }
-                        arr.value(row_idx).to_string()
+                // Extract name (optional, nested)
+                let name = name_arr.and_then(|arr| {
+                    if arr.is_null(row_idx) {
+                        None
+                    } else {
+                        Some(arr.value(row_idx).to_string())
                     }
-                    None => continue,
-                };
+                });
 
-                let name = None;
+                // Extract class (try "class" then "road_class")
                 let class = class_arr
                     .and_then(|arr| {
                         if arr.is_null(row_idx) {
@@ -297,6 +387,7 @@ impl OvertureExtractor {
                         })
                     });
 
+                // Extract subtype, subclass, surface (all optional)
                 let subtype = subtype_arr.and_then(|arr| {
                     if arr.is_null(row_idx) {
                         None
@@ -319,6 +410,7 @@ impl OvertureExtractor {
                     }
                 });
 
+                // Extract oneway (try "oneway" as string, then "directed" as string or bool)
                 let oneway = oneway_arr
                     .and_then(|arr| {
                         if arr.is_null(row_idx) {
@@ -354,6 +446,7 @@ impl OvertureExtractor {
                     }
                 });
 
+                // Extract osm_id (try column directly, then nested sources)
                 let osm_id = osm_id_arr
                     .and_then(|arr| {
                         if arr.is_null(row_idx) {
@@ -372,6 +465,7 @@ impl OvertureExtractor {
                         })
                     });
 
+                // Decode WKB geometry
                 let Some(geom_arr) = geometry_arr else {
                     continue;
                 };
@@ -380,7 +474,7 @@ impl OvertureExtractor {
                 }
                 let wkb_bytes = geom_arr.value(row_idx);
 
-                let wkb_geom = match wkb::reader::read_wkb(wkb_bytes) {
+                let wkb_geom = match read_wkb(wkb_bytes) {
                     Ok(g) => g,
                     Err(e) => {
                         tracing::debug!("WKB decode error for id {}: {}", id, e);
@@ -393,6 +487,7 @@ impl OvertureExtractor {
                     continue;
                 };
 
+                // Filter by bounding box: skip segments whose geometry bbox doesn't intersect
                 if let Some(geom_bbox) = geometry.bbox() {
                     if !bbox.intersects(&geom_bbox) {
                         continue;
@@ -416,23 +511,11 @@ impl OvertureExtractor {
 
         Ok(segments)
     }
+}
 
-    /// Convert a WKB geometry to our Geometry type
-    fn convert_wkb_geometry<G: GeometryTrait<T = f64>>(geom: &G) -> Option<Geometry> {
-        match geom.as_type() {
-            GeometryType::LineString(ls) => {
-                let coords: Vec<(f64, f64)> = ls.coords().map(|c| (c.x(), c.y())).collect();
-                Some(Geometry::LineString(coords))
-            }
-            GeometryType::MultiLineString(mls) => {
-                let coords: Vec<(f64, f64)> = mls
-                    .line_strings()
-                    .flat_map(|ls| ls.coords().map(|c| (c.x(), c.y())).collect::<Vec<_>>())
-                    .collect();
-                Some(Geometry::LineString(coords))
-            }
-            _ => None,
-        }
+impl Default for OvertureExtractor {
+    fn default() -> Self {
+        Self::new().expect("Failed to create Overture extractor")
     }
 }
 

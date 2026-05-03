@@ -1,58 +1,60 @@
+use ratatui::Frame;
+
 use crate::app::App;
-use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
-    Frame,
-};
 
-pub fn render(f: &mut Frame, app: &App) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(10)])
-        .split(f.area());
+pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let count = app.cached_maps.len();
+    let block = ratatui::widgets::Block::default()
+        .title(format!(" Cached Maps ({}) ", count))
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan));
 
-    let title = Block::default()
-        .borders(Borders::ALL)
-        .title(format!(" {} ", module_name()));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
 
-    let content = Paragraph::new("Module under construction").block(title);
+    if app.cached_maps.is_empty() {
+        let lines = vec![
+            ratatui::text::Line::from(""),
+            ratatui::text::Line::from("No cached maps found"),
+            ratatui::text::Line::from(""),
+            ratatui::text::Line::from(ratatui::text::Span::styled(
+                "Compile a GeoJSON file to create a .rmp map",
+                ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
+            )),
+            ratatui::text::Line::from(""),
+            ratatui::text::Line::from(ratatui::text::Span::styled(
+                "(press Esc to return home)",
+                ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
+            )),
+        ];
+        let paragraph = ratatui::widgets::Paragraph::new(lines);
+        f.render_widget(paragraph, inner);
+    } else {
+        let items: Vec<ratatui::widgets::ListItem> = app
+            .cached_maps
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                let style = if i == app.browse_selection {
+                    ratatui::style::Style::default()
+                        .fg(ratatui::style::Color::Yellow)
+                        .add_modifier(ratatui::style::Modifier::BOLD)
+                } else {
+                    ratatui::style::Style::default().fg(ratatui::style::Color::White)
+                };
+                let prefix = if i == app.browse_selection {
+                    " > "
+                } else {
+                    "   "
+                };
+                ratatui::widgets::ListItem::new(ratatui::text::Span::styled(
+                    format!("{}{}", prefix, name),
+                    style,
+                ))
+            })
+            .collect();
 
-    f.render_widget(content, chunks[0]);
-
-    render_logs(f, app, chunks[1]);
-}
-
-fn module_name() -> &'static str {
-    env!("CARGO_PKG_NAME")
-}
-
-fn render_logs(f: &mut Frame, app: &App, area: Rect) {
-    let logs: Vec<ListItem> = app
-        .log_entries
-        .iter()
-        .rev()
-        .take(area.height as usize - 2)
-        .rev()
-        .map(|entry| {
-            let style = match entry.level {
-                crate::app::LogLevel::Info => Style::default().fg(Color::Cyan),
-                crate::app::LogLevel::Success => Style::default().fg(Color::Green),
-                crate::app::LogLevel::Warn => Style::default().fg(Color::Yellow),
-                crate::app::LogLevel::Error => Style::default().fg(Color::Red),
-            };
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("[{}] ", entry.timestamp),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(&entry.message, style),
-            ]))
-        })
-        .collect();
-
-    let logs_widget = List::new(logs).block(Block::default().borders(Borders::ALL).title(" Logs "));
-
-    f.render_widget(logs_widget, area);
+        let list = ratatui::widgets::List::new(items);
+        f.render_widget(list, inner);
+    }
 }

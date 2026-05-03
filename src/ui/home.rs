@@ -1,58 +1,104 @@
+use ratatui::Frame;
+
 use crate::app::App;
-use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
-    Frame,
-};
 
-pub fn render(f: &mut Frame, app: &App) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(10)])
-        .split(f.area());
+const MENU_ITEMS: &[&str] = &[
+    "Extract Data (OSM/Overture)",
+    "Compile Map (GeoJSON -> .rmp)",
+    "Optimize Route",
+    "Browse Cached Maps",
+    "Browse Saved Routes",
+];
 
-    let title = Block::default()
-        .borders(Borders::ALL)
-        .title(format!(" {} ", module_name()));
+pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let columns = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Horizontal)
+        .constraints([
+            ratatui::layout::Constraint::Percentage(45),
+            ratatui::layout::Constraint::Percentage(55),
+        ])
+        .split(area);
 
-    let content = Paragraph::new("Module under construction").block(title);
-
-    f.render_widget(content, chunks[0]);
-
-    render_logs(f, app, chunks[1]);
+    draw_workflow(f, app, columns[0]);
+    draw_expanded_logs(f, app, columns[1]);
 }
 
-fn module_name() -> &'static str {
-    env!("CARGO_PKG_NAME")
-}
+fn draw_workflow(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let block = ratatui::widgets::Block::default()
+        .title(" Workflow ")
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan));
 
-fn render_logs(f: &mut Frame, app: &App, area: Rect) {
-    let logs: Vec<ListItem> = app
-        .log_entries
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let items: Vec<ratatui::widgets::ListItem> = MENU_ITEMS
         .iter()
-        .rev()
-        .take(area.height as usize - 2)
-        .rev()
-        .map(|entry| {
-            let style = match entry.level {
-                crate::app::LogLevel::Info => Style::default().fg(Color::Cyan),
-                crate::app::LogLevel::Success => Style::default().fg(Color::Green),
-                crate::app::LogLevel::Warn => Style::default().fg(Color::Yellow),
-                crate::app::LogLevel::Error => Style::default().fg(Color::Red),
+        .enumerate()
+        .map(|(i, item)| {
+            let style = if i == app.workflow_selection {
+                ratatui::style::Style::default()
+                    .fg(ratatui::style::Color::Yellow)
+                    .add_modifier(ratatui::style::Modifier::BOLD)
+            } else {
+                ratatui::style::Style::default().fg(ratatui::style::Color::White)
             };
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("[{}] ", entry.timestamp),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(&entry.message, style),
-            ]))
+            let prefix = if i == app.workflow_selection {
+                " > "
+            } else {
+                "   "
+            };
+            ratatui::widgets::ListItem::new(ratatui::text::Span::styled(
+                format!("{}{}", prefix, item),
+                style,
+            ))
         })
         .collect();
 
-    let logs_widget = List::new(logs).block(Block::default().borders(Borders::ALL).title(" Logs "));
+    let list = ratatui::widgets::List::new(items);
+    f.render_widget(list, inner);
+}
 
-    f.render_widget(logs_widget, area);
+fn draw_expanded_logs(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let block = ratatui::widgets::Block::default()
+        .title(" Logs ")
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let visible = inner.height as usize;
+    let entries: Vec<ratatui::text::Line> = app
+        .log_entries
+        .iter()
+        .rev()
+        .take(visible)
+        .rev()
+        .map(|entry| {
+            let ts_style = ratatui::style::Style::default().fg(ratatui::style::Color::Cyan);
+            let level_style = match entry.level {
+                crate::app::LogLevel::Info => {
+                    ratatui::style::Style::default().fg(ratatui::style::Color::Cyan)
+                }
+                crate::app::LogLevel::Success => {
+                    ratatui::style::Style::default().fg(ratatui::style::Color::Green)
+                }
+                crate::app::LogLevel::Warn => {
+                    ratatui::style::Style::default().fg(ratatui::style::Color::Yellow)
+                }
+                crate::app::LogLevel::Error => {
+                    ratatui::style::Style::default().fg(ratatui::style::Color::Red)
+                }
+            };
+            ratatui::text::Line::from(vec![
+                ratatui::text::Span::styled(format!("{} ", entry.timestamp), ts_style),
+                ratatui::text::Span::styled(format!("[{}] ", entry.level), level_style),
+                ratatui::text::Span::raw(entry.message.clone()),
+            ])
+        })
+        .collect();
+
+    let paragraph = ratatui::widgets::Paragraph::new(entries);
+    f.render_widget(paragraph, inner);
 }

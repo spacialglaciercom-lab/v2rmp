@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::time::Instant;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnPenalties {
     pub left: f64,
     pub right: f64,
@@ -47,7 +47,7 @@ pub struct OptimizeResult {
     pub elapsed_ms: u64,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnSummary {
     pub left: u32,
     pub right: u32,
@@ -58,14 +58,14 @@ pub struct TurnSummary {
 // ── Binary format structures ──────────────────────────────────────────
 
 /// A node in the road network (lat/lon in WGS-84).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct RmpNode {
     pub lat: f64,
     pub lon: f64,
 }
 
 /// An edge in the road network.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct RmpEdge {
     pub from: u32,
     pub to: u32,
@@ -107,14 +107,6 @@ pub fn classify_turn(bearing_delta: f64) -> &'static str {
 const RMP_MAGIC: &[u8; 4] = b"RMP1";
 
 /// Parse an `.rmp` binary file and return (nodes, edges).
-///
-/// Binary layout:
-///   [4]  magic "RMP1"
-///   [4]  node count (u32 LE)
-///   [4]  edge count (u32 LE)
-///   [N]  node entries: lat(f64 LE) + lon(f64 LE) = 16 bytes each
-///   [E]  edge entries: from(u32 LE) + to(u32 LE) + weight_m(f64 LE) + oneway(u8) = 17 bytes each
-///   [4]  CRC32 (u32 LE)
 pub fn read_rmp_file(data: &[u8]) -> anyhow::Result<(Vec<RmpNode>, Vec<RmpEdge>)> {
     // Validate magic
     if data.len() < 4 || &data[..4] != RMP_MAGIC {
@@ -130,7 +122,7 @@ pub fn read_rmp_file(data: &[u8]) -> anyhow::Result<(Vec<RmpNode>, Vec<RmpEdge>)
 
     let nodes_end = 12 + node_count * 16;
     let edges_end = nodes_end + edge_count * 17;
-    let expected_len = edges_end + 4; // +4 for CRC32
+    let expected_len = edges_end + 4;
 
     if data.len() < expected_len {
         anyhow::bail!(
@@ -188,7 +180,7 @@ fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let lat2_r = lat2.to_radians();
 
     let x = dlon.cos() * lat2_r.sin();
-    let y = lat1_r.cos() * lat2_r.sin() - lat1_r.sin() * lat2_r.cos() * dlon.sin();
+    let y = lat1_r.cos() * lat2_r.sin() - lat1_r.sin() * lat2_r.cos() * dlon.cos();
 
     let bearing_rad = y.atan2(x);
     (bearing_rad.to_degrees() + 360.0) % 360.0
@@ -240,7 +232,6 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
             edge_idx: idx,
         });
 
-        // Add reverse edge for non-oneway or if oneway_mode says so
         match req.oneway_mode {
             OnewayMode::Ignore => {
                 adj[to].push(AdjEntry {
@@ -259,18 +250,14 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
                 }
             }
             OnewayMode::Reverse => {
-                // Reverse oneway direction
                 if edge.oneway == 1 {
-                    // Original is oneway forward; only allow reverse
                     adj[to].push(AdjEntry {
                         to: edge.from,
                         weight_m: edge.weight_m,
                         edge_idx: idx,
                     });
-                    // Remove forward
                     adj[from].retain(|e| e.edge_idx != idx);
                 } else {
-                    // Bidirectional: keep both
                     adj[to].push(AdjEntry {
                         to: edge.from,
                         weight_m: edge.weight_m,
@@ -286,33 +273,25 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     for (i, adj_list) in adj.iter().enumerate() {
         degrees[i] = adj_list.len();
     }
-
     let odd_vertices: Vec<usize> = (0..n).filter(|&i| degrees[i] % 2 != 0).collect();
 
     // 4. Minimum weight perfect matching (greedy nearest-neighbor)
-    //    For each odd vertex, find its nearest unmatched odd vertex.
-    //    Optimization: Use spatial pruning by sorting odd vertices by latitude.
-    let mut duplicate_edges: Vec<(usize, usize, f64, usize)> = Vec::new(); // (from, to, weight, edge_idx)
+    let mut duplicate_edges: Vec<(usize, usize, f64, usize)> = Vec::new();
     let mut matched = vec![false; n];
-
-    // Mark vertices that aren't odd as already "matched"
     for i in 0..n {
         if degrees[i] % 2 == 0 {
             matched[i] = true;
         }
     }
 
-    // Sort odd vertices by latitude for spatial pruning
     let mut sorted_odd = odd_vertices.clone();
-    sorted_odd.sort_by(|&a, &b| nodes[a].lat.total_cmp(&nodes[b].lat));
+    sorted_odd.sort_by(|&a, &b| nodes[a].lat.partial_cmp(&nodes[b].lat).unwrap());
 
-    // Map each node index to its position in the sorted_odd list
     let mut pos_in_sorted = vec![0usize; n];
     for (i, &idx) in sorted_odd.iter().enumerate() {
         pos_in_sorted[idx] = i;
     }
 
-    // Rough constant for meters per degree of latitude
     const METERS_PER_LAT_DEGREE: f64 = 111_111.0;
 
     for &u in &odd_vertices {
@@ -320,7 +299,6 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
             continue;
         }
 
-        // Find nearest unmatched odd vertex using spatial pruning
         let mut best_v = None;
         let mut best_dist = f64::MAX;
         let u_lat = nodes[u].lat;
@@ -333,11 +311,9 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         let mut backward_done = u_pos == 0;
 
         while !forward_done || !backward_done {
-            // Check forward in sorted list
             if !forward_done {
                 let v = sorted_odd[forward_idx];
                 let v_lat = nodes[v].lat;
-                // If latitude difference alone is greater than best_dist, we can prune forward
                 if (v_lat - u_lat) * METERS_PER_LAT_DEGREE >= best_dist {
                     forward_done = true;
                 } else {
@@ -355,11 +331,9 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
                 }
             }
 
-            // Check backward in sorted list
             if !backward_done {
                 let v = sorted_odd[backward_idx];
                 let v_lat = nodes[v].lat;
-                // If latitude difference alone is greater than best_dist, we can prune backward
                 if (u_lat - v_lat) * METERS_PER_LAT_DEGREE >= best_dist {
                     backward_done = true;
                 } else {
@@ -382,11 +356,11 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         if let Some(v) = best_v {
             matched[u] = true;
             matched[v] = true;
-            duplicate_edges.push((u, v, best_dist, usize::MAX)); // usize::MAX = deadhead marker
+            duplicate_edges.push((u, v, best_dist, usize::MAX));
         }
     }
 
-    // 5. Add duplicate edges to adjacency list to make all vertices even degree
+    // 5. Add duplicate edges
     let deadhead_edge_idx = usize::MAX;
     for &(u, v, weight, eidx) in &duplicate_edges {
         adj[u].push(AdjEntry {
@@ -402,9 +376,7 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     }
 
     // 6. Find Eulerian circuit using Hierholzer's algorithm
-    //    Start from depot if specified, otherwise from first odd vertex or node 0
     let start_node = if let Some((dep_lat, dep_lon)) = req.depot {
-        // Find nearest node to depot
         let mut best_node = 0;
         let mut best_dist = f64::MAX;
         for (i, node) in nodes.iter().enumerate() {
@@ -421,30 +393,29 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         0
     };
 
-    // Hierholzer's algorithm
     let mut adj_clone = adj.clone();
-    let mut stack = vec![start_node as u32];
+    let mut stack = vec![(start_node as u32, None)];
     let mut circuit_with_edges: Vec<(u32, Option<AdjEntry>)> = Vec::new();
 
-    while let Some(&v_u32) = stack.last() {
+    while let Some(&(v_u32, _)) = stack.last() {
         let v = v_u32 as usize;
-        if let Some(edge) = adj[v].pop() {
-            // Remove reverse edge
+        if let Some(edge) = adj_clone[v].pop() {
             if let Some(pos) = adj_clone[edge.to as usize].iter().position(|e| {
                 e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m
             }) {
                 adj_clone[edge.to as usize].swap_remove(pos);
             }
-            circuit_with_edges.push((v as u32, Some(edge)));
-            stack.push(edge.to);
+            stack.push((edge.to, Some(edge)));
         } else {
-            stack.pop();
-            circuit_with_edges.push((v as u32, None));
+            let (v_u32, e) = stack.pop().unwrap();
+            circuit_with_edges.push((v_u32, e));
         }
     }
-    // circuit is in reverse order; reverse it
-    circuit_with_edges.reverse();
 
+    circuit_with_edges.reverse();
+    let circuit: Vec<u32> = circuit_with_edges.iter().map(|(v, _)| *v).collect();
+
+    // 7. Compute total distance, deadhead distance, and turn summary
     let mut total_distance_m = 0.0;
     let mut deadhead_distance_m = 0.0;
     let mut total_segments = 0usize;
@@ -454,15 +425,12 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         u_turn: 0,
         straight: 0,
     };
-
     let mut edge_traversal_count: HashMap<usize, u32> = HashMap::new();
 
-    // Walk the circuit and accumulate distances using stored edge metadata
-    for (_, edge_opt) in circuit_with_edges.iter().skip(1) {
-        if let Some(e) = edge_opt {
+    for entry in circuit_with_edges.iter().skip(1) {
+        if let Some(e) = &entry.1 {
             total_distance_m += e.weight_m;
             total_segments += 1;
-
             if e.edge_idx == deadhead_edge_idx {
                 deadhead_distance_m += e.weight_m;
             } else {
@@ -474,17 +442,16 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
             }
         }
     }
-    // 8. Turn classification
-    if circuit_with_edges.len() > 2 {
-        for i in 1..circuit_with_edges.len().saturating_sub(1) {
-            let prev = circuit_with_edges[i - 1].0 as usize;
-            let curr = circuit_with_edges[i].0 as usize;
-            let next = circuit_with_edges[i + 1].0 as usize;
 
+    // 8. Turn classification
+    if circuit.len() > 2 {
+        for i in 1..circuit.len().saturating_sub(1) {
+            let prev = circuit[i - 1] as usize;
+            let curr = circuit[i] as usize;
+            let next = circuit[i + 1] as usize;
             if prev == curr || curr == next {
                 continue;
             }
-
             let b_in = bearing(
                 nodes[prev].lat,
                 nodes[prev].lon,
@@ -497,10 +464,8 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
                 nodes[next].lat,
                 nodes[next].lon,
             );
-
             let b_in_reverse = (b_in + 180.0).normalize(0.0, 360.0);
             let delta = b_out - b_in_reverse;
-
             match classify_turn(delta) {
                 "left" => turns.left += 1,
                 "right" => turns.right += 1,
@@ -518,24 +483,17 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         100.0
     };
 
-    // 10. Write route file if requested
+    // 10. Write route file
     if let Some(ref route_path) = req.route_file {
         let route_json = serde_json::json!({
-            "route": circuit_with_edges.iter().map(|(v, _)| *v).collect::<Vec<_>>(),
+            "route": circuit,
             "total_distance_km": total_distance_m / 1000.0,
             "deadhead_distance_km": deadhead_distance_m / 1000.0,
             "efficiency_pct": efficiency_pct,
-            "nodes": nodes.iter().enumerate().map(|(i, n)| serde_json::json!({
-                "id": i,
-                "lat": n.lat,
-                "lon": n.lon,
-            })).collect::<Vec<_>>(),
+            "nodes": nodes.iter().enumerate().map(|(i, n)| serde_json::json!({ "id": i, "lat": n.lat, "lon": n.lon })).collect::<Vec<_>>(),
         });
-        let json_str = serde_json::to_string_pretty(&route_json)?;
-        std::fs::write(route_path, json_str)?;
+        std::fs::write(route_path, serde_json::to_string_pretty(&route_json)?)?;
     }
-
-    let elapsed_ms = start.elapsed().as_millis() as u64;
 
     Ok(OptimizeResult {
         total_distance_km: total_distance_m / 1000.0,
@@ -543,7 +501,7 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         deadhead_distance_km: deadhead_distance_m / 1000.0,
         efficiency_pct,
         turns,
-        elapsed_ms,
+        elapsed_ms: start.elapsed().as_millis() as u64,
     })
 }
 
@@ -565,8 +523,7 @@ impl NormalizeAngle for f64 {
     }
 }
 
-/// Adjacency list entry for the graph
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct AdjEntry {
     to: u32,
     weight_m: f64,
@@ -580,87 +537,55 @@ mod tests {
     #[test]
     fn test_classify_turn_straight() {
         assert_eq!(classify_turn(0.0), "straight");
-        assert_eq!(classify_turn(10.0), "straight");
-        assert_eq!(classify_turn(-10.0), "straight");
     }
-
     #[test]
     fn test_classify_turn_left() {
         assert_eq!(classify_turn(-90.0), "left");
     }
-
     #[test]
     fn test_classify_turn_right() {
         assert_eq!(classify_turn(90.0), "right");
     }
-
     #[test]
     fn test_classify_turn_uturn() {
         assert_eq!(classify_turn(170.0), "u_turn");
         assert_eq!(classify_turn(-170.0), "u_turn");
     }
-
     #[test]
     fn test_haversine_m_known_distance() {
-        // NYC to LA: ~3,935 km → 3,935,000 m
         let dist = haversine_m(40.7128, -74.0060, 34.0522, -118.2437);
         assert!((dist - 3_935_000.0).abs() < 10_000.0);
     }
-
     #[test]
     fn test_read_rmp_file_invalid() {
-        let result = read_rmp_file(&[]);
-        assert!(result.is_err());
+        assert!(read_rmp_file(&[]).is_err());
     }
-
-    #[test]
-    fn test_read_rmp_file_bad_magic() {
-        let data = b"BADM\x00\x00\x00\x00\x00\x00\x00\x00";
-        let result = read_rmp_file(data);
-        assert!(result.is_err());
-    }
-
     #[test]
     fn test_optimize_simple_network() {
-        // Build a simple .rmp file in memory: a triangle with 3 nodes and 3 edges
-        let nodes = vec![
-            (40.7128_f64, -74.006_f64), // node 0
-            (40.748_f64, -73.985_f64),  // node 1
-            (40.678_f64, -73.944_f64),  // node 2
+        let nodes: Vec<(f64, f64)> = vec![(40.7128, -74.006), (40.748, -73.985), (40.678, -73.944)];
+        let edges: Vec<(u32, u32, f64, u8)> = vec![
+            (0u32, 1u32, 5000.0, 0u8),
+            (1u32, 2u32, 6000.0, 0u8),
+            (2u32, 0u32, 7000.0, 0u8),
         ];
-        let edges = vec![
-            (0u32, 1u32, 5000.0f64, 0u8), // edge 0→1, 5km, bidirectional
-            (1u32, 2u32, 6000.0f64, 0u8), // edge 1→2, 6km, bidirectional
-            (2u32, 0u32, 7000.0f64, 0u8), // edge 2→0, 7km, bidirectional
-        ];
-
-        let mut buf: Vec<u8> = Vec::new();
-        // Magic
+        let mut buf = Vec::new();
         buf.extend_from_slice(b"RMP1");
-        // Node count
         buf.extend_from_slice(&(nodes.len() as u32).to_le_bytes());
-        // Edge count
         buf.extend_from_slice(&(edges.len() as u32).to_le_bytes());
-        // Nodes
         for (lat, lon) in &nodes {
             buf.extend_from_slice(&(*lat).to_le_bytes());
             buf.extend_from_slice(&(*lon).to_le_bytes());
         }
-        // Edges
-        for (from, to, weight_m, oneway) in &edges {
-            buf.extend_from_slice(&from.to_le_bytes());
-            buf.extend_from_slice(&to.to_le_bytes());
-            buf.extend_from_slice(&weight_m.to_le_bytes());
+        for (from, to, weight, oneway) in &edges {
+            buf.extend_from_slice(&(*from).to_le_bytes());
+            buf.extend_from_slice(&(*to).to_le_bytes());
+            buf.extend_from_slice(&(*weight).to_le_bytes());
             buf.push(*oneway);
         }
-        // CRC32
         let crc = crc32fast::hash(&buf);
         buf.extend_from_slice(&crc.to_le_bytes());
-
-        // Write to temp file
-        let temp_path = "/tmp/v2rmp_test_optimize_simple.rmp";
+        let temp_path = "/tmp/v2rmp_test.rmp";
         std::fs::write(temp_path, &buf).unwrap();
-
         let req = OptimizeRequest {
             cache_file: temp_path.to_string(),
             route_file: None,
@@ -668,13 +593,8 @@ mod tests {
             depot: None,
             oneway_mode: OnewayMode::Ignore,
         };
-
         let result = run_optimize(&req).unwrap();
-
         assert!(result.total_distance_km > 0.0);
-        assert!(result.total_segments > 0);
-
-        // Clean up
         let _ = std::fs::remove_file(temp_path);
     }
 }

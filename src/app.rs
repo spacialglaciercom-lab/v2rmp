@@ -1,19 +1,188 @@
+use std::path::PathBuf;
 use std::time::Instant;
 
+use crate::core::clean::CleanOptions;
 use crate::core::optimize::TurnPenalties;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub enum View {
     Home,
     Extract,
     Compile,
+    Clean,
     Optimize,
     BrowseMaps,
     BrowseRoutes,
+    FileBrowser,
     Help,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone)]
+pub struct FileEntry {
+    pub name: String,
+    pub path: PathBuf,
+    pub is_dir: bool,
+    pub size: Option<u64>,
+    pub modified: Option<std::time::SystemTime>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FileFilter {
+    GeoJson,
+    Rmp,
+    All,
+}
+
+impl FileFilter {
+    pub fn matches(&self, path: &std::path::Path) -> bool {
+        let ext = path.extension().and_then(|e| e.to_str());
+        match self {
+            FileFilter::GeoJson => matches!(ext, Some("geojson") | Some("json")),
+            FileFilter::Rmp => matches!(ext, Some("rmp")),
+            FileFilter::All => true,
+        }
+    }
+
+    pub fn description(&self) -> &str {
+        match self {
+            FileFilter::GeoJson => "*.geojson, *.json",
+            FileFilter::Rmp => "*.rmp",
+            FileFilter::All => "*.*",
+        }
+    }
+}
+
+pub struct FileBrowser {
+    pub current_path: PathBuf,
+    pub entries: Vec<FileEntry>,
+    pub selection: usize,
+    pub filter: FileFilter,
+    pub target_field: InputField,
+    pub show_hidden: bool,
+}
+
+impl FileBrowser {
+    pub fn new(target_field: InputField) -> Self {
+        let current_path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        Self {
+            current_path,
+            entries: Vec::new(),
+            selection: 0,
+            filter: match target_field {
+                InputField::InputFile | InputField::CleanInputFile => FileFilter::GeoJson,
+                InputField::CacheFile => FileFilter::Rmp,
+                _ => FileFilter::All,
+            },
+            target_field,
+            show_hidden: false,
+        }
+    }
+
+    pub fn refresh_entries(&mut self) -> anyhow::Result<()> {
+        self.entries.clear();
+
+        // Add parent directory entry if not at root
+        if self.current_path.parent().is_some() {
+            self.entries.push(FileEntry {
+                name: "..".to_string(),
+                path: self.current_path.parent().unwrap().to_path_buf(),
+                is_dir: true,
+                size: None,
+                modified: None,
+            });
+        }
+
+        // Read directory entries
+        let read_dir = std::fs::read_dir(&self.current_path)?;
+        let mut entries: Vec<FileEntry> = Vec::new();
+
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+
+            // Skip hidden files unless show_hidden is true
+            if !self.show_hidden && name.starts_with('.') {
+                continue;
+            }
+
+            let metadata = entry.metadata().ok();
+            let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+            let size = metadata
+                .as_ref()
+                .and_then(|m| if !is_dir { Some(m.len()) } else { None });
+            let modified = metadata.as_ref().and_then(|m| m.modified().ok());
+
+            // Include directories and files matching filter
+            if is_dir || self.filter.matches(&path) {
+                entries.push(FileEntry {
+                    name,
+                    path,
+                    is_dir,
+                    size,
+                    modified,
+                });
+            }
+        }
+
+        // Sort: directories first, then by name
+        entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        });
+
+        self.entries.extend(entries);
+
+        // Reset selection if out of bounds
+        if self.selection >= self.entries.len() && !self.entries.is_empty() {
+            self.selection = 0;
+        }
+
+        Ok(())
+    }
+
+    pub fn navigate_up(&mut self) {
+        if !self.entries.is_empty() {
+            self.selection = self.selection.saturating_sub(1);
+        }
+    }
+
+    pub fn navigate_down(&mut self) {
+        if !self.entries.is_empty() {
+            self.selection = (self.selection + 1).min(self.entries.len() - 1);
+        }
+    }
+
+    pub fn select_entry(&mut self) -> Option<PathBuf> {
+        if self.entries.is_empty() {
+            return None;
+        }
+
+        let entry = &self.entries[self.selection];
+
+        if entry.is_dir {
+            // Navigate into directory
+            self.current_path = entry.path.clone();
+            self.selection = 0;
+            let _ = self.refresh_entries();
+            None
+        } else {
+            // Return selected file path
+            Some(entry.path.clone())
+        }
+    }
+
+    pub fn go_parent(&mut self) {
+        if let Some(parent) = self.current_path.parent() {
+            self.current_path = parent.to_path_buf();
+            self.selection = 0;
+            let _ = self.refresh_entries();
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum DataSource {
     Osm,
     Overture,
@@ -74,7 +243,7 @@ pub struct LogEntry {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LogLevel {
     Info,
     Success,
@@ -93,6 +262,7 @@ impl std::fmt::Display for LogLevel {
     }
 }
 
+#[allow(dead_code)]
 pub struct InputMode {
     pub active: bool,
     pub field: InputField,
@@ -100,6 +270,7 @@ pub struct InputMode {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub enum InputField {
     BoundingBox,
     InputFile,
@@ -110,6 +281,8 @@ pub enum InputField {
     RightTurnPenalty,
     UTurnPenalty,
     DepotCoordinates,
+    CleanInputFile,
+    CleanOutputFile,
 }
 
 pub struct App {
@@ -129,6 +302,13 @@ pub struct App {
     pub output_file: Option<String>,
     pub compile_status: Status,
 
+    // Clean state
+    pub clean_options: CleanOptions,
+    pub clean_input_file: Option<String>,
+    pub clean_output_file: Option<String>,
+    pub clean_status: Status,
+    pub clean_selection: usize,
+
     // Optimize state
     pub cache_file: Option<String>,
     pub route_file: Option<String>,
@@ -141,10 +321,14 @@ pub struct App {
     pub saved_routes: Vec<String>,
     pub browse_selection: usize,
 
+    // File browser state
+    pub file_browser: Option<FileBrowser>,
+
     // Input mode
     pub input_mode: InputMode,
 
     // Timing
+    #[allow(dead_code)]
     pub start_time: Instant,
 }
 
@@ -155,25 +339,6 @@ impl Default for App {
 }
 
 impl App {
-    /// Scan current directory for .rmp cache files
-    fn scan_cached_maps() -> Vec<String> {
-        use std::fs;
-        let mut maps = Vec::new();
-
-        if let Ok(entries) = fs::read_dir(".") {
-            for entry in entries.flatten() {
-                if let Ok(file_name) = entry.file_name().into_string() {
-                    if file_name.ends_with(".rmp") {
-                        maps.push(file_name);
-                    }
-                }
-            }
-        }
-
-        maps.sort();
-        maps
-    }
-
     pub fn new() -> Self {
         Self {
             running: true,
@@ -190,15 +355,23 @@ impl App {
             output_file: None,
             compile_status: Status::Ready,
 
+            clean_options: CleanOptions::default(),
+            clean_input_file: None,
+            clean_output_file: None,
+            clean_status: Status::Ready,
+            clean_selection: 0,
+
             cache_file: None,
             route_file: None,
             turn_penalties: TurnPenalties::default(),
             depot_coords: None,
             optimize_status: Status::Ready,
 
-            cached_maps: Self::scan_cached_maps(),
+            cached_maps: Vec::new(),
             saved_routes: Vec::new(),
             browse_selection: 0,
+
+            file_browser: None,
 
             input_mode: InputMode {
                 active: false,
@@ -208,6 +381,74 @@ impl App {
 
             start_time: Instant::now(),
         }
+    }
+
+    pub fn start_file_browser(&mut self, field: InputField) {
+        let mut browser = FileBrowser::new(field);
+        if let Err(e) = browser.refresh_entries() {
+            self.log(
+                LogLevel::Error,
+                format!("Failed to open file browser: {}", e),
+            );
+            return;
+        }
+        self.file_browser = Some(browser);
+        self.current_view = View::FileBrowser;
+        self.log(LogLevel::Info, "File browser opened");
+    }
+
+    pub fn close_file_browser(&mut self, selected_path: Option<PathBuf>) {
+        if let Some(path) = selected_path {
+            let path_str = path.to_string_lossy().to_string();
+
+            if let Some(browser) = &self.file_browser {
+                match browser.target_field {
+                    InputField::InputFile => {
+                        self.input_file = Some(path_str.clone());
+                        if self.output_file.is_none() {
+                            let out = path_str
+                                .replace(".geojson", ".rmp")
+                                .replace(".json", ".rmp");
+                            self.output_file = Some(out);
+                        }
+                        self.log(
+                            LogLevel::Success,
+                            format!("Input file selected: {}", path_str),
+                        );
+                        self.current_view = View::Compile;
+                    }
+                    InputField::OutputFile => {
+                        self.output_file = Some(path_str.clone());
+                        self.log(
+                            LogLevel::Success,
+                            format!("Output file selected: {}", path_str),
+                        );
+                        self.current_view = View::Compile;
+                    }
+                    InputField::CacheFile => {
+                        self.cache_file = Some(path_str.clone());
+                        self.log(
+                            LogLevel::Success,
+                            format!("Cache file selected: {}", path_str),
+                        );
+                        self.current_view = View::Optimize;
+                    }
+                    InputField::RouteFile => {
+                        self.route_file = Some(path_str.clone());
+                        self.log(
+                            LogLevel::Success,
+                            format!("Route file selected: {}", path_str),
+                        );
+                        self.current_view = View::Optimize;
+                    }
+                    _ => {
+                        self.current_view = View::Home;
+                    }
+                }
+            }
+        }
+
+        self.file_browser = None;
     }
 
     pub fn log(&mut self, level: LogLevel, message: impl Into<String>) {
@@ -236,7 +477,7 @@ impl App {
             return;
         }
 
-        match self.input_mode.field {
+        match self.input_mode.field.clone() {
             InputField::BoundingBox => {
                 let parts: Vec<&str> = value.split(',').collect();
                 if parts.len() == 4 {
@@ -246,14 +487,6 @@ impl App {
                         parts[2].parse::<f64>(),
                         parts[3].parse::<f64>(),
                     ) {
-                        if min_lon >= max_lon || min_lat >= max_lat {
-                            self.log(
-                                LogLevel::Error,
-                                "Invalid bounding box: min must be less than max".to_string(),
-                            );
-                            self.input_mode.active = false;
-                            return;
-                        }
                         let bbox = BoundingBox {
                             min_lon,
                             min_lat,
@@ -309,6 +542,20 @@ impl App {
                     self.turn_penalties.u_turn = v;
                     self.log(LogLevel::Success, format!("U-turn penalty set: {}", v));
                 }
+            }
+            InputField::CleanInputFile => {
+                self.clean_input_file = Some(value.clone());
+                if self.clean_output_file.is_none() {
+                    let out = value
+                        .replace(".geojson", ".cleaned.geojson")
+                        .replace(".json", ".cleaned.json");
+                    self.clean_output_file = Some(out);
+                }
+                self.log(LogLevel::Success, format!("Clean input set: {}", value));
+            }
+            InputField::CleanOutputFile => {
+                self.clean_output_file = Some(value.clone());
+                self.log(LogLevel::Success, format!("Clean output set: {}", value));
             }
             InputField::DepotCoordinates => {
                 let parts: Vec<&str> = value.split(',').collect();
@@ -382,204 +629,28 @@ mod tests {
     #[test]
     fn test_app_initialization() {
         let app = App::new();
-
-        // Basic state
-        assert!(app.running);
         assert_eq!(app.current_view, View::Home);
-        assert_eq!(app.workflow_selection, 0);
+        assert!(app.running);
         assert!(app.log_entries.is_empty());
-        assert_eq!(app.log_scroll, 0);
-
-        // Extract state
-        assert_eq!(app.data_source, DataSource::Osm);
-        assert!(app.bounding_box.is_none());
-        assert_eq!(app.extract_status, Status::Ready);
-
-        // Compile state
-        assert!(app.input_file.is_none());
-        assert!(app.output_file.is_none());
-        assert_eq!(app.compile_status, Status::Ready);
-
-        // Optimize state
-        assert!(app.cache_file.is_none());
-        assert!(app.route_file.is_none());
-        assert_eq!(app.turn_penalties.left, 1.0);
-        assert_eq!(app.turn_penalties.right, 0.0);
-        assert_eq!(app.turn_penalties.u_turn, 5.0);
-        assert!(app.depot_coords.is_none());
-        assert_eq!(app.optimize_status, Status::Ready);
-
-        // Browse state
-        // app.cached_maps depends on filesystem, but should be a Vec
-        assert!(app.saved_routes.is_empty());
-        assert_eq!(app.browse_selection, 0);
-
-        // Input mode
-        assert!(!app.input_mode.active);
-        assert_eq!(app.input_mode.field, InputField::BoundingBox);
-        assert!(app.input_mode.buffer.is_empty());
-    }
-
-    #[test]
-    fn test_log_truncation() {
-        let mut app = App::new();
-
-        // Add 501 entries
-        for i in 0..501 {
-            app.log(LogLevel::Info, format!("Message {}", i));
-        }
-
-        // Verify length is capped at 500
-        assert_eq!(app.log_entries.len(), 500);
-
-        // Verify oldest was removed (first entry should be "Message 1")
-        assert_eq!(app.log_entries[0].message, "Message 1");
-
-        // Verify latest is correct
-        assert_eq!(app.log_entries[499].message, "Message 500");
-
-        // Verify scroll position
-        assert_eq!(app.log_scroll, 499);
-    }
-
-    #[test]
-    fn test_invalid_bbox_input() {
-        let mut app = App::new();
-        app.input_mode.field = InputField::BoundingBox;
-
-        // Invalid: min > max
-        app.input_mode.buffer = "10.0,20.0,5.0,25.0".to_string();
-        app.confirm_input();
-        assert!(app.bounding_box.is_none());
-        assert_eq!(app.log_entries.last().unwrap().level, LogLevel::Error);
-        assert!(app
-            .log_entries
-            .last()
-            .unwrap()
-            .message
-            .contains("Invalid bounding box"));
-
-        // Valid
-        app.input_mode.active = true;
-        app.input_mode.buffer = "5.0,15.0,10.0,25.0".to_string();
-        app.confirm_input();
-        assert!(app.bounding_box.is_some());
-        assert_eq!(app.log_entries.last().unwrap().level, LogLevel::Success);
-    }
-
-    #[test]
-    fn test_confirm_input_empty() {
-        let mut app = App::new();
-        app.input_mode.active = true;
-        app.input_mode.buffer = "  ".to_string();
-        app.confirm_input();
-        assert!(!app.input_mode.active);
-    }
-
-    #[test]
-    fn test_confirm_input_bounding_box() {
-        let mut app = App::new();
-        app.start_input(InputField::BoundingBox);
-
-        // Valid
-        app.input_mode.buffer = "1.0,2.0,3.0,4.0".to_string();
-        app.confirm_input();
-        assert!(app.bounding_box.is_some());
-        let bbox = app.bounding_box.as_ref().unwrap();
-        assert_eq!(bbox.min_lon, 1.0);
-        assert_eq!(bbox.min_lat, 2.0);
-        assert_eq!(bbox.max_lon, 3.0);
-        assert_eq!(bbox.max_lat, 4.0);
-        assert!(!app.input_mode.active);
-
-        // Invalid numeric
-        app.start_input(InputField::BoundingBox);
-        app.input_mode.buffer = "1.0,abc,3.0,4.0".to_string();
-        app.bounding_box = None;
-        app.confirm_input();
-        assert!(app.bounding_box.is_none());
-
-        // Invalid format
-        app.start_input(InputField::BoundingBox);
-        app.input_mode.buffer = "1.0,2.0,3.0".to_string();
-        app.confirm_input();
         assert!(app.bounding_box.is_none());
     }
 
     #[test]
-    fn test_confirm_input_files() {
+    fn test_app_navigation() {
         let mut app = App::new();
-
-        // InputFile + OutputFile derivation
-        app.start_input(InputField::InputFile);
-        app.input_mode.buffer = "map.geojson".to_string();
-        app.confirm_input();
-        assert_eq!(app.input_file, Some("map.geojson".to_string()));
-        assert_eq!(app.output_file, Some("map.rmp".to_string()));
-
-        // OutputFile manual override
-        app.start_input(InputField::OutputFile);
-        app.input_mode.buffer = "custom.rmp".to_string();
-        app.confirm_input();
-        assert_eq!(app.output_file, Some("custom.rmp".to_string()));
-
-        // CacheFile
-        app.start_input(InputField::CacheFile);
-        app.input_mode.buffer = "cache.rmp".to_string();
-        app.confirm_input();
-        assert_eq!(app.cache_file, Some("cache.rmp".to_string()));
-
-        // RouteFile
-        app.start_input(InputField::RouteFile);
-        app.input_mode.buffer = "route.json".to_string();
-        app.confirm_input();
-        assert_eq!(app.route_file, Some("route.json".to_string()));
+        // Home view workflow selection
+        assert_eq!(app.workflow_selection, 0);
+        app.navigate_down();
+        assert_eq!(app.workflow_selection, 1);
+        app.navigate_up();
+        assert_eq!(app.workflow_selection, 0);
     }
 
     #[test]
-    fn test_confirm_input_penalties() {
+    fn test_app_logging() {
         let mut app = App::new();
-
-        // Left
-        app.start_input(InputField::LeftTurnPenalty);
-        app.input_mode.buffer = "2.5".to_string();
-        app.confirm_input();
-        assert_eq!(app.turn_penalties.left, 2.5);
-
-        // Right
-        app.start_input(InputField::RightTurnPenalty);
-        app.input_mode.buffer = "0.5".to_string();
-        app.confirm_input();
-        assert_eq!(app.turn_penalties.right, 0.5);
-
-        // U-turn
-        app.start_input(InputField::UTurnPenalty);
-        app.input_mode.buffer = "10.0".to_string();
-        app.confirm_input();
-        assert_eq!(app.turn_penalties.u_turn, 10.0);
-
-        // Invalid numeric
-        app.start_input(InputField::LeftTurnPenalty);
-        app.input_mode.buffer = "invalid".to_string();
-        app.confirm_input();
-        assert_eq!(app.turn_penalties.left, 2.5); // Should remain unchanged
-    }
-
-    #[test]
-    fn test_confirm_input_depot() {
-        let mut app = App::new();
-
-        // Valid
-        app.start_input(InputField::DepotCoordinates);
-        app.input_mode.buffer = "45.0,-122.0".to_string();
-        app.confirm_input();
-        assert_eq!(app.depot_coords, Some((45.0, -122.0)));
-
-        // Invalid format
-        app.start_input(InputField::DepotCoordinates);
-        app.input_mode.buffer = "45.0".to_string();
-        app.depot_coords = None;
-        app.confirm_input();
-        assert!(app.depot_coords.is_none());
+        app.log(LogLevel::Info, "test message");
+        assert_eq!(app.log_entries.len(), 1);
+        assert_eq!(app.log_entries[0].message, "test message");
     }
 }

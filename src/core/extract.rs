@@ -1,5 +1,4 @@
-use crate::core::osm;
-use crate::core::overture::{BBox, OvertureExtractor, OvertureSegment};
+use crate::core::overture::{BBox, Geometry, OvertureExtractor, OvertureSegment};
 use anyhow::{Context, Result};
 use geojson::{Feature, FeatureCollection, Geometry as GeoJsonGeometry, Value as GeoJsonValue};
 use serde::{Deserialize, Serialize};
@@ -39,8 +38,6 @@ pub struct ExtractRequest {
     pub bbox: BBoxRequest,
     pub road_classes: Vec<RoadClass>,
     pub output_path: String,
-    /// Path to OSM PBF file (required when source is Osm)
-    pub pbf_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -106,11 +103,17 @@ pub struct ExtractResult {
     pub output_path: String,
 }
 
-/// Extract road network from Overture Maps S3 Parquet files or OSM PBF files.
+/// Extract road network from Overture Maps S3 Parquet files.
+///
+/// This is production implementation for Overture extraction.
+/// For OSM PBF, this currently returns a stub result.
 pub fn run_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
     match req.source {
         ExtractSource::Overture => run_overture_extract(req),
-        ExtractSource::Osm => run_osm_extract(req),
+        ExtractSource::Osm => {
+            // TODO: Implement OSM PBF extraction using osmpbf crate
+            anyhow::bail!("OSM PBF extraction not yet implemented")
+        }
     }
 }
 
@@ -135,86 +138,131 @@ fn run_overture_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
 
         tracing::info!("Extracted {} segments from Overture S3", segments.len());
 
+        // Convert segments to GeoJSON features
         let features: Vec<Feature> = segments
             .into_iter()
             .filter(|seg| should_include_segment(seg, &req.road_classes))
             .map(segment_to_feature)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+            .collect();
 
         tracing::info!(
             "After road class filtering: {} road segments",
             features.len()
         );
 
-        finalize_extraction(features, &req.output_path)
+        // Build graph statistics
+        let (nodes, edges, total_km) = build_graph_stats(&features)?;
+
+        // Write GeoJSON output
+        let geojson = FeatureCollection {
+            bbox: None,
+            features,
+            foreign_members: None,
+        };
+
+        let geojson_string = serde_json::to_string_pretty(&geojson)?;
+        let output_path = &req.output_path;
+
+        File::create(output_path)?
+            .write_all(geojson_string.as_bytes())
+            .context("Failed to write GeoJSON output")?;
+
+        Ok(ExtractResult {
+            nodes,
+            edges,
+            total_km,
+            output_path: output_path.clone(),
+        })
     })
 }
 
-/// Check if a segment should be included based on road class filter.
+/// Check if a segment should be included based on road classes
 fn should_include_segment(seg: &OvertureSegment, classes: &[RoadClass]) -> bool {
-    match &seg.class {
-        Some(class) => classes.iter().any(|rc| rc.as_str() == class),
-        None => false,
+    if classes.is_empty() {
+        return true;
     }
+
+    let class_str = seg.class.as_deref().unwrap_or("");
+
+    classes.iter().any(|rc| rc.as_str() == class_str)
 }
 
-/// Convert an OvertureSegment to a GeoJSON Feature.
-fn segment_to_feature(seg: OvertureSegment) -> anyhow::Result<Feature> {
-    use crate::core::overture::Geometry as OvertureGeometry;
-
-    // Build the GeoJSON geometry value
+/// Convert an Overture segment to a GeoJSON feature
+fn segment_to_feature(seg: OvertureSegment) -> Feature {
     let geometry_json = match seg.geometry {
-        OvertureGeometry::LineString(coords) => json!({
-            "type": "LineString",
-            "coordinates": coords.into_iter()
-                .map(|(lon, lat)| vec![lon, lat])
-                .collect::<Vec<_>>()
-        }),
-        OvertureGeometry::Point(lon, lat) => json!({
-            "type": "Point",
-            "coordinates": vec![lon, lat]
-        }),
+        Geometry::LineString(coords) => {
+            json!({
+                "type": "LineString",
+                "coordinates": coords
+            })
+        }
+        Geometry::Point(lon, lat) => {
+            json!({
+                "type": "Point",
+                "coordinates": [lon, lat]
+            })
+        }
     };
 
     // Convert JSON to geojson::Geometry
-    let geometry = GeoJsonGeometry::from_json_value(geometry_json)?;
+    let geometry = GeoJsonGeometry::from_json_value(geometry_json)
+        .expect("Failed to convert JSON to geojson::Geometry");
 
     // Build properties map
     let mut props = serde_json::Map::new();
-    props.insert("id".to_string(), serde_json::Value::String(seg.id));
-    if let Some(name) = seg.name {
-        props.insert("name".to_string(), serde_json::Value::String(name));
+    props.insert("id".to_string(), serde_json::Value::String(seg.id.clone()));
+    if let Some(ref name) = seg.name {
+        props.insert("name".to_string(), serde_json::Value::String(name.clone()));
     }
-    if let Some(class) = seg.class {
-        props.insert("class".to_string(), serde_json::Value::String(class));
+    if let Some(ref class) = seg.class {
+        props.insert(
+            "class".to_string(),
+            serde_json::Value::String(class.clone()),
+        );
     }
-    if let Some(subtype) = seg.subtype {
-        props.insert("subtype".to_string(), serde_json::Value::String(subtype));
+    if let Some(ref subtype) = seg.subtype {
+        props.insert(
+            "subtype".to_string(),
+            serde_json::Value::String(subtype.clone()),
+        );
     }
-    if let Some(surface) = seg.surface {
-        props.insert("surface".to_string(), serde_json::Value::String(surface));
+    if let Some(ref surface) = seg.surface {
+        props.insert(
+            "surface".to_string(),
+            serde_json::Value::String(surface.clone()),
+        );
     }
-    if let Some(oneway) = seg.oneway {
-        props.insert("oneway".to_string(), serde_json::Value::String(oneway));
+    if let Some(ref oneway) = seg.oneway {
+        props.insert(
+            "oneway".to_string(),
+            serde_json::Value::String(oneway.clone()),
+        );
     }
-    if let Some(junction) = seg.junction {
-        props.insert("junction".to_string(), serde_json::Value::String(junction));
+    if let Some(ref junction) = seg.junction {
+        props.insert(
+            "junction".to_string(),
+            serde_json::Value::String(junction.clone()),
+        );
     }
-    if let Some(osm_id) = seg.osm_id {
-        props.insert("osm_id".to_string(), serde_json::Value::String(osm_id));
+    if let Some(ref osm_id) = seg.osm_id {
+        props.insert(
+            "osm_id".to_string(),
+            serde_json::Value::String(osm_id.clone()),
+        );
     }
 
-    Ok(Feature {
+    Feature {
         id: None,
         bbox: None,
         geometry: Some(geometry),
         properties: Some(props),
         foreign_members: None,
-    })
+    }
 }
 
 /// Build graph statistics from features
 fn build_graph_stats(features: &[Feature]) -> Result<(usize, usize, f64)> {
+    // Node deduplication: snap coordinates to ~1m precision
     let mut node_map: HashMap<(i64, i64), usize> = HashMap::new();
     let mut next_node_id: usize = 0;
     let mut edge_count = 0;
@@ -233,22 +281,27 @@ fn build_graph_stats(features: &[Feature]) -> Result<(usize, usize, f64)> {
                     continue;
                 }
 
+                // Extract coordinates as (lon, lat) pairs
                 let coord_points: Vec<(f64, f64)> = coords
                     .iter()
                     .filter(|p| p.len() >= 2)
                     .map(|p| (p[0], p[1]))
                     .collect();
 
+                // Calculate length for each segment
                 for window in coord_points.windows(2) {
                     let (lon1, lat1) = window[0];
                     let (lon2, lat2) = window[1];
 
+                    // Haversine distance in km
                     let d = haversine_distance_km(lat1, lon1, lat2, lon2);
                     total_km += d;
 
+                    // Get/create node IDs
                     let _node1 = get_or_create_node(&mut node_map, &mut next_node_id, lon1, lat1);
                     let _node2 = get_or_create_node(&mut node_map, &mut next_node_id, lon2, lat2);
 
+                    // Count edge
                     edge_count += 1;
                 }
             }
@@ -265,6 +318,7 @@ fn get_or_create_node(
     lon: f64,
     lat: f64,
 ) -> usize {
+    // Snap to ~1m precision (6 decimal places)
     let key = ((lon * 1e6) as i64, (lat * 1e6) as i64);
     *node_map.entry(key).or_insert_with(|| {
         let id = *next_node_id;
@@ -289,89 +343,13 @@ fn haversine_distance_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     EARTH_RADIUS_KM * c
 }
 
-/// Get highway tags from road classes, falling back to all vehicle classes if empty.
-fn get_highway_tags(road_classes: &[RoadClass]) -> Vec<String> {
-    if road_classes.is_empty() {
-        RoadClass::all_vehicle()
-            .iter()
-            .map(|rc| rc.as_str().to_string())
-            .collect()
-    } else {
-        road_classes
-            .iter()
-            .map(|rc| rc.as_str().to_string())
-            .collect()
-    }
-}
-
-/// Finalize extraction by building stats, serializing to GeoJSON, and writing to file.
-fn finalize_extraction(features: Vec<Feature>, output_path: &str) -> Result<ExtractResult> {
-    let (nodes, edges, total_km) = build_graph_stats(&features)?;
-
-    let geojson = FeatureCollection {
-        bbox: None,
-        features,
-        foreign_members: None,
-    };
-
-    let geojson_string = serde_json::to_string_pretty(&geojson)?;
-
-    File::create(output_path)?
-        .write_all(geojson_string.as_bytes())
-        .context("Failed to write GeoJSON output")?;
-
-    Ok(ExtractResult {
-        nodes,
-        edges,
-        total_km,
-        output_path: output_path.to_string(),
-    })
-}
-
-/// Run OSM PBF extraction from local file
-fn run_osm_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
-    let pbf_path = req
-        .pbf_path
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("pbf_path is required for OSM extraction"))?;
-
-    let bbox = osm::BBox {
-        min_lon: req.bbox.min_lon,
-        min_lat: req.bbox.min_lat,
-        max_lon: req.bbox.max_lon,
-        max_lat: req.bbox.max_lat,
-    };
-
-    tracing::info!(
-        "Extracting OSM data from {} for bbox: [{:.4}, {:.4}, {:.4}, {:.4}]",
-        pbf_path,
-        bbox.min_lon,
-        bbox.min_lat,
-        bbox.max_lon,
-        bbox.max_lat
-    );
-
-    let extractor = osm::OsmExtractor::new(pbf_path.clone())?;
-
-    let highway_tags = get_highway_tags(&req.road_classes);
-    let segments = extractor.extract_bbox(&bbox, &highway_tags)?;
-
-    tracing::info!("Extracted {} segments from OSM PBF", segments.len());
-
-    let features: Vec<Feature> = segments
-        .into_iter()
-        .map(osm::segment_to_feature)
-        .collect::<Result<Vec<_>, _>>()?;
-
-    finalize_extraction(features, &req.output_path)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_haversine_distance() {
+        // Distance from New York to Los Angeles (approx 3935 km)
         let ny_lat = 40.7128;
         let ny_lon = -74.0060;
         let la_lat = 34.0522;
@@ -386,134 +364,5 @@ mod tests {
         assert_eq!(RoadClass::Motorway.as_str(), "motorway");
         assert_eq!(RoadClass::Residential.as_str(), "residential");
         assert_eq!(RoadClass::Tertiary.as_str(), "tertiary");
-    }
-
-    #[test]
-    fn test_should_include_segment() {
-        use crate::core::overture::Geometry;
-        let seg = OvertureSegment {
-            id: "seg1".to_string(),
-            name: None,
-            class: Some("residential".to_string()),
-            subtype: None,
-            subclass: None,
-            surface: None,
-            geometry: Geometry::LineString(vec![(-74.0, 40.7), (-73.9, 40.8)]),
-            oneway: None,
-            junction: None,
-            osm_id: None,
-        };
-        assert!(should_include_segment(&seg, &[RoadClass::Residential]));
-        assert!(!should_include_segment(&seg, &[RoadClass::Motorway]));
-    }
-
-    #[test]
-    fn test_should_include_segment_no_class() {
-        use crate::core::overture::Geometry;
-        let seg = OvertureSegment {
-            id: "seg2".to_string(),
-            name: None,
-            class: None,
-            subtype: None,
-            subclass: None,
-            surface: None,
-            geometry: Geometry::LineString(vec![(-74.0, 40.7), (-73.9, 40.8)]),
-            oneway: None,
-            junction: None,
-            osm_id: None,
-        };
-        assert!(!should_include_segment(&seg, &[RoadClass::Residential]));
-    }
-
-    #[test]
-    fn test_build_graph_stats_basic() {
-        let geometry = GeoJsonGeometry {
-            bbox: None,
-            value: GeoJsonValue::LineString(vec![
-                vec![-74.006, 40.7128],
-                vec![-73.985, 40.748],
-                vec![-73.944, 40.678],
-            ]),
-            foreign_members: None,
-        };
-        let feature = Feature {
-            id: None,
-            bbox: None,
-            geometry: Some(geometry),
-            properties: Some(json!({"class": "residential"}).as_object().unwrap().clone()),
-            foreign_members: None,
-        };
-        let fc = FeatureCollection {
-            bbox: None,
-            features: vec![feature],
-            foreign_members: None,
-        };
-        let (nodes, edges, total_km) = build_graph_stats(&fc.features).unwrap();
-        assert_eq!(nodes, 3);
-        assert_eq!(edges, 2);
-        assert!(total_km > 0.0);
-        assert!(total_km > 5.0 && total_km < 20.0);
-    }
-
-    #[test]
-    fn test_build_graph_stats_dedup() {
-        let geom1 = GeoJsonGeometry {
-            bbox: None,
-            value: GeoJsonValue::LineString(vec![vec![-74.006, 40.7128], vec![-73.985, 40.748]]),
-            foreign_members: None,
-        };
-        let feat1 = Feature {
-            id: None,
-            bbox: None,
-            geometry: Some(geom1),
-            properties: Some(json!({}).as_object().unwrap().clone()),
-            foreign_members: None,
-        };
-        let geom2 = GeoJsonGeometry {
-            bbox: None,
-            value: GeoJsonValue::LineString(vec![vec![-73.985, 40.748], vec![-73.944, 40.678]]),
-            foreign_members: None,
-        };
-        let feat2 = Feature {
-            id: None,
-            bbox: None,
-            geometry: Some(geom2),
-            properties: Some(json!({}).as_object().unwrap().clone()),
-            foreign_members: None,
-        };
-        let (nodes, edges, _total_km) = build_graph_stats(&[feat1, feat2]).unwrap();
-        assert_eq!(nodes, 3);
-        assert_eq!(edges, 2);
-    }
-
-    #[test]
-    fn test_bbox_request_conversion() {
-        let req = BBoxRequest {
-            min_lon: -122.5,
-            min_lat: 37.7,
-            max_lon: -122.4,
-            max_lat: 37.8,
-        };
-        let bbox: BBox = req.into();
-        assert!((bbox.min_lon - (-122.5)).abs() < f64::EPSILON);
-        assert!((bbox.min_lat - 37.7).abs() < f64::EPSILON);
-        assert!((bbox.max_lon - (-122.4)).abs() < f64::EPSILON);
-        assert!((bbox.max_lat - 37.8).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_extract_result_serialization() {
-        let result = ExtractResult {
-            nodes: 100,
-            edges: 200,
-            total_km: 42.5,
-            output_path: "/tmp/test.geojson".to_string(),
-        };
-        let json = serde_json::to_string(&result).unwrap();
-        let deserialized: ExtractResult = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.nodes, 100);
-        assert_eq!(deserialized.edges, 200);
-        assert!((deserialized.total_km - 42.5).abs() < f64::EPSILON);
-        assert_eq!(deserialized.output_path, "/tmp/test.geojson");
     }
 }

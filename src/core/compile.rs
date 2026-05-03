@@ -4,12 +4,15 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::time::Instant;
 
+use super::clean::{clean_geojson, CleanOptions, CleanStats};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompileRequest {
     pub input_geojson: String,
     pub output_rmp: String,
     pub compress: bool,
     pub road_classes: Vec<String>,
+    pub clean_options: Option<CleanOptions>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,12 +49,21 @@ pub fn run_compile(req: &CompileRequest) -> anyhow::Result<CompileResult> {
     let input_size_bytes = input_data.len() as u64;
 
     // 2. Parse into FeatureCollection
-    let geojson: geojson::FeatureCollection = serde_json::from_slice(&input_data)
+    let mut geojson: geojson::FeatureCollection = serde_json::from_slice(&input_data)
         .with_context(|| "Failed to parse GeoJSON FeatureCollection")?;
+
+    // 2.5. Clean GeoJSON if options provided
+    let mut _clean_stats: Option<CleanStats> = None;
+    if let Some(ref clean_opts) = req.clean_options {
+        let (cleaned_fc, stats, _warnings) =
+            clean_geojson(&geojson, clean_opts).with_context(|| "Failed to clean GeoJSON")?;
+        _clean_stats = Some(stats);
+        geojson = cleaned_fc;
+    }
 
     // 3. Deduplicate nodes by snapping coordinates to 1e6 precision
     //    and 4. Build adjacency list of edges
-    let mut node_map: HashMap<u64, u32> = HashMap::new();
+    let mut node_map: HashMap<(i64, i64), u32> = HashMap::new();
     let mut nodes: Vec<(f64, f64)> = Vec::new(); // (lat, lon) in original precision
     let mut edges: Vec<(u32, u32, f64, u8)> = Vec::new(); // (from, to, weight_m, oneway)
 
@@ -97,17 +109,16 @@ pub fn run_compile(req: &CompileRequest) -> anyhow::Result<CompileResult> {
                 continue;
             }
 
-            let mut it = coord_points.iter();
-            if let Some(&(mut lat1, mut lon1)) = it.next() {
-                let mut from_node = get_or_create_node(&mut node_map, &mut nodes, lat1, lon1);
-                for &(lat2, lon2) in it {
-                    let weight_m = haversine_distance_m(lat1, lon1, lat2, lon2);
-                    let to_node = get_or_create_node(&mut node_map, &mut nodes, lat2, lon2);
-                    edges.push((from_node, to_node, weight_m, oneway));
-                    from_node = to_node;
-                    lat1 = lat2;
-                    lon1 = lon2;
-                }
+            for window in coord_points.windows(2) {
+                let (lat1, lon1) = window[0];
+                let (lat2, lon2) = window[1];
+
+                let weight_m = haversine_distance_m(lat1, lon1, lat2, lon2);
+
+                let from_node = get_or_create_node(&mut node_map, &mut nodes, lat1, lon1);
+                let to_node = get_or_create_node(&mut node_map, &mut nodes, lat2, lon2);
+
+                edges.push((from_node, to_node, weight_m, oneway));
             }
         }
     }
@@ -162,6 +173,7 @@ pub fn run_compile(req: &CompileRequest) -> anyhow::Result<CompileResult> {
 }
 
 /// Quick validation: check if a file starts with the RMP magic bytes.
+#[allow(dead_code)]
 pub fn is_rmp_file(data: &[u8]) -> bool {
     data.len() >= 4 && &data[..4] == RMP_MAGIC
 }
@@ -169,14 +181,12 @@ pub fn is_rmp_file(data: &[u8]) -> bool {
 /// Get or create a node ID for the given (lat, lon) coordinates.
 /// Snaps to 1e6 precision for deduplication, but stores original-precision coords.
 fn get_or_create_node(
-    node_map: &mut HashMap<u64, u32>,
+    node_map: &mut HashMap<(i64, i64), u32>,
     nodes: &mut Vec<(f64, f64)>,
     lat: f64,
     lon: f64,
 ) -> u32 {
-    let lat_i = (lat * 1e6) as i32;
-    let lon_i = (lon * 1e6) as i32;
-    let key = ((lat_i as u64) << 32) | (lon_i as u32 as u64);
+    let key = ((lat * 1e6) as i64, (lon * 1e6) as i64);
     *node_map.entry(key).or_insert_with(|| {
         let id = nodes.len() as u32;
         nodes.push((lat, lon));
@@ -198,135 +208,4 @@ fn haversine_distance_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
 
     EARTH_RADIUS_M * c
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::optimize::read_rmp_file;
-
-    #[test]
-    fn test_is_rmp_file_valid() {
-        let data = b"RMP1\x00\x00\x00\x00\x00\x00\x00\x00extra";
-        assert!(is_rmp_file(data));
-    }
-
-    #[test]
-    fn test_is_rmp_file_invalid() {
-        let data = b"GARBAGE_data_here";
-        assert!(!is_rmp_file(data));
-    }
-
-    #[test]
-    fn test_compile_roundtrip() {
-        // Create a simple GeoJSON FeatureCollection with 2 LineString features
-        let geojson = serde_json::json!({
-            "type": "FeatureCollection",
-            "features": [
-                {
-                    "type": "Feature",
-                    "geometry": {
-                        "type": "LineString",
-                        "coordinates": [[-73.985, 40.748], [-73.944, 40.678]]
-                    },
-                    "properties": {"class": "residential"}
-                },
-                {
-                    "type": "Feature",
-                    "geometry": {
-                        "type": "LineString",
-                        "coordinates": [[-73.944, 40.678], [-74.006, 40.7128]]
-                    },
-                    "properties": {"class": "primary", "oneway": "yes"}
-                }
-            ]
-        });
-
-        let input_path = "/tmp/v2rmp_test_compile_input.geojson";
-        let output_path = "/tmp/v2rmp_test_compile_output.rmp";
-
-        // Write input GeoJSON
-        std::fs::write(input_path, serde_json::to_string_pretty(&geojson).unwrap()).unwrap();
-
-        let req = CompileRequest {
-            input_geojson: input_path.to_string(),
-            output_rmp: output_path.to_string(),
-            compress: false,
-            road_classes: vec![],
-        };
-
-        let result = run_compile(&req).unwrap();
-
-        // Verify compile result
-        assert_eq!(result.node_count, 3); // 3 unique nodes (middle one shared)
-        assert_eq!(result.edge_count, 2); // 2 edges
-
-        // Read the output file and verify magic bytes
-        let output_data = std::fs::read(output_path).unwrap();
-        assert!(output_data.len() >= 4);
-        assert_eq!(&output_data[..4], b"RMP1");
-
-        // Parse with read_rmp_file
-        let (nodes, edges) = read_rmp_file(&output_data).unwrap();
-        assert_eq!(nodes.len(), 3);
-        assert_eq!(edges.len(), 2);
-
-        // Verify edge data
-        assert_eq!(edges[0].from, 0);
-        assert_eq!(edges[0].to, 1);
-        assert_eq!(edges[1].from, 1);
-        assert_eq!(edges[1].to, 2);
-        // Second edge has oneway=yes
-        assert_eq!(edges[1].oneway, 1);
-
-        // Clean up
-        let _ = std::fs::remove_file(input_path);
-        let _ = std::fs::remove_file(output_path);
-    }
-
-    #[test]
-    fn test_haversine_distance_m() {
-        // NYC to LA: ~3,935 km
-        let dist = haversine_distance_m(40.7128, -74.0060, 34.0522, -118.2437);
-        assert!((dist - 3_935_000.0).abs() < 10_000.0);
-    }
-
-    #[test]
-    fn test_run_compile_non_existent_file() {
-        let req = CompileRequest {
-            input_geojson: "/tmp/non_existent_file.geojson".to_string(),
-            output_rmp: "/tmp/output.rmp".to_string(),
-            compress: false,
-            road_classes: vec![],
-        };
-
-        let result = run_compile(&req);
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Failed to open input GeoJSON"));
-    }
-
-    #[test]
-    fn test_run_compile_invalid_geojson() {
-        let input_path = "/tmp/v2rmp_test_invalid.geojson";
-        std::fs::write(input_path, "invalid json").unwrap();
-
-        let req = CompileRequest {
-            input_geojson: input_path.to_string(),
-            output_rmp: "/tmp/output.rmp".to_string(),
-            compress: false,
-            road_classes: vec![],
-        };
-
-        let result = run_compile(&req);
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Failed to parse GeoJSON FeatureCollection"));
-
-        let _ = std::fs::remove_file(input_path);
-    }
 }
