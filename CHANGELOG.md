@@ -48,3 +48,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [Unreleased]: https://github.com/yourusername/v2rmp/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/yourusername/v2rmp/releases/tag/v0.1.0
+## [0.1.1] - 2026-05-03
+
+### Added
+- Clipboard support in TUI input fields
+  - Ctrl+C: Copy current input to clipboard
+  - Ctrl+V: Paste from clipboard
+  - Ctrl+X: Cut to clipboard
+- Full TUI implementation with all view modules
+- Graceful fallback when clipboard is unavailable
+
+### Dependencies
+- Added `arboard` 3.4 for cross-platform clipboard support
