@@ -29,17 +29,12 @@ pub struct OptimizeRequest {
     pub oneway_mode: OnewayMode,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum OnewayMode {
     Ignore,
+    #[default]
     Respect,
     Reverse,
-}
-
-impl Default for OnewayMode {
-    fn default() -> Self {
-        Self::Respect
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,7 +94,7 @@ pub fn classify_turn(bearing_delta: f64) -> &'static str {
         "straight"
     } else if d > 45.0 && d <= 135.0 {
         "right"
-    } else if d < -45.0 && d >= -135.0 {
+    } else if (-135.0..-45.0).contains(&d) {
         "left"
     } else {
         "u_turn"
@@ -428,25 +423,22 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
 
     // Hierholzer's algorithm
     let mut adj_clone = adj.clone();
-    let mut stack = vec![start_node as u32];
-    let mut circuit: Vec<u32> = Vec::new();
+    let mut stack = vec![(start_node as u32, None)];
+    let mut circuit_with_edges: Vec<(u32, Option<AdjEntry>)> = Vec::new();
 
-    while let Some(&v_u32) = stack.last() {
+    while let Some(&(v_u32, _)) = stack.last() {
         let v = v_u32 as usize;
         if let Some(edge) = adj_clone[v].pop() {
             // Remove reverse edge
-            if let Some(pos) = adj_clone[edge.to as usize]
-                .iter()
-                .position(|e| {
-                    e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m
-                })
-            {
+            if let Some(pos) = adj_clone[edge.to as usize].iter().position(|e| {
+                e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m
+            }) {
                 adj_clone[edge.to as usize].swap_remove(pos);
             }
-            stack.push(edge.to);
+            stack.push((edge.to, Some(edge)));
         } else {
-            stack.pop();
-            circuit.push(v as u32);
+            let (v, e) = stack.pop().unwrap();
+            circuit_with_edges.push((v, e));
         }
     }
 
@@ -454,7 +446,6 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     circuit_with_edges.reverse();
     let circuit: Vec<u32> = circuit_with_edges.iter().map(|(v, _)| *v).collect();
 
-    // 7. Compute total distance, deadhead distance, and turn summary
     let mut total_distance_m = 0.0;
     let mut deadhead_distance_m = 0.0;
     let mut total_segments = 0usize;
@@ -468,8 +459,8 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     let mut edge_traversal_count: HashMap<usize, u32> = HashMap::new();
 
     // Walk the circuit and accumulate distances using stored edge metadata
-    for i in 1..circuit_with_edges.len() {
-        if let Some(e) = &circuit_with_edges[i].1 {
+    for (_, edge_opt) in circuit_with_edges.iter().skip(1) {
+        if let Some(e) = edge_opt {
             total_distance_m += e.weight_m;
             total_segments += 1;
 

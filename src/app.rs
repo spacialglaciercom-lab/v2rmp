@@ -148,6 +148,12 @@ pub struct App {
     pub start_time: Instant,
 }
 
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl App {
     /// Scan current directory for .rmp cache files
     fn scan_cached_maps() -> Vec<String> {
@@ -246,10 +252,7 @@ impl App {
                             max_lon,
                             max_lat,
                         };
-                        self.log(
-                            LogLevel::Success,
-                            format!("Bounding box set: {bbox}"),
-                        );
+                        self.log(LogLevel::Success, format!("Bounding box set: {bbox}"));
                         self.bounding_box = Some(bbox);
                     } else {
                         self.log(LogLevel::Error, "Invalid coordinates".to_string());
@@ -317,7 +320,7 @@ impl App {
 
     pub fn cancel_input(&mut self) {
         self.input_mode.active = false;
-                self.input_mode.buffer.clear();
+        self.input_mode.buffer.clear();
         self.log(LogLevel::Info, "Input cancelled");
     }
 
