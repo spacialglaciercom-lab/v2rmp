@@ -99,7 +99,7 @@ pub struct InputMode {
     pub buffer: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum InputField {
     BoundingBox,
     InputFile,
