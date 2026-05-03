@@ -369,33 +369,28 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     };
 
     // Hierholzer's algorithm
-    let mut adj_clone = adj.clone();
-    let mut stack = vec![start_node as u32];
-    let mut circuit: Vec<u32> = Vec::new();
+    // We consume adj in-place to avoid cloning the potentially large adjacency list.
+    let mut stack = vec![(start_node as u32, None::<AdjEntry>)];
+    let mut circuit_with_edges: Vec<(u32, Option<AdjEntry>)> = Vec::new();
 
-    while !stack.is_empty() {
-        let v = *stack.last().unwrap() as usize;
-        let mut found = false;
-        while !adj_clone[v].is_empty() {
-            let edge = adj_clone[v].pop().unwrap();
+    while let Some(&(v, _)) = stack.last() {
+        let v_idx = v as usize;
+        if let Some(edge) = adj[v_idx].pop() {
             // Remove reverse edge
             if let Some(pos) = adj_clone[edge.to as usize].iter().position(|e| {
                 e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m
             }) {
                 adj_clone[edge.to as usize].remove(pos);
             }
-            stack.push(edge.to);
-            found = true;
-            break;
-        }
-        if !found {
-            stack.pop();
-            circuit.push(v as u32);
+            stack.push((edge.to, Some(edge)));
+        } else {
+            circuit_with_edges.push(stack.pop().unwrap());
         }
     }
 
     // circuit is in reverse order; reverse it
-    circuit.reverse();
+    circuit_with_edges.reverse();
+    let circuit: Vec<u32> = circuit_with_edges.iter().map(|(v, _)| *v).collect();
 
     // 7. Compute total distance, deadhead distance, and turn summary
     let mut total_distance_m = 0.0;
@@ -410,17 +405,9 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
 
     let mut edge_traversal_count: HashMap<usize, u32> = HashMap::new();
 
-    // Walk the circuit and accumulate distances
-    for i in 0..circuit.len().saturating_sub(1) {
-        let u = circuit[i];
-        let v = circuit[i + 1];
-
-        let edge_info = adj[u as usize]
-            .iter()
-            .find(|e| e.to == v)
-            .or_else(|| adj[v as usize].iter().find(|e| e.to == u));
-
-        if let Some(e) = edge_info {
+    // Walk the circuit and accumulate distances using stored edge metadata
+    for i in 1..circuit_with_edges.len() {
+        if let Some(e) = &circuit_with_edges[i].1 {
             total_distance_m += e.weight_m;
             total_segments += 1;
 

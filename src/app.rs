@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use crate::core::optimize::TurnPenalties;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum View {
     Home,
     Extract,
@@ -13,7 +13,7 @@ pub enum View {
     Help,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DataSource {
     Osm,
     Overture,
@@ -74,7 +74,7 @@ pub struct LogEntry {
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LogLevel {
     Info,
     Success,
@@ -99,7 +99,7 @@ pub struct InputMode {
     pub buffer: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InputField {
     BoundingBox,
     InputFile,
@@ -230,7 +230,7 @@ impl App {
             return;
         }
 
-        match self.input_mode.field.clone() {
+        match self.input_mode.field {
             InputField::BoundingBox => {
                 let parts: Vec<&str> = value.split(',').collect();
                 if parts.len() == 4 {
@@ -240,16 +240,14 @@ impl App {
                         parts[2].parse::<f64>(),
                         parts[3].parse::<f64>(),
                     ) {
-                        self.bounding_box = Some(BoundingBox {
+                        let bbox = BoundingBox {
                             min_lon,
                             min_lat,
                             max_lon,
                             max_lat,
-                        });
-                        self.log(
-                            LogLevel::Success,
-                            format!("Bounding box set: {}", self.bounding_box.as_ref().unwrap()),
-                        );
+                        };
+                        self.log(LogLevel::Success, format!("Bounding box set: {}", bbox));
+                        self.bounding_box = Some(bbox);
                     } else {
                         self.log(LogLevel::Error, "Invalid coordinates".to_string());
                     }
@@ -316,7 +314,7 @@ impl App {
 
     pub fn cancel_input(&mut self) {
         self.input_mode.active = false;
-        self.input_mode.buffer.clear();
+                self.input_mode.buffer.clear();
         self.log(LogLevel::Info, "Input cancelled");
     }
 
@@ -360,5 +358,32 @@ impl App {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cancel_input() {
+        let mut app = App::new();
+
+        // Setup state
+        app.input_mode.active = true;
+        app.input_mode.buffer = "test input".to_string();
+
+        // Call function
+        app.cancel_input();
+
+        // Verify state cleared
+        assert!(!app.input_mode.active);
+        assert!(app.input_mode.buffer.is_empty());
+
+        // Verify log entry
+        assert!(!app.log_entries.is_empty());
+        let last_log = app.log_entries.last().unwrap();
+        assert_eq!(last_log.level, LogLevel::Info);
+        assert_eq!(last_log.message, "Input cancelled");
     }
 }
