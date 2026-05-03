@@ -17,14 +17,24 @@ fn main() -> Result<()> {
     let mut app = App::new();
     app.log(LogLevel::Info, "rmpca v0.1.0 - Route Optimization TUI");
     app.log(LogLevel::Info, "Press 'q' to quit, '?' for help");
-    app.log(LogLevel::Info, "Clipboard: Ctrl+C (copy), Ctrl+V (paste), Ctrl+X (cut)");
+    app.log(
+        LogLevel::Info,
+        "Clipboard: Ctrl+C (copy), Ctrl+V (paste), Ctrl+X (cut)",
+    );
     let mut clipboard = arboard::Clipboard::new().ok();
     if clipboard.is_none() {
-        app.log(LogLevel::Warn, "Clipboard unavailable - copy/paste disabled");
+        app.log(
+            LogLevel::Warn,
+            "Clipboard unavailable - copy/paste disabled",
+        );
     }
     let res = run_app(&mut terminal, &mut app, &mut clipboard);
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     terminal.show_cursor()?;
     if let Err(err) = res {
         eprintln!("Error: {:?}", err);
@@ -32,20 +42,24 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App, clipboard: &mut Option<arboard::Clipboard>) -> Result<()> {
+fn run_app(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut App,
+    clipboard: &mut Option<arboard::Clipboard>,
+) -> Result<()> {
     loop {
-        terminal.draw(|f| {
-            match app.current_view {
-                View::Home => v2rmp::ui::home::render(f, app),
-                View::Extract => v2rmp::ui::extract::render(f, app),
-                View::Compile => v2rmp::ui::compile::render(f, app),
-                View::Optimize => v2rmp::ui::optimize::render(f, app),
-                View::BrowseMaps => v2rmp::ui::browse_maps::render(f, app),
-                View::BrowseRoutes => v2rmp::ui::browse_routes::render(f, app),
-                View::Help => v2rmp::ui::home::render(f, app),
-            }
+        terminal.draw(|f| match app.current_view {
+            View::Home => v2rmp::ui::home::render(f, app),
+            View::Extract => v2rmp::ui::extract::render(f, app),
+            View::Compile => v2rmp::ui::compile::render(f, app),
+            View::Optimize => v2rmp::ui::optimize::render(f, app),
+            View::BrowseMaps => v2rmp::ui::browse_maps::render(f, app),
+            View::BrowseRoutes => v2rmp::ui::browse_routes::render(f, app),
+            View::Help => v2rmp::ui::home::render(f, app),
         })?;
-        if !app.running { break; }
+        if !app.running {
+            break;
+        }
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 if app.input_mode.active {
@@ -76,7 +90,9 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App,
                             }
                         }
                         KeyCode::Char(c) => app.input_mode.buffer.push(c),
-                        KeyCode::Backspace => { app.input_mode.buffer.pop(); }
+                        KeyCode::Backspace => {
+                            app.input_mode.buffer.pop();
+                        }
                         _ => {}
                     }
                 } else {
@@ -103,16 +119,14 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App,
 
 fn handle_enter(app: &mut App) {
     match app.current_view {
-        View::Home => {
-            match app.workflow_selection {
-                0 => app.current_view = View::Extract,
-                1 => app.current_view = View::Compile,
-                2 => app.current_view = View::Optimize,
-                3 => app.current_view = View::BrowseMaps,
-                4 => app.current_view = View::BrowseRoutes,
-                _ => {}
-            }
-        }
+        View::Home => match app.workflow_selection {
+            0 => app.current_view = View::Extract,
+            1 => app.current_view = View::Compile,
+            2 => app.current_view = View::Optimize,
+            3 => app.current_view = View::BrowseMaps,
+            4 => app.current_view = View::BrowseRoutes,
+            _ => {}
+        },
         View::Extract => app.start_input(InputField::BoundingBox),
         View::Compile => app.start_input(InputField::InputFile),
         View::Optimize => app.start_input(InputField::CacheFile),
