@@ -51,7 +51,7 @@ pub fn run_compile(req: &CompileRequest) -> anyhow::Result<CompileResult> {
 
     // 3. Deduplicate nodes by snapping coordinates to 1e6 precision
     //    and 4. Build adjacency list of edges
-    let mut node_map: HashMap<(i64, i64), u32> = HashMap::new();
+    let mut node_map: HashMap<u64, u32> = HashMap::new();
     let mut nodes: Vec<(f64, f64)> = Vec::new(); // (lat, lon) in original precision
     let mut edges: Vec<(u32, u32, f64, u8)> = Vec::new(); // (from, to, weight_m, oneway)
 
@@ -68,7 +68,11 @@ pub fn run_compile(req: &CompileRequest) -> anyhow::Result<CompileResult> {
             .and_then(|props| props.get("oneway"))
             .and_then(|v| v.as_str())
             .map(|s| {
-                if matches!(s, "yes" | "1" | "true") { 1u8 } else { 0u8 }
+                if matches!(s, "yes" | "1" | "true") {
+                    1u8
+                } else {
+                    0u8
+                }
             })
             .unwrap_or(0);
 
@@ -93,16 +97,17 @@ pub fn run_compile(req: &CompileRequest) -> anyhow::Result<CompileResult> {
                 continue;
             }
 
-            for window in coord_points.windows(2) {
-                let (lat1, lon1) = window[0];
-                let (lat2, lon2) = window[1];
-
-                let weight_m = haversine_distance_m(lat1, lon1, lat2, lon2);
-
-                let from_node = get_or_create_node(&mut node_map, &mut nodes, lat1, lon1);
-                let to_node = get_or_create_node(&mut node_map, &mut nodes, lat2, lon2);
-
-                edges.push((from_node, to_node, weight_m, oneway));
+            let mut it = coord_points.iter();
+            if let Some(&(mut lat1, mut lon1)) = it.next() {
+                let mut from_node = get_or_create_node(&mut node_map, &mut nodes, lat1, lon1);
+                for &(lat2, lon2) in it {
+                    let weight_m = haversine_distance_m(lat1, lon1, lat2, lon2);
+                    let to_node = get_or_create_node(&mut node_map, &mut nodes, lat2, lon2);
+                    edges.push((from_node, to_node, weight_m, oneway));
+                    from_node = to_node;
+                    lat1 = lat2;
+                    lon1 = lon2;
+                }
             }
         }
     }
@@ -164,12 +169,14 @@ pub fn is_rmp_file(data: &[u8]) -> bool {
 /// Get or create a node ID for the given (lat, lon) coordinates.
 /// Snaps to 1e6 precision for deduplication, but stores original-precision coords.
 fn get_or_create_node(
-    node_map: &mut HashMap<(i64, i64), u32>,
+    node_map: &mut HashMap<u64, u32>,
     nodes: &mut Vec<(f64, f64)>,
     lat: f64,
     lon: f64,
 ) -> u32 {
-    let key = ((lat * 1e6) as i64, (lon * 1e6) as i64);
+    let lat_i = (lat * 1e6) as i32;
+    let lon_i = (lon * 1e6) as i32;
+    let key = ((lat_i as u64) << 32) | (lon_i as u32 as u64);
     *node_map.entry(key).or_insert_with(|| {
         let id = nodes.len() as u32;
         nodes.push((lat, lon));

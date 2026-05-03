@@ -1,5 +1,5 @@
-use crate::core::overture::{BBox, OvertureExtractor, OvertureSegment};
 use crate::core::osm;
+use crate::core::overture::{BBox, OvertureExtractor, OvertureSegment};
 use anyhow::{Context, Result};
 use geojson::{Feature, FeatureCollection, Geometry as GeoJsonGeometry, Value as GeoJsonValue};
 use serde::{Deserialize, Serialize};
@@ -138,7 +138,7 @@ fn run_overture_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
         let features: Vec<Feature> = segments
             .into_iter()
             .filter(|seg| should_include_segment(seg, &req.road_classes))
-            .map(|seg| segment_to_feature(seg))
+            .map(segment_to_feature)
             .collect();
 
         tracing::info!(
@@ -183,16 +183,16 @@ fn segment_to_feature(seg: OvertureSegment) -> Feature {
     use crate::core::overture::Geometry as OvertureGeometry;
 
     // Build the GeoJSON geometry value
-    let geometry_json = match &seg.geometry {
+    let geometry_json = match seg.geometry {
         OvertureGeometry::LineString(coords) => json!({
             "type": "LineString",
-            "coordinates": coords.iter()
-                .map(|(lon, lat)| vec![*lon, *lat])
+            "coordinates": coords.into_iter()
+                .map(|(lon, lat)| vec![lon, lat])
                 .collect::<Vec<_>>()
         }),
         OvertureGeometry::Point(lon, lat) => json!({
             "type": "Point",
-            "coordinates": vec![*lon, *lat]
+            "coordinates": vec![lon, lat]
         }),
     };
 
@@ -202,32 +202,27 @@ fn segment_to_feature(seg: OvertureSegment) -> Feature {
 
     // Build properties map
     let mut props = serde_json::Map::new();
-    props.insert("id".to_string(), serde_json::Value::String(seg.id.clone()));
-    if let Some(ref name) = seg.name {
-        props.insert("name".to_string(), serde_json::Value::String(name.clone()));
+    props.insert("id".to_string(), serde_json::Value::String(seg.id));
+    if let Some(name) = seg.name {
+        props.insert("name".to_string(), serde_json::Value::String(name));
     }
-    if let Some(ref class) = seg.class {
-        props.insert("class".to_string(), serde_json::Value::String(class.clone()));
+    if let Some(class) = seg.class {
+        props.insert("class".to_string(), serde_json::Value::String(class));
     }
-    if let Some(ref subtype) = seg.subtype {
-        props
-            .insert("subtype".to_string(), serde_json::Value::String(subtype.clone()));
+    if let Some(subtype) = seg.subtype {
+        props.insert("subtype".to_string(), serde_json::Value::String(subtype));
     }
-    if let Some(ref surface) = seg.surface {
-        props
-            .insert("surface".to_string(), serde_json::Value::String(surface.clone()));
+    if let Some(surface) = seg.surface {
+        props.insert("surface".to_string(), serde_json::Value::String(surface));
     }
-    if let Some(ref oneway) = seg.oneway {
-        props
-            .insert("oneway".to_string(), serde_json::Value::String(oneway.clone()));
+    if let Some(oneway) = seg.oneway {
+        props.insert("oneway".to_string(), serde_json::Value::String(oneway));
     }
-    if let Some(ref junction) = seg.junction {
-        props
-            .insert("junction".to_string(), serde_json::Value::String(junction.clone()));
+    if let Some(junction) = seg.junction {
+        props.insert("junction".to_string(), serde_json::Value::String(junction));
     }
-    if let Some(ref osm_id) = seg.osm_id {
-        props
-            .insert("osm_id".to_string(), serde_json::Value::String(osm_id.clone()));
+    if let Some(osm_id) = seg.osm_id {
+        props.insert("osm_id".to_string(), serde_json::Value::String(osm_id));
     }
 
     Feature {
@@ -357,10 +352,7 @@ fn run_osm_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
 
     tracing::info!("Extracted {} segments from OSM PBF", segments.len());
 
-    let features: Vec<Feature> = segments
-        .into_iter()
-        .map(osm::segment_to_feature)
-        .collect();
+    let features: Vec<Feature> = segments.into_iter().map(osm::segment_to_feature).collect();
 
     let (nodes, edges, total_km) = build_graph_stats(&features)?;
 
@@ -478,10 +470,7 @@ mod tests {
     fn test_build_graph_stats_dedup() {
         let geom1 = GeoJsonGeometry {
             bbox: None,
-            value: GeoJsonValue::LineString(vec![
-                vec![-74.006, 40.7128],
-                vec![-73.985, 40.748],
-            ]),
+            value: GeoJsonValue::LineString(vec![vec![-74.006, 40.7128], vec![-73.985, 40.748]]),
             foreign_members: None,
         };
         let feat1 = Feature {
@@ -493,10 +482,7 @@ mod tests {
         };
         let geom2 = GeoJsonGeometry {
             bbox: None,
-            value: GeoJsonValue::LineString(vec![
-                vec![-73.985, 40.748],
-                vec![-73.944, 40.678],
-            ]),
+            value: GeoJsonValue::LineString(vec![vec![-73.985, 40.748], vec![-73.944, 40.678]]),
             foreign_members: None,
         };
         let feat2 = Feature {
