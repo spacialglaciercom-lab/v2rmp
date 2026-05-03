@@ -1,0 +1,691 @@
+     1	use serde::{Deserialize, Serialize};
+     2	use std::collections::HashMap;
+     3	use std::io::Read;
+     4	use std::time::Instant;
+     5
+     6	#[derive(Debug, Clone, Serialize, Deserialize)]
+     7	pub struct TurnPenalties {
+     8	    pub left: f64,
+     9	    pub right: f64,
+    10	    pub u_turn: f64,
+    11	}
+    12
+    13	impl Default for TurnPenalties {
+    14	    fn default() -> Self {
+    15	        Self {
+    16	            left: 1.0,
+    17	            right: 0.0,
+    18	            u_turn: 5.0,
+    19	        }
+    20	    }
+    21	}
+    22
+    23	#[derive(Debug, Clone, Serialize, Deserialize)]
+    24	pub struct OptimizeRequest {
+    25	    pub cache_file: String,
+    26	    pub route_file: Option<String>,
+    27	    pub turn_penalties: TurnPenalties,
+    28	    pub depot: Option<(f64, f64)>,
+    29	    pub oneway_mode: OnewayMode,
+    30	}
+    31
+    32	#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+    33	pub enum OnewayMode {
+    34	    Ignore,
+    35	    Respect,
+    36	    Reverse,
+    37	}
+    38
+    39	impl Default for OnewayMode {
+    40	    fn default() -> Self {
+    41	        Self::Respect
+    42	    }
+    43	}
+    44
+    45	#[derive(Debug, Clone, Serialize, Deserialize)]
+    46	pub struct OptimizeResult {
+    47	    pub total_distance_km: f64,
+    48	    pub total_segments: usize,
+    49	    pub deadhead_distance_km: f64,
+    50	    pub efficiency_pct: f64,
+    51	    pub turns: TurnSummary,
+    52	    pub elapsed_ms: u64,
+    53	}
+    54
+    55	#[derive(Debug, Clone, Serialize, Deserialize)]
+    56	pub struct TurnSummary {
+    57	    pub left: u32,
+    58	    pub right: u32,
+    59	    pub u_turn: u32,
+    60	    pub straight: u32,
+    61	}
+    62
+    63	// ── Binary format structures ──────────────────────────────────────────
+    64
+    65	/// A node in the road network (lat/lon in WGS-84).
+    66	#[derive(Debug, Clone)]
+    67	pub struct RmpNode {
+    68	    pub lat: f64,
+    69	    pub lon: f64,
+    70	}
+    71
+    72	/// An edge in the road network.
+    73	#[derive(Debug, Clone)]
+    74	pub struct RmpEdge {
+    75	    pub from: u32,
+    76	    pub to: u32,
+    77	    pub weight_m: f64,
+    78	    pub oneway: u8,
+    79	}
+    80
+    81	// ── Haversine & turn classification ──────────────────────────────────
+    82
+    83	/// Haversine distance in meters between two WGS-84 points.
+    84	pub fn haversine_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    85	    let r = 6_371_000.0;
+    86	    let dlat = (lat2 - lat1).to_radians();
+    87	    let dlon = (lon2 - lon1).to_radians();
+    88	    let a = (dlat / 2.0).sin().powi(2)
+    89	        + lat1.to_radians().cos() * lat2.to_radians().cos() * (dlon / 2.0).sin().powi(2);
+    90	    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+    91	    r * c
+    92	}
+    93
+    94	/// Classify a turn by bearing delta (degrees).
+    95	/// Returns "straight", "right", "left", or "u_turn".
+    96	pub fn classify_turn(bearing_delta: f64) -> &'static str {
+    97	    let d = bearing_delta.normalize(-180.0, 180.0);
+    98	    if d.abs() <= 45.0 {
+    99	        "straight"
+   100	    } else if d > 45.0 && d <= 135.0 {
+   101	        "right"
+   102	    } else if d < -45.0 && d >= -135.0 {
+   103	        "left"
+   104	    } else {
+   105	        "u_turn"
+   106	    }
+   107	}
+   108
+   109	// ── Binary parser ────────────────────────────────────────────────────
+   110
+   111	/// Magic bytes for the .rmp binary format.
+   112	const RMP_MAGIC: &[u8; 4] = b"RMP1";
+   113
+   114	/// Parse an `.rmp` binary file and return (nodes, edges).
+   115	///
+   116	/// Binary layout:
+   117	///   [4]  magic "RMP1"
+   118	///   [4]  node count (u32 LE)
+   119	///   [4]  edge count (u32 LE)
+   120	///   [N]  node entries: lat(f64 LE) + lon(f64 LE) = 16 bytes each
+   121	///   [E]  edge entries: from(u32 LE) + to(u32 LE) + weight_m(f64 LE) + oneway(u8) = 17 bytes each
+   122	///   [4]  CRC32 (u32 LE)
+   123	pub fn read_rmp_file(data: &[u8]) -> anyhow::Result<(Vec<RmpNode>, Vec<RmpEdge>)> {
+   124	    // Validate magic
+   125	    if data.len() < 4 || &data[..4] != RMP_MAGIC {
+   126	        anyhow::bail!("Invalid .rmp file: missing RMP1 magic bytes");
+   127	    }
+   128
+   129	    if data.len() < 12 {
+   130	        anyhow::bail!("Invalid .rmp file: header too short");
+   131	    }
+   132
+   133	    let node_count = u32::from_le_bytes(data[4..8].try_into()?) as usize;
+   134	    let edge_count = u32::from_le_bytes(data[8..12].try_into()?) as usize;
+   135
+   136	    let nodes_end = 12 + node_count * 16;
+   137	    let edges_end = nodes_end + edge_count * 17;
+   138	    let expected_len = edges_end + 4; // +4 for CRC32
+   139
+   140	    if data.len() < expected_len {
+   141	        anyhow::bail!(
+   142	            "Invalid .rmp file: expected {} bytes, got {}",
+   143	            expected_len,
+   144	            data.len()
+   145	        );
+   146	    }
+   147
+   148	    // Parse nodes
+   149	    let mut nodes = Vec::with_capacity(node_count);
+   150	    for i in 0..node_count {
+   151	        let offset = 12 + i * 16;
+   152	        let lat = f64::from_le_bytes(data[offset..offset + 8].try_into()?);
+   153	        let lon = f64::from_le_bytes(data[offset + 8..offset + 16].try_into()?);
+   154	        nodes.push(RmpNode { lat, lon });
+   155	    }
+   156
+   157	    // Parse edges
+   158	    let mut edges = Vec::with_capacity(edge_count);
+   159	    for i in 0..edge_count {
+   160	        let offset = nodes_end + i * 17;
+   161	        let from = u32::from_le_bytes(data[offset..offset + 4].try_into()?);
+   162	        let to = u32::from_le_bytes(data[offset + 4..offset + 8].try_into()?);
+   163	        let weight_m = f64::from_le_bytes(data[offset + 8..offset + 16].try_into()?);
+   164	        let oneway = data[offset + 16];
+   165	        edges.push(RmpEdge {
+   166	            from,
+   167	            to,
+   168	            weight_m,
+   169	            oneway,
+   170	        });
+   171	    }
+   172
+   173	    // Verify CRC32
+   174	    let expected_crc = u32::from_le_bytes(data[edges_end..edges_end + 4].try_into()?);
+   175	    let actual_crc = crc32fast::hash(&data[..edges_end]);
+   176	    if expected_crc != actual_crc {
+   177	        anyhow::bail!(
+   178	            "Invalid .rmp file: CRC32 mismatch (expected {}, got {})",
+   179	            expected_crc,
+   180	            actual_crc
+   181	        );
+   182	    }
+   183
+   184	    Ok((nodes, edges))
+   185	}
+   186
+   187	// ── Bearing calculation ──────────────────────────────────────────────
+   188
+   189	/// Calculate the initial bearing from point 1 to point 2 in degrees.
+   190	fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+   191	    let dlon = (lon2 - lon1).to_radians();
+   192	    let lat1_r = lat1.to_radians();
+   193	    let lat2_r = lat2.to_radians();
+   194
+   195	    let x = dlon.cos() * lat2_r.sin();
+   196	    let y = lat1_r.cos() * lat2_r.sin() - lat1_r.sin() * lat2_r.cos() * dlon.sin();
+   197
+   198	    let bearing_rad = y.atan2(x);
+   199	    (bearing_rad.to_degrees() + 360.0) % 360.0
+   200	}
+   201
+   202	// ── Route optimization ───────────────────────────────────────────────
+   203
+   204	/// Run the Chinese Postman Problem route optimization.
+   205	pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
+   206	    let start = Instant::now();
+   207
+   208	    // 1. Read the .rmp file
+   209	    let mut file_data = Vec::new();
+   210	    {
+   211	        let mut file = std::fs::File::open(&req.cache_file)
+   212	            .map_err(|e| anyhow::anyhow!("Failed to open .rmp file '{}': {}", req.cache_file, e))?;
+   213	        file.read_to_end(&mut file_data)?;
+   214	    }
+   215
+   216	    let (nodes, edges) = read_rmp_file(&file_data)?;
+   217
+   218	    if nodes.is_empty() || edges.is_empty() {
+   219	        return Ok(OptimizeResult {
+   220	            total_distance_km: 0.0,
+   221	            total_segments: 0,
+   222	            deadhead_distance_km: 0.0,
+   223	            efficiency_pct: 100.0,
+   224	            turns: TurnSummary {
+   225	                left: 0,
+   226	                right: 0,
+   227	                u_turn: 0,
+   228	                straight: 0,
+   229	            },
+   230	            elapsed_ms: start.elapsed().as_millis() as u64,
+   231	        });
+   232	    }
+   233
+   234	    // 2. Build adjacency list
+   235	    let n = nodes.len();
+   236	    let mut adj: Vec<Vec<AdjEntry>> = vec![vec![]; n];
+   237
+   238	    for (idx, edge) in edges.iter().enumerate() {
+   239	        let from = edge.from as usize;
+   240	        let to = edge.to as usize;
+   241
+   242	        adj[from].push(AdjEntry {
+   243	            to: edge.to,
+   244	            weight_m: edge.weight_m,
+   245	            edge_idx: idx,
+   246	        });
+   247
+   248	        // Add reverse edge for non-oneway or if oneway_mode says so
+   249	        match req.oneway_mode {
+   250	            OnewayMode::Ignore => {
+   251	                adj[to].push(AdjEntry {
+   252	                    to: edge.from,
+   253	                    weight_m: edge.weight_m,
+   254	                    edge_idx: idx,
+   255	                });
+   256	            }
+   257	            OnewayMode::Respect => {
+   258	                if edge.oneway == 0 {
+   259	                    adj[to].push(AdjEntry {
+   260	                        to: edge.from,
+   261	                        weight_m: edge.weight_m,
+   262	                        edge_idx: idx,
+   263	                    });
+   264	                }
+   265	            }
+   266	            OnewayMode::Reverse => {
+   267	                // Reverse oneway direction
+   268	                if edge.oneway == 1 {
+   269	                    // Original is oneway forward; only allow reverse
+   270	                    adj[to].push(AdjEntry {
+   271	                        to: edge.from,
+   272	                        weight_m: edge.weight_m,
+   273	                        edge_idx: idx,
+   274	                    });
+   275	                    // Remove forward
+   276	                    adj[from].retain(|e| e.edge_idx != idx);
+   277	                } else {
+   278	                    // Bidirectional: keep both
+   279	                    adj[to].push(AdjEntry {
+   280	                        to: edge.from,
+   281	                        weight_m: edge.weight_m,
+   282	                        edge_idx: idx,
+   283	                    });
+   284	                }
+   285	            }
+   286	        }
+   287	    }
+   288
+   289	    // 3. Find odd-degree vertices
+   290	    let mut degrees = vec![0usize; n];
+   291	    for (i, adj_list) in adj.iter().enumerate() {
+   292	        degrees[i] = adj_list.len();
+   293	    }
+   294
+   295	    let odd_vertices: Vec<usize> = (0..n).filter(|&i| degrees[i] % 2 != 0).collect();
+   296
+   297	    // 4. Minimum weight perfect matching (greedy nearest-neighbor)
+   298	    //    For each odd vertex, find its nearest unmatched odd vertex.
+   299	    //    Optimization: Use spatial pruning by sorting odd vertices by latitude.
+   300	    let mut duplicate_edges: Vec<(usize, usize, f64, usize)> = Vec::new(); // (from, to, weight, edge_idx)
+   301	    let mut matched = vec![false; n];
+   302
+   303	    // Mark vertices that aren't odd as already "matched"
+   304	    for i in 0..n {
+   305	        if degrees[i] % 2 == 0 {
+   306	            matched[i] = true;
+   307	        }
+   308	    }
+   309
+   310	    // Sort odd vertices by latitude for spatial pruning
+   311	    let mut sorted_odd = odd_vertices.clone();
+   312	    sorted_odd.sort_by(|&a, &b| nodes[a].lat.partial_cmp(&nodes[b].lat).unwrap());
+   313
+   314	    // Map each node index to its position in the sorted_odd list
+   315	    let mut pos_in_sorted = vec![0usize; n];
+   316	    for (i, &idx) in sorted_odd.iter().enumerate() {
+   317	        pos_in_sorted[idx] = i;
+   318	    }
+   319
+   320	    // Rough constant for meters per degree of latitude
+   321	    const METERS_PER_LAT_DEGREE: f64 = 111_111.0;
+   322
+   323	    for &u in &odd_vertices {
+   324	        if matched[u] {
+   325	            continue;
+   326	        }
+   327
+   328	        // Find nearest unmatched odd vertex using spatial pruning
+   329	        let mut best_v = None;
+   330	        let mut best_dist = f64::MAX;
+   331	        let u_lat = nodes[u].lat;
+   332	        let u_lon = nodes[u].lon;
+   333	        let u_pos = pos_in_sorted[u];
+   334
+   335	        let mut forward_idx = u_pos + 1;
+   336	        let mut backward_idx = u_pos.wrapping_sub(1);
+   337	        let mut forward_done = forward_idx >= sorted_odd.len();
+   338	        let mut backward_done = u_pos == 0;
+   339
+   340	        while !forward_done || !backward_done {
+   341	            // Check forward in sorted list
+   342	            if !forward_done {
+   343	                let v = sorted_odd[forward_idx];
+   344	                let v_lat = nodes[v].lat;
+   345	                // If latitude difference alone is greater than best_dist, we can prune forward
+   346	                if (v_lat - u_lat) * METERS_PER_LAT_DEGREE >= best_dist {
+   347	                    forward_done = true;
+   348	                } else {
+   349	                    if !matched[v] {
+   350	                        let dist = haversine_m(u_lat, u_lon, v_lat, nodes[v].lon);
+   351	                        if dist < best_dist {
+   352	                            best_dist = dist;
+   353	                            best_v = Some(v);
+   354	                        }
+   355	                    }
+   356	                    forward_idx += 1;
+   357	                    if forward_idx >= sorted_odd.len() {
+   358	                        forward_done = true;
+   359	                    }
+   360	                }
+   361	            }
+   362
+   363	            // Check backward in sorted list
+   364	            if !backward_done {
+   365	                let v = sorted_odd[backward_idx];
+   366	                let v_lat = nodes[v].lat;
+   367	                // If latitude difference alone is greater than best_dist, we can prune backward
+   368	                if (u_lat - v_lat) * METERS_PER_LAT_DEGREE >= best_dist {
+   369	                    backward_done = true;
+   370	                } else {
+   371	                    if !matched[v] {
+   372	                        let dist = haversine_m(u_lat, u_lon, v_lat, nodes[v].lon);
+   373	                        if dist < best_dist {
+   374	                            best_dist = dist;
+   375	                            best_v = Some(v);
+   376	                        }
+   377	                    }
+   378	                    if backward_idx == 0 {
+   379	                        backward_done = true;
+   380	                    } else {
+   381	                        backward_idx -= 1;
+   382	                    }
+   383	                }
+   384	            }
+   385	        }
+   386
+   387	        if let Some(v) = best_v {
+   388	            matched[u] = true;
+   389	            matched[v] = true;
+   390	            duplicate_edges.push((u, v, best_dist, usize::MAX)); // usize::MAX = deadhead marker
+   391	        }
+   392	    }
+   393
+   394	    // 5. Add duplicate edges to adjacency list to make all vertices even degree
+   395	    let deadhead_edge_idx = usize::MAX;
+   396	    for &(u, v, weight, eidx) in &duplicate_edges {
+   397	        adj[u].push(AdjEntry {
+   398	            to: v as u32,
+   399	            weight_m: weight,
+   400	            edge_idx: eidx,
+   401	        });
+   402	        adj[v].push(AdjEntry {
+   403	            to: u as u32,
+   404	            weight_m: weight,
+   405	            edge_idx: eidx,
+   406	        });
+   407	    }
+   408
+   409	    // 6. Find Eulerian circuit using Hierholzer's algorithm
+   410	    //    Start from depot if specified, otherwise from first odd vertex or node 0
+   411	    let start_node = if let Some((dep_lat, dep_lon)) = req.depot {
+   412	        // Find nearest node to depot
+   413	        let mut best_node = 0;
+   414	        let mut best_dist = f64::MAX;
+   415	        for (i, node) in nodes.iter().enumerate() {
+   416	            let dist = haversine_m(dep_lat, dep_lon, node.lat, node.lon);
+   417	            if dist < best_dist {
+   418	                best_dist = dist;
+   419	                best_node = i;
+   420	            }
+   421	        }
+   422	        best_node
+   423	    } else if !odd_vertices.is_empty() {
+   424	        odd_vertices[0]
+   425	    } else {
+   426	        0
+   427	    };
+   428
+   429	    // Hierholzer's algorithm
+   430	    let mut adj_clone = adj.clone();
+   431	    let mut stack = vec![start_node as u32];
+   432	    let mut circuit: Vec<u32> = Vec::new();
+   433
+   434	    while let Some(&v_u32) = stack.last() {
+   435	        let v = v_u32 as usize;
+   436	        if let Some(edge) = adj_clone[v].pop() {
+   437	            // Remove reverse edge
+   438	            if let Some(pos) = adj_clone[edge.to as usize]
+   439	                .iter()
+   440	                .position(|e| {
+   441	                    e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m
+   442	                })
+   443	            {
+   444	                adj_clone[edge.to as usize].swap_remove(pos);
+   445	            }
+   446	            stack.push(edge.to);
+   447	        } else {
+   448	            stack.pop();
+   449	            circuit.push(v as u32);
+   450	        }
+   451	    }
+   452
+   453	    // circuit is in reverse order; reverse it
+   454	    circuit_with_edges.reverse();
+   455	    let circuit: Vec<u32> = circuit_with_edges.iter().map(|(v, _)| *v).collect();
+   456
+   457	    // 7. Compute total distance, deadhead distance, and turn summary
+   458	    let mut total_distance_m = 0.0;
+   459	    let mut deadhead_distance_m = 0.0;
+   460	    let mut total_segments = 0usize;
+   461	    let mut turns = TurnSummary {
+   462	        left: 0,
+   463	        right: 0,
+   464	        u_turn: 0,
+   465	        straight: 0,
+   466	    };
+   467
+   468	    let mut edge_traversal_count: HashMap<usize, u32> = HashMap::new();
+   469
+   470	    // Walk the circuit and accumulate distances using stored edge metadata
+   471	    for i in 1..circuit_with_edges.len() {
+   472	        if let Some(e) = &circuit_with_edges[i].1 {
+   473	            total_distance_m += e.weight_m;
+   474	            total_segments += 1;
+   475
+   476	            if e.edge_idx == deadhead_edge_idx {
+   477	                deadhead_distance_m += e.weight_m;
+   478	            } else {
+   479	                let count = edge_traversal_count.entry(e.edge_idx).or_insert(0);
+   480	                *count += 1;
+   481	                if *count > 1 {
+   482	                    deadhead_distance_m += e.weight_m;
+   483	                }
+   484	            }
+   485	        }
+   486	    }
+   487
+   488	    // 8. Turn classification
+   489	    if circuit.len() > 2 {
+   490	        for i in 1..circuit.len().saturating_sub(1) {
+   491	            let prev = circuit[i - 1] as usize;
+   492	            let curr = circuit[i] as usize;
+   493	            let next = circuit[i + 1] as usize;
+   494
+   495	            if prev == curr || curr == next {
+   496	                continue;
+   497	            }
+   498
+   499	            let b_in = bearing(
+   500	                nodes[prev].lat,
+   501	                nodes[prev].lon,
+   502	                nodes[curr].lat,
+   503	                nodes[curr].lon,
+   504	            );
+   505	            let b_out = bearing(
+   506	                nodes[curr].lat,
+   507	                nodes[curr].lon,
+   508	                nodes[next].lat,
+   509	                nodes[next].lon,
+   510	            );
+   511
+   512	            let b_in_reverse = (b_in + 180.0).normalize(0.0, 360.0);
+   513	            let delta = b_out - b_in_reverse;
+   514
+   515	            match classify_turn(delta) {
+   516	                "left" => turns.left += 1,
+   517	                "right" => turns.right += 1,
+   518	                "u_turn" => turns.u_turn += 1,
+   519	                _ => turns.straight += 1,
+   520	            }
+   521	        }
+   522	    }
+   523
+   524	    // 9. Compute efficiency
+   525	    let effective_distance_m = total_distance_m - deadhead_distance_m;
+   526	    let efficiency_pct = if total_distance_m > 0.0 {
+   527	        (effective_distance_m / total_distance_m) * 100.0
+   528	    } else {
+   529	        100.0
+   530	    };
+   531
+   532	    // 10. Write route file if requested
+   533	    if let Some(ref route_path) = req.route_file {
+   534	        let route_json = serde_json::json!({
+   535	            "route": circuit,
+   536	            "total_distance_km": total_distance_m / 1000.0,
+   537	            "deadhead_distance_km": deadhead_distance_m / 1000.0,
+   538	            "efficiency_pct": efficiency_pct,
+   539	            "nodes": nodes.iter().enumerate().map(|(i, n)| serde_json::json!({
+   540	                "id": i,
+   541	                "lat": n.lat,
+   542	                "lon": n.lon,
+   543	            })).collect::<Vec<_>>(),
+   544	        });
+   545	        let json_str = serde_json::to_string_pretty(&route_json)?;
+   546	        std::fs::write(route_path, json_str)?;
+   547	    }
+   548
+   549	    let elapsed_ms = start.elapsed().as_millis() as u64;
+   550
+   551	    Ok(OptimizeResult {
+   552	        total_distance_km: total_distance_m / 1000.0,
+   553	        total_segments,
+   554	        deadhead_distance_km: deadhead_distance_m / 1000.0,
+   555	        efficiency_pct,
+   556	        turns,
+   557	        elapsed_ms,
+   558	    })
+   559	}
+   560
+   561	trait NormalizeAngle {
+   562	    fn normalize(self, lower: f64, upper: f64) -> f64;
+   563	}
+   564
+   565	impl NormalizeAngle for f64 {
+   566	    fn normalize(self, lower: f64, upper: f64) -> f64 {
+   567	        let width = upper - lower;
+   568	        let mut val = self;
+   569	        while val < lower {
+   570	            val += width;
+   571	        }
+   572	        while val >= upper {
+   573	            val -= width;
+   574	        }
+   575	        val
+   576	    }
+   577	}
+   578
+   579	/// Adjacency list entry for the graph
+   580	#[derive(Debug, Clone)]
+   581	struct AdjEntry {
+   582	    to: u32,
+   583	    weight_m: f64,
+   584	    edge_idx: usize,
+   585	}
+   586
+   587	#[cfg(test)]
+   588	mod tests {
+   589	    use super::*;
+   590
+   591	    #[test]
+   592	    fn test_classify_turn_straight() {
+   593	        assert_eq!(classify_turn(0.0), "straight");
+   594	        assert_eq!(classify_turn(10.0), "straight");
+   595	        assert_eq!(classify_turn(-10.0), "straight");
+   596	    }
+   597
+   598	    #[test]
+   599	    fn test_classify_turn_left() {
+   600	        assert_eq!(classify_turn(-90.0), "left");
+   601	    }
+   602
+   603	    #[test]
+   604	    fn test_classify_turn_right() {
+   605	        assert_eq!(classify_turn(90.0), "right");
+   606	    }
+   607
+   608	    #[test]
+   609	    fn test_classify_turn_uturn() {
+   610	        assert_eq!(classify_turn(170.0), "u_turn");
+   611	        assert_eq!(classify_turn(-170.0), "u_turn");
+   612	    }
+   613
+   614	    #[test]
+   615	    fn test_haversine_m_known_distance() {
+   616	        // NYC to LA: ~3,935 km → 3,935,000 m
+   617	        let dist = haversine_m(40.7128, -74.0060, 34.0522, -118.2437);
+   618	        assert!((dist - 3_935_000.0).abs() < 10_000.0);
+   619	    }
+   620
+   621	    #[test]
+   622	    fn test_read_rmp_file_invalid() {
+   623	        let result = read_rmp_file(&[]);
+   624	        assert!(result.is_err());
+   625	    }
+   626
+   627	    #[test]
+   628	    fn test_read_rmp_file_bad_magic() {
+   629	        let data = b"BADM\x00\x00\x00\x00\x00\x00\x00\x00";
+   630	        let result = read_rmp_file(data);
+   631	        assert!(result.is_err());
+   632	    }
+   633
+   634	    #[test]
+   635	    fn test_optimize_simple_network() {
+   636	        // Build a simple .rmp file in memory: a triangle with 3 nodes and 3 edges
+   637	        let nodes = vec![
+   638	            (40.7128_f64, -74.006_f64), // node 0
+   639	            (40.748_f64, -73.985_f64),  // node 1
+   640	            (40.678_f64, -73.944_f64),  // node 2
+   641	        ];
+   642	        let edges = vec![
+   643	            (0u32, 1u32, 5000.0f64, 0u8), // edge 0→1, 5km, bidirectional
+   644	            (1u32, 2u32, 6000.0f64, 0u8), // edge 1→2, 6km, bidirectional
+   645	            (2u32, 0u32, 7000.0f64, 0u8), // edge 2→0, 7km, bidirectional
+   646	        ];
+   647
+   648	        let mut buf: Vec<u8> = Vec::new();
+   649	        // Magic
+   650	        buf.extend_from_slice(b"RMP1");
+   651	        // Node count
+   652	        buf.extend_from_slice(&(nodes.len() as u32).to_le_bytes());
+   653	        // Edge count
+   654	        buf.extend_from_slice(&(edges.len() as u32).to_le_bytes());
+   655	        // Nodes
+   656	        for (lat, lon) in &nodes {
+   657	            buf.extend_from_slice(&(*lat).to_le_bytes());
+   658	            buf.extend_from_slice(&(*lon).to_le_bytes());
+   659	        }
+   660	        // Edges
+   661	        for (from, to, weight_m, oneway) in &edges {
+   662	            buf.extend_from_slice(&from.to_le_bytes());
+   663	            buf.extend_from_slice(&to.to_le_bytes());
+   664	            buf.extend_from_slice(&weight_m.to_le_bytes());
+   665	            buf.push(*oneway);
+   666	        }
+   667	        // CRC32
+   668	        let crc = crc32fast::hash(&buf);
+   669	        buf.extend_from_slice(&crc.to_le_bytes());
+   670
+   671	        // Write to temp file
+   672	        let temp_path = "/tmp/v2rmp_test_optimize_simple.rmp";
+   673	        std::fs::write(temp_path, &buf).unwrap();
+   674
+   675	        let req = OptimizeRequest {
+   676	            cache_file: temp_path.to_string(),
+   677	            route_file: None,
+   678	            turn_penalties: TurnPenalties::default(),
+   679	            depot: None,
+   680	            oneway_mode: OnewayMode::Ignore,
+   681	        };
+   682
+   683	        let result = run_optimize(&req).unwrap();
+   684
+   685	        assert!(result.total_distance_km > 0.0);
+   686	        assert!(result.total_segments > 0);
+   687
+   688	        // Clean up
+   689	        let _ = std::fs::remove_file(temp_path);
+   690	    }
+   691	}

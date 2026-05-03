@@ -139,34 +139,14 @@ fn run_overture_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
             .into_iter()
             .filter(|seg| should_include_segment(seg, &req.road_classes))
             .map(segment_to_feature)
-            .collect();
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         tracing::info!(
             "After road class filtering: {} road segments",
             features.len()
         );
 
-        let (nodes, edges, total_km) = build_graph_stats(&features)?;
-
-        let geojson = FeatureCollection {
-            bbox: None,
-            features,
-            foreign_members: None,
-        };
-
-        let geojson_string = serde_json::to_string_pretty(&geojson)?;
-        let output_path = &req.output_path;
-
-        File::create(output_path)?
-            .write_all(geojson_string.as_bytes())
-            .context("Failed to write GeoJSON output")?;
-
-        Ok(ExtractResult {
-            nodes,
-            edges,
-            total_km,
-            output_path: output_path.clone(),
-        })
+        finalize_extraction(features, &req.output_path)
     })
 }
 
@@ -179,7 +159,7 @@ fn should_include_segment(seg: &OvertureSegment, classes: &[RoadClass]) -> bool 
 }
 
 /// Convert an OvertureSegment to a GeoJSON Feature.
-fn segment_to_feature(seg: OvertureSegment) -> Feature {
+fn segment_to_feature(seg: OvertureSegment) -> anyhow::Result<Feature> {
     use crate::core::overture::Geometry as OvertureGeometry;
 
     // Build the GeoJSON geometry value
@@ -198,7 +178,7 @@ fn segment_to_feature(seg: OvertureSegment) -> Feature {
 
     // Convert JSON to geojson::Geometry
     let geometry = GeoJsonGeometry::from_json_value(geometry_json)
-        .expect("Failed to convert JSON to geojson::Geometry");
+        ?;
 
     // Build properties map
     let mut props = serde_json::Map::new();
@@ -225,13 +205,13 @@ fn segment_to_feature(seg: OvertureSegment) -> Feature {
         props.insert("osm_id".to_string(), serde_json::Value::String(osm_id));
     }
 
-    Feature {
+    Ok(Feature {
         id: None,
         bbox: None,
         geometry: Some(geometry),
         properties: Some(props),
         foreign_members: None,
-    }
+    })
 }
 
 /// Build graph statistics from features
@@ -310,6 +290,45 @@ fn haversine_distance_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     EARTH_RADIUS_KM * c
 }
 
+/// Get highway tags from road classes, falling back to all vehicle classes if empty.
+fn get_highway_tags(road_classes: &[RoadClass]) -> Vec<String> {
+    if road_classes.is_empty() {
+        RoadClass::all_vehicle()
+            .iter()
+            .map(|rc| rc.as_str().to_string())
+            .collect()
+    } else {
+        road_classes
+            .iter()
+            .map(|rc| rc.as_str().to_string())
+            .collect()
+    }
+}
+
+/// Finalize extraction by building stats, serializing to GeoJSON, and writing to file.
+fn finalize_extraction(features: Vec<Feature>, output_path: &str) -> Result<ExtractResult> {
+    let (nodes, edges, total_km) = build_graph_stats(&features)?;
+
+    let geojson = FeatureCollection {
+        bbox: None,
+        features,
+        foreign_members: None,
+    };
+
+    let geojson_string = serde_json::to_string_pretty(&geojson)?;
+
+    File::create(output_path)?
+        .write_all(geojson_string.as_bytes())
+        .context("Failed to write GeoJSON output")?;
+
+    Ok(ExtractResult {
+        nodes,
+        edges,
+        total_km,
+        output_path: output_path.to_string(),
+    })
+}
+
 /// Run OSM PBF extraction from local file
 fn run_osm_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
     let pbf_path = req
@@ -335,46 +354,14 @@ fn run_osm_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
 
     let extractor = osm::OsmExtractor::new(pbf_path.clone())?;
 
-    // Convert road classes to highway tags
-    let highway_tags: Vec<String> = if req.road_classes.is_empty() {
-        RoadClass::all_vehicle()
-            .iter()
-            .map(|rc| rc.as_str().to_string())
-            .collect()
-    } else {
-        req.road_classes
-            .iter()
-            .map(|rc| rc.as_str().to_string())
-            .collect()
-    };
-
+    let highway_tags = get_highway_tags(&req.road_classes);
     let segments = extractor.extract_bbox(&bbox, &highway_tags)?;
 
     tracing::info!("Extracted {} segments from OSM PBF", segments.len());
 
-    let features: Vec<Feature> = segments.into_iter().map(osm::segment_to_feature).collect();
+    let features: Vec<Feature> = segments.into_iter().map(osm::segment_to_feature).collect::<anyhow::Result<Vec<_>>>()?;
 
-    let (nodes, edges, total_km) = build_graph_stats(&features)?;
-
-    let geojson = FeatureCollection {
-        bbox: None,
-        features,
-        foreign_members: None,
-    };
-
-    let geojson_string = serde_json::to_string_pretty(&geojson)?;
-    let output_path = &req.output_path;
-
-    File::create(output_path)?
-        .write_all(geojson_string.as_bytes())
-        .context("Failed to write GeoJSON output")?;
-
-    Ok(ExtractResult {
-        nodes,
-        edges,
-        total_km,
-        output_path: output_path.clone(),
-    })
+    finalize_extraction(features, &req.output_path)
 }
 
 #[cfg(test)]
