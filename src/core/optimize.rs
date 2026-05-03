@@ -171,9 +171,7 @@ pub fn read_rmp_file(data: &[u8]) -> anyhow::Result<(Vec<RmpNode>, Vec<RmpEdge>)
     }
 
     // Verify CRC32
-    let expected_crc = u32::from_le_bytes(
-        data[edges_end..edges_end + 4].try_into()?,
-    );
+    let expected_crc = u32::from_le_bytes(data[edges_end..edges_end + 4].try_into()?);
     let actual_crc = crc32fast::hash(&data[..edges_end]);
     if expected_crc != actual_crc {
         anyhow::bail!(
@@ -375,30 +373,25 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     let mut stack = vec![start_node as u32];
     let mut circuit: Vec<u32> = Vec::new();
 
-    while !stack.is_empty() {
-        let v = *stack.last().unwrap() as usize;
-        let mut found = false;
-        while !adj_clone[v].is_empty() {
-            let edge = adj_clone[v].pop().unwrap();
+    while let Some(&v_u32) = stack.last() {
+        let v = v_u32 as usize;
+        if let Some(edge) = adj_clone[v].pop() {
             // Remove reverse edge
-            if let Some(pos) = adj_clone[edge.to as usize]
-                .iter()
-                .position(|e| e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m)
-            {
+            if let Some(pos) = adj_clone[edge.to as usize].iter().position(|e| {
+                e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m
+            }) {
                 adj_clone[edge.to as usize].remove(pos);
             }
             stack.push(edge.to);
-            found = true;
-            break;
-        }
-        if !found {
+        } else {
             stack.pop();
             circuit.push(v as u32);
         }
     }
 
     // circuit is in reverse order; reverse it
-    circuit.reverse();
+    circuit_with_edges.reverse();
+    let circuit: Vec<u32> = circuit_with_edges.iter().map(|(v, _)| *v).collect();
 
     // 7. Compute total distance, deadhead distance, and turn summary
     let mut total_distance_m = 0.0;
@@ -413,17 +406,9 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
 
     let mut edge_traversal_count: HashMap<usize, u32> = HashMap::new();
 
-    // Walk the circuit and accumulate distances
-    for i in 0..circuit.len().saturating_sub(1) {
-        let u = circuit[i];
-        let v = circuit[i + 1];
-
-        let edge_info = adj[u as usize]
-            .iter()
-            .find(|e| e.to == v)
-            .or_else(|| adj[v as usize].iter().find(|e| e.to == u));
-
-        if let Some(e) = edge_info {
+    // Walk the circuit and accumulate distances using stored edge metadata
+    for i in 1..circuit_with_edges.len() {
+        if let Some(e) = &circuit_with_edges[i].1 {
             total_distance_m += e.weight_m;
             total_segments += 1;
 
@@ -589,8 +574,8 @@ mod tests {
     fn test_optimize_simple_network() {
         // Build a simple .rmp file in memory: a triangle with 3 nodes and 3 edges
         let nodes = vec![
-            (40.7128_f64, -74.006_f64),  // node 0
-            (40.748_f64, -73.985_f64),   // node 1
+            (40.7128_f64, -74.006_f64), // node 0
+            (40.748_f64, -73.985_f64),  // node 1
             (40.678_f64, -73.944_f64),  // node 2
         ];
         let edges = vec![

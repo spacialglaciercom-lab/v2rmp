@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use crate::core::optimize::TurnPenalties;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum View {
     Home,
     Extract,
@@ -13,7 +13,7 @@ pub enum View {
     Help,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DataSource {
     Osm,
     Overture,
@@ -74,7 +74,7 @@ pub struct LogEntry {
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LogLevel {
     Info,
     Success,
@@ -99,7 +99,7 @@ pub struct InputMode {
     pub buffer: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InputField {
     BoundingBox,
     InputFile,
@@ -153,7 +153,7 @@ impl App {
     fn scan_cached_maps() -> Vec<String> {
         use std::fs;
         let mut maps = Vec::new();
-        
+
         if let Ok(entries) = fs::read_dir(".") {
             for entry in entries.flatten() {
                 if let Ok(file_name) = entry.file_name().into_string() {
@@ -163,11 +163,10 @@ impl App {
                 }
             }
         }
-        
+
         maps.sort();
         maps
     }
-
 
     pub fn new() -> Self {
         Self {
@@ -231,7 +230,7 @@ impl App {
             return;
         }
 
-        match self.input_mode.field.clone() {
+        match self.input_mode.field {
             InputField::BoundingBox => {
                 let parts: Vec<&str> = value.split(',').collect();
                 if parts.len() == 4 {
@@ -241,16 +240,14 @@ impl App {
                         parts[2].parse::<f64>(),
                         parts[3].parse::<f64>(),
                     ) {
-                        self.bounding_box = Some(BoundingBox {
+                        let bbox = BoundingBox {
                             min_lon,
                             min_lat,
                             max_lon,
                             max_lat,
-                        });
-                        self.log(
-                            LogLevel::Success,
-                            format!("Bounding box set: {}", self.bounding_box.as_ref().unwrap()),
-                        );
+                        };
+                        self.log(LogLevel::Success, format!("Bounding box set: {}", bbox));
+                        self.bounding_box = Some(bbox);
                     } else {
                         self.log(LogLevel::Error, "Invalid coordinates".to_string());
                     }
@@ -302,9 +299,7 @@ impl App {
             InputField::DepotCoordinates => {
                 let parts: Vec<&str> = value.split(',').collect();
                 if parts.len() == 2 {
-                    if let (Ok(lat), Ok(lon)) =
-                        (parts[0].parse::<f64>(), parts[1].parse::<f64>())
-                    {
+                    if let (Ok(lat), Ok(lon)) = (parts[0].parse::<f64>(), parts[1].parse::<f64>()) {
                         self.depot_coords = Some((lat, lon));
                         self.log(
                             LogLevel::Success,
@@ -319,7 +314,7 @@ impl App {
 
     pub fn cancel_input(&mut self) {
         self.input_mode.active = false;
-        self.input_mode.buffer.clear();
+                self.input_mode.buffer.clear();
         self.log(LogLevel::Info, "Input cancelled");
     }
 
