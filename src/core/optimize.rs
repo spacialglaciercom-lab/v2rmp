@@ -63,14 +63,14 @@ pub struct TurnSummary {
 // ── Binary format structures ──────────────────────────────────────────
 
 /// A node in the road network (lat/lon in WGS-84).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct RmpNode {
     pub lat: f64,
     pub lon: f64,
 }
 
 /// An edge in the road network.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct RmpEdge {
     pub from: u32,
     pub to: u32,
@@ -428,25 +428,22 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
 
     // Hierholzer's algorithm
     let mut adj_clone = adj.clone();
-    let mut stack = vec![start_node as u32];
-    let mut circuit: Vec<u32> = Vec::new();
+    let mut stack = vec![(start_node as u32, None)];
+    let mut circuit_with_edges: Vec<(u32, Option<AdjEntry>)> = Vec::new();
 
-    while let Some(&v_u32) = stack.last() {
+    while let Some(&(v_u32, _)) = stack.last() {
         let v = v_u32 as usize;
         if let Some(edge) = adj_clone[v].pop() {
             // Remove reverse edge
-            if let Some(pos) = adj_clone[edge.to as usize]
-                .iter()
-                .position(|e| {
-                    e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m
-                })
-            {
+            if let Some(pos) = adj_clone[edge.to as usize].iter().position(|e| {
+                e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m
+            }) {
                 adj_clone[edge.to as usize].swap_remove(pos);
             }
-            stack.push(edge.to);
+            stack.push((edge.to, Some(edge)));
         } else {
-            stack.pop();
-            circuit.push(v as u32);
+            let (v, e) = stack.pop().unwrap();
+            circuit_with_edges.push((v, e));
         }
     }
 
@@ -577,7 +574,7 @@ impl NormalizeAngle for f64 {
 }
 
 /// Adjacency list entry for the graph
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct AdjEntry {
     to: u32,
     weight_m: f64,

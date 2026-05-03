@@ -146,27 +146,7 @@ fn run_overture_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
             features.len()
         );
 
-        let (nodes, edges, total_km) = build_graph_stats(&features)?;
-
-        let geojson = FeatureCollection {
-            bbox: None,
-            features,
-            foreign_members: None,
-        };
-
-        let geojson_string = serde_json::to_string_pretty(&geojson)?;
-        let output_path = &req.output_path;
-
-        File::create(output_path)?
-            .write_all(geojson_string.as_bytes())
-            .context("Failed to write GeoJSON output")?;
-
-        Ok(ExtractResult {
-            nodes,
-            edges,
-            total_km,
-            output_path: output_path.clone(),
-        })
+        finalize_extraction(features, &req.output_path)
     })
 }
 
@@ -354,6 +334,12 @@ fn run_osm_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
 
     let features: Vec<Feature> = segments.into_iter().map(osm::segment_to_feature).collect();
 
+    finalize_extraction(features, &req.output_path)
+}
+
+
+/// Build graph stats, serialize to GeoJSON, and write to file.
+fn finalize_extraction(features: Vec<Feature>, output_path: &str) -> anyhow::Result<ExtractResult> {
     let (nodes, edges, total_km) = build_graph_stats(&features)?;
 
     let geojson = FeatureCollection {
@@ -363,7 +349,6 @@ fn run_osm_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
     };
 
     let geojson_string = serde_json::to_string_pretty(&geojson)?;
-    let output_path = &req.output_path;
 
     File::create(output_path)?
         .write_all(geojson_string.as_bytes())
@@ -373,10 +358,9 @@ fn run_osm_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
         nodes,
         edges,
         total_km,
-        output_path: output_path.clone(),
+        output_path: output_path.to_string(),
     })
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
