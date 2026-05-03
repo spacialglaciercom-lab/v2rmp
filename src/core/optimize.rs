@@ -438,8 +438,8 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
             }
             stack.push((edge.to, Some(edge)));
         } else {
-            if let Some((node, edge)) = stack.pop() {
-                circuit_with_edges.push((node, edge));
+            if let Some(entry) = stack.pop() {
+                circuit_with_edges.push(entry);
             }
         }
     }
