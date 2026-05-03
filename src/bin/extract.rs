@@ -1,7 +1,5 @@
 use clap::Parser;
-use v2rmp::core::extract::{
-    run_extract, BBoxRequest, ExtractRequest, ExtractSource, RoadClass,
-};
+use v2rmp::core::extract::{run_extract, BBoxRequest, ExtractRequest, ExtractSource, RoadClass};
 
 #[derive(Parser, Debug)]
 #[command(name = "rmpca-extract")]
@@ -45,14 +43,22 @@ fn main() -> anyhow::Result<()> {
     }
     let request = ExtractRequest {
         source,
-        bbox: BBoxRequest { min_lon, min_lat, max_lon, max_lat },
+        bbox: BBoxRequest {
+            min_lon,
+            min_lat,
+            max_lon,
+            max_lat,
+        },
         road_classes: RoadClass::all_vehicle(),
         output_path: args.output.clone(),
         pbf_path: args.pbf_path,
     };
     println!("Extracting road network...");
     println!("  Source: {:?}", request.source);
-    println!("  BBox: [{:.4}, {:.4}, {:.4}, {:.4}]", min_lat, min_lon, max_lat, max_lon);
+    println!(
+        "  BBox: [{:.4}, {:.4}, {:.4}, {:.4}]",
+        min_lat, min_lon, max_lat, max_lon
+    );
     if let Some(ref pbf) = request.pbf_path {
         println!("  PBF file: {}", pbf);
     }

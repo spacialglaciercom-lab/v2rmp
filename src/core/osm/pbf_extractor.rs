@@ -51,27 +51,25 @@ impl OsmExtractor {
         // First pass: collect nodes within bbox
         let file = File::open(&self.pbf_path)
             .context(format!("Failed to open PBF file: {}", self.pbf_path))?;
-        
+
         let reader = ElementReader::new(file);
-        
-        reader.for_each(|element| {
-            match element {
-                Element::Node(node) => {
-                    let lon = node.lon();
-                    let lat = node.lat();
-                    if bbox.contains(lon, lat) {
-                        nodes.insert(node.id(), (lon, lat));
-                    }
+
+        reader.for_each(|element| match element {
+            Element::Node(node) => {
+                let lon = node.lon();
+                let lat = node.lat();
+                if bbox.contains(lon, lat) {
+                    nodes.insert(node.id(), (lon, lat));
                 }
-                Element::DenseNode(node) => {
-                    let lon = node.lon();
-                    let lat = node.lat();
-                    if bbox.contains(lon, lat) {
-                        nodes.insert(node.id(), (lon, lat));
-                    }
-                }
-                _ => {}
             }
+            Element::DenseNode(node) => {
+                let lon = node.lon();
+                let lat = node.lat();
+                if bbox.contains(lon, lat) {
+                    nodes.insert(node.id(), (lon, lat));
+                }
+            }
+            _ => {}
         })?;
 
         tracing::info!("Collected {} nodes within bbox", nodes.len());
@@ -83,24 +81,24 @@ impl OsmExtractor {
         reader.for_each(|element| {
             if let Element::Way(way) = element {
                 // Check if it's a road
-                let mut highway: Option<String> = None;
-                let mut name: Option<String> = None;
-                let mut oneway: Option<String> = None;
-                let mut surface: Option<String> = None;
+                let mut highway_val: Option<&str> = None;
+                let mut name_val: Option<&str> = None;
+                let mut oneway_val: Option<&str> = None;
+                let mut surface_val: Option<&str> = None;
 
                 for (key, value) in way.tags() {
                     match key {
-                        "highway" => highway = Some(value.to_string()),
-                        "name" => name = Some(value.to_string()),
-                        "oneway" => oneway = Some(value.to_string()),
-                        "surface" => surface = Some(value.to_string()),
+                        "highway" => highway_val = Some(value),
+                        "name" => name_val = Some(value),
+                        "oneway" => oneway_val = Some(value),
+                        "surface" => surface_val = Some(value),
                         _ => {}
                     }
                 }
 
                 // Filter by highway tag
-                if let Some(ref hw) = highway {
-                    if !road_classes.is_empty() && !road_classes.contains(hw) {
+                if let Some(hw) = highway_val {
+                    if !road_classes.is_empty() && !road_classes.iter().any(|rc| rc == hw) {
                         return;
                     }
 
@@ -116,10 +114,10 @@ impl OsmExtractor {
                     if geometry.len() >= 2 {
                         segments.push(OsmSegment {
                             id: way.id(),
-                            name,
-                            highway: hw.clone(),
-                            oneway,
-                            surface,
+                            name: name_val.map(|s| s.to_string()),
+                            highway: hw.to_string(),
+                            oneway: oneway_val.map(|s| s.to_string()),
+                            surface: surface_val.map(|s| s.to_string()),
                             geometry,
                         });
                     }
@@ -137,8 +135,8 @@ impl OsmExtractor {
 pub fn segment_to_feature(seg: OsmSegment) -> Feature {
     let coordinates: Vec<Vec<f64>> = seg
         .geometry
-        .iter()
-        .map(|(lon, lat)| vec![*lon, *lat])
+        .into_iter()
+        .map(|(lon, lat)| vec![lon, lat])
         .collect();
 
     let geometry = GeoJsonGeometry {
@@ -149,16 +147,16 @@ pub fn segment_to_feature(seg: OsmSegment) -> Feature {
 
     let mut props = serde_json::Map::new();
     props.insert("id".to_string(), serde_json::Value::Number(seg.id.into()));
-    props.insert("class".to_string(), serde_json::Value::String(seg.highway.clone()));
-    
-    if let Some(ref name) = seg.name {
-        props.insert("name".to_string(), serde_json::Value::String(name.clone()));
+    props.insert("class".to_string(), serde_json::Value::String(seg.highway));
+
+    if let Some(name) = seg.name {
+        props.insert("name".to_string(), serde_json::Value::String(name));
     }
-    if let Some(ref oneway) = seg.oneway {
-        props.insert("oneway".to_string(), serde_json::Value::String(oneway.clone()));
+    if let Some(oneway) = seg.oneway {
+        props.insert("oneway".to_string(), serde_json::Value::String(oneway));
     }
-    if let Some(ref surface) = seg.surface {
-        props.insert("surface".to_string(), serde_json::Value::String(surface.clone()));
+    if let Some(surface) = seg.surface {
+        props.insert("surface".to_string(), serde_json::Value::String(surface));
     }
 
     Feature {
@@ -200,7 +198,7 @@ mod tests {
 
         let feature = segment_to_feature(seg);
         assert!(feature.geometry.is_some());
-        
+
         let props = feature.properties.unwrap();
         assert_eq!(props.get("class").unwrap().as_str().unwrap(), "residential");
         assert_eq!(props.get("name").unwrap().as_str().unwrap(), "Main Street");

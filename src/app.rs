@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use crate::core::optimize::TurnPenalties;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum View {
     Home,
     Extract,
@@ -13,7 +13,7 @@ pub enum View {
     Help,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DataSource {
     Osm,
     Overture,
@@ -74,7 +74,7 @@ pub struct LogEntry {
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LogLevel {
     Info,
     Success,
@@ -99,7 +99,7 @@ pub struct InputMode {
     pub buffer: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InputField {
     BoundingBox,
     InputFile,
@@ -153,7 +153,7 @@ impl App {
     fn scan_cached_maps() -> Vec<String> {
         use std::fs;
         let mut maps = Vec::new();
-        
+
         if let Ok(entries) = fs::read_dir(".") {
             for entry in entries.flatten() {
                 if let Ok(file_name) = entry.file_name().into_string() {
@@ -163,11 +163,10 @@ impl App {
                 }
             }
         }
-        
+
         maps.sort();
         maps
     }
-
 
     pub fn new() -> Self {
         Self {
@@ -231,7 +230,7 @@ impl App {
             return;
         }
 
-        match self.input_mode.field.clone() {
+        match self.input_mode.field {
             InputField::BoundingBox => {
                 let parts: Vec<&str> = value.split(',').collect();
                 if parts.len() == 4 {
@@ -303,9 +302,7 @@ impl App {
             InputField::DepotCoordinates => {
                 let parts: Vec<&str> = value.split(',').collect();
                 if parts.len() == 2 {
-                    if let (Ok(lat), Ok(lon)) =
-                        (parts[0].parse::<f64>(), parts[1].parse::<f64>())
-                    {
+                    if let (Ok(lat), Ok(lon)) = (parts[0].parse::<f64>(), parts[1].parse::<f64>()) {
                         self.depot_coords = Some((lat, lon));
                         self.log(
                             LogLevel::Success,
@@ -320,7 +317,7 @@ impl App {
 
     pub fn cancel_input(&mut self) {
         self.input_mode.active = false;
-        self.input_mode.buffer.clear();
+                self.input_mode.buffer.clear();
         self.log(LogLevel::Info, "Input cancelled");
     }
 
@@ -364,5 +361,51 @@ impl App {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_app_initialization() {
+        let app = App::new();
+
+        // Basic state
+        assert!(app.running);
+        assert_eq!(app.current_view, View::Home);
+        assert_eq!(app.workflow_selection, 0);
+        assert!(app.log_entries.is_empty());
+        assert_eq!(app.log_scroll, 0);
+
+        // Extract state
+        assert_eq!(app.data_source, DataSource::Osm);
+        assert!(app.bounding_box.is_none());
+        assert_eq!(app.extract_status, Status::Ready);
+
+        // Compile state
+        assert!(app.input_file.is_none());
+        assert!(app.output_file.is_none());
+        assert_eq!(app.compile_status, Status::Ready);
+
+        // Optimize state
+        assert!(app.cache_file.is_none());
+        assert!(app.route_file.is_none());
+        assert_eq!(app.turn_penalties.left, 1.0);
+        assert_eq!(app.turn_penalties.right, 0.0);
+        assert_eq!(app.turn_penalties.u_turn, 5.0);
+        assert!(app.depot_coords.is_none());
+        assert_eq!(app.optimize_status, Status::Ready);
+
+        // Browse state
+        // app.cached_maps depends on filesystem, but should be a Vec
+        assert!(app.saved_routes.is_empty());
+        assert_eq!(app.browse_selection, 0);
+
+        // Input mode
+        assert!(!app.input_mode.active);
+        assert_eq!(app.input_mode.field, InputField::BoundingBox);
+        assert!(app.input_mode.buffer.is_empty());
     }
 }
