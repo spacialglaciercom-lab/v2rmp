@@ -369,22 +369,23 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     };
 
     // Hierholzer's algorithm
-    // We consume adj in-place to avoid cloning the potentially large adjacency list.
-    let mut stack = vec![(start_node as u32, None::<AdjEntry>)];
-    let mut circuit_with_edges: Vec<(u32, Option<AdjEntry>)> = Vec::new();
+    let mut adj_clone = adj.clone();
+    let mut stack = vec![start_node as u32];
+    let mut circuit: Vec<u32> = Vec::new();
 
-    while let Some(&(v, _)) = stack.last() {
-        let v_idx = v as usize;
-        if let Some(edge) = adj[v_idx].pop() {
+    while let Some(&v_u32) = stack.last() {
+        let v = v_u32 as usize;
+        if let Some(edge) = adj_clone[v].pop() {
             // Remove reverse edge
             if let Some(pos) = adj_clone[edge.to as usize].iter().position(|e| {
                 e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m
             }) {
                 adj_clone[edge.to as usize].remove(pos);
             }
-            stack.push((edge.to, Some(edge)));
+            stack.push(edge.to);
         } else {
-            circuit_with_edges.push(stack.pop().unwrap());
+            stack.pop();
+            circuit.push(v as u32);
         }
     }
 
