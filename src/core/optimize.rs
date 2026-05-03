@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::time::Instant;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct TurnPenalties {
     pub left: f64,
     pub right: f64,
@@ -47,7 +47,7 @@ pub struct OptimizeResult {
     pub elapsed_ms: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct TurnSummary {
     pub left: u32,
     pub right: u32,
@@ -437,12 +437,11 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
                 adj_clone[to_idx].swap_remove(pos);
             }
             stack.push((edge.to, Some(edge)));
-        } else if let Some(node_data) = stack.pop() {
-            circuit_with_edges.push(node_data);
+        } else {
+            let (v_final, edge_final) = stack.pop().unwrap();
+            circuit_with_edges.push((v_final, edge_final));
         }
     }
-
-    // circuit is in reverse order; reverse it
     circuit_with_edges.reverse();
     let circuit: Vec<u32> = circuit_with_edges.iter().map(|(v, _)| *v).collect();
 
