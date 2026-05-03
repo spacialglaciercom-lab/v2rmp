@@ -93,7 +93,6 @@ impl std::fmt::Display for LogLevel {
     }
 }
 
-#[allow(dead_code)]
 pub struct InputMode {
     pub active: bool,
     pub field: InputField,
@@ -101,7 +100,6 @@ pub struct InputMode {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
 pub enum InputField {
     BoundingBox,
     InputFile,
