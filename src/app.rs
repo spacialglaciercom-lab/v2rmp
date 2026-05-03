@@ -246,7 +246,10 @@ impl App {
                             max_lon,
                             max_lat,
                         };
-                        self.log(LogLevel::Success, format!("Bounding box set: {}", bbox));
+                        self.log(
+                            LogLevel::Success,
+                            format!("Bounding box set: {bbox}"),
+                        );
                         self.bounding_box = Some(bbox);
                     } else {
                         self.log(LogLevel::Error, "Invalid coordinates".to_string());
