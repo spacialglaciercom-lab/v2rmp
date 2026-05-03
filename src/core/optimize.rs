@@ -375,11 +375,9 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     let mut stack = vec![start_node as u32];
     let mut circuit: Vec<u32> = Vec::new();
 
-    while !stack.is_empty() {
-        let v = *stack.last().unwrap() as usize;
-        let mut found = false;
-        while !adj_clone[v].is_empty() {
-            let edge = adj_clone[v].pop().unwrap();
+    while let Some(&v_u32) = stack.last() {
+        let v = v_u32 as usize;
+        if let Some(edge) = adj_clone[v].pop() {
             // Remove reverse edge
             if let Some(pos) = adj_clone[edge.to as usize]
                 .iter()
@@ -388,10 +386,7 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
                 adj_clone[edge.to as usize].remove(pos);
             }
             stack.push(edge.to);
-            found = true;
-            break;
-        }
-        if !found {
+        } else {
             stack.pop();
             circuit.push(v as u32);
         }
