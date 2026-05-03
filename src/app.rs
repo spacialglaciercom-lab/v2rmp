@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use crate::core::optimize::TurnPenalties;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum View {
     Home,
     Extract,
@@ -13,7 +13,7 @@ pub enum View {
     Help,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DataSource {
     Osm,
     Overture,
@@ -74,7 +74,7 @@ pub struct LogEntry {
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LogLevel {
     Info,
     Success,
@@ -99,7 +99,7 @@ pub struct InputMode {
     pub buffer: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InputField {
     BoundingBox,
     InputFile,
@@ -231,7 +231,7 @@ impl App {
             return;
         }
 
-        match self.input_mode.field.clone() {
+        match self.input_mode.field {
             InputField::BoundingBox => {
                 let parts: Vec<&str> = value.split(',').collect();
                 if parts.len() == 4 {
