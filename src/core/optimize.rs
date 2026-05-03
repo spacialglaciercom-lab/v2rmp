@@ -437,8 +437,9 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
             }
             stack.push((edge.to, Some(edge)));
         } else {
-            let (v, e) = stack.pop().unwrap();
-            circuit_with_edges.push((v, e));
+            if let Some(entry) = stack.pop() {
+                circuit_with_edges.push(entry);
+            }
         }
     }
     // circuit is in reverse order; reverse it
