@@ -377,10 +377,11 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         let v = v_u32 as usize;
         if let Some(edge) = adj_clone[v].pop() {
             // Remove reverse edge
-            if let Some(pos) = adj_clone[edge.to as usize].iter().position(|e| {
-                e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m
-            }) {
-                adj_clone[edge.to as usize].remove(pos);
+            if let Some(pos) = adj_clone[edge.to as usize]
+                .iter()
+                .position(|e| e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m)
+            {
+                adj_clone[edge.to as usize].swap_remove(pos);
             }
             stack.push(edge.to);
         } else {
