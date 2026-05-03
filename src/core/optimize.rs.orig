@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::time::Instant;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnPenalties {
     pub left: f64,
     pub right: f64,
@@ -29,12 +29,17 @@ pub struct OptimizeRequest {
     pub oneway_mode: OnewayMode,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum OnewayMode {
     Ignore,
-    #[default]
     Respect,
     Reverse,
+}
+
+impl Default for OnewayMode {
+    fn default() -> Self {
+        Self::Respect
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,7 +52,7 @@ pub struct OptimizeResult {
     pub elapsed_ms: u64,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnSummary {
     pub left: u32,
     pub right: u32,
@@ -58,6 +63,7 @@ pub struct TurnSummary {
 // ── Binary format structures ──────────────────────────────────────────
 
 /// A node in the road network (lat/lon in WGS-84).
+#[derive(Debug, Clone)]
 #[derive(Debug, Clone, Copy)]
 pub struct RmpNode {
     pub lat: f64,
@@ -65,7 +71,7 @@ pub struct RmpNode {
 }
 
 /// An edge in the road network.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct RmpEdge {
     pub from: u32,
     pub to: u32,
@@ -94,7 +100,7 @@ pub fn classify_turn(bearing_delta: f64) -> &'static str {
         "straight"
     } else if d > 45.0 && d <= 135.0 {
         "right"
-    } else if (-135.0..-45.0).contains(&d) {
+    } else if d < -45.0 && d >= -135.0 {
         "left"
     } else {
         "u_turn"
@@ -304,7 +310,7 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
 
     // Sort odd vertices by latitude for spatial pruning
     let mut sorted_odd = odd_vertices.clone();
-    sorted_odd.sort_by(|&a, &b| nodes[a].lat.partial_cmp(&nodes[b].lat).unwrap_or(std::cmp::Ordering::Equal));
+    sorted_odd.sort_by(|&a, &b| nodes[a].lat.partial_cmp(&nodes[b].lat).unwrap());
 
     // Map each node index to its position in the sorted_odd list
     let mut pos_in_sorted = vec![0usize; n];
@@ -430,24 +436,26 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         let v = v_u32 as usize;
         if let Some(edge) = adj_clone[v].pop() {
             // Remove reverse edge
-            let to_idx = edge.to as usize;
-            if let Some(pos) = adj_clone[to_idx].iter().position(|e| {
-                e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m
-            }) {
-                adj_clone[to_idx].swap_remove(pos);
+            if let Some(pos) = adj_clone[edge.to as usize]
+                .iter()
+                .position(|e| {
+                    e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m
+                })
+            {
+                adj_clone[edge.to as usize].swap_remove(pos);
             }
             stack.push((edge.to, Some(edge)));
         } else {
-            if let Some(entry) = stack.pop() {
-                circuit_with_edges.push(entry);
-            }
+            let (v_u32, edge_opt) = stack.pop().unwrap();
+            circuit_with_edges.push((v_u32, edge_opt));
         }
     }
+
+    // circuit is in reverse order; reverse it
     circuit_with_edges.reverse();
     let circuit: Vec<u32> = circuit_with_edges.iter().map(|(v, _)| *v).collect();
 
     // 7. Compute total distance, deadhead distance, and turn summary
-
     let mut total_distance_m = 0.0;
     let mut deadhead_distance_m = 0.0;
     let mut total_segments = 0usize;
@@ -461,8 +469,8 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     let mut edge_traversal_count: HashMap<usize, u32> = HashMap::new();
 
     // Walk the circuit and accumulate distances using stored edge metadata
-    for (_, edge_opt) in circuit_with_edges.iter().skip(1) {
-        if let Some(e) = edge_opt {
+    for i in 1..circuit_with_edges.len() {
+        if let Some(e) = &circuit_with_edges[i].1 {
             total_distance_m += e.weight_m;
             total_segments += 1;
 
