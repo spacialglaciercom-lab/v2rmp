@@ -426,7 +426,7 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     let mut stack = vec![start_node as u32];
     let mut circuit_with_edges: Vec<(u32, Option<AdjEntry>)> = Vec::new();
 
-    while let Some(&(v_u32, _)) = stack.last() {
+    while let Some(&v_u32) = stack.last() {
         let v = v_u32 as usize;
         if let Some(edge) = adj[v].pop() {
             // Remove reverse edge
@@ -435,7 +435,7 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
             }) {
                 adj_clone[edge.to as usize].swap_remove(pos);
             }
-            circuit_with_edges.push((v as u32, Some(edge.clone())));
+            circuit_with_edges.push((v as u32, Some(edge)));
             stack.push(edge.to);
         } else {
             stack.pop();
@@ -444,7 +444,6 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     }
     // circuit is in reverse order; reverse it
     circuit_with_edges.reverse();
-
 
     let mut total_distance_m = 0.0;
     let mut deadhead_distance_m = 0.0;

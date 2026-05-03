@@ -1,12 +1,12 @@
 [package]
 name = "v2rmp"
-version = "0.1.1"
+version = "0.3.6"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Spacial Glacier Lab"]
 description = "A powerful Terminal User Interface (TUI) for route optimization using the Chinese Postman Problem algorithm"
 documentation = "https://docs.rs/v2rmp"
-homepage = "https://github.com/yourusername/v2rmp"
-repository = "https://github.com/yourusername/v2rmp"
+homepage = "https://github.com/spacialglaciercom-lab/v2rmp"
+repository = "https://github.com/spacialglaciercom-lab/v2rmp"
 license = "MIT OR Apache-2.0"
 keywords = ["route", "optimization", "tui", "cpp", "graph"]
 categories = ["command-line-utilities", "algorithms", "visualization"]

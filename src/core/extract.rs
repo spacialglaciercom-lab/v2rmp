@@ -177,8 +177,7 @@ fn segment_to_feature(seg: OvertureSegment) -> anyhow::Result<Feature> {
     };
 
     // Convert JSON to geojson::Geometry
-    let geometry = GeoJsonGeometry::from_json_value(geometry_json)
-        ?;
+    let geometry = GeoJsonGeometry::from_json_value(geometry_json)?;
 
     // Build properties map
     let mut props = serde_json::Map::new();
@@ -359,35 +358,14 @@ fn run_osm_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
 
     tracing::info!("Extracted {} segments from OSM PBF", segments.len());
 
-    let features: Vec<Feature> = segments.into_iter().map(osm::segment_to_feature).collect();
+    let features: Vec<Feature> = segments
+        .into_iter()
+        .map(osm::segment_to_feature)
+        .collect::<Result<Vec<_>, _>>()?;
 
     finalize_extraction(features, &req.output_path)
 }
 
-
-/// Build graph stats, serialize to GeoJSON, and write to file.
-fn finalize_extraction(features: Vec<Feature>, output_path: &str) -> anyhow::Result<ExtractResult> {
-    let (nodes, edges, total_km) = build_graph_stats(&features)?;
-
-    let geojson = FeatureCollection {
-        bbox: None,
-        features,
-        foreign_members: None,
-    };
-
-    let geojson_string = serde_json::to_string_pretty(&geojson)?;
-
-    File::create(output_path)?
-        .write_all(geojson_string.as_bytes())
-        .context("Failed to write GeoJSON output")?;
-
-    Ok(ExtractResult {
-        nodes,
-        edges,
-        total_km,
-        output_path: output_path.to_string(),
-    })
-}
 #[cfg(test)]
 mod tests {
     use super::*;

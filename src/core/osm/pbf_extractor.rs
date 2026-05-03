@@ -210,7 +210,10 @@ mod tests {
     fn test_osm_extractor_new_invalid_path() {
         let result = OsmExtractor::new("non_existent_file.osm.pbf".to_string());
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("PBF file not found"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("PBF file not found"));
     }
 
     #[test]
