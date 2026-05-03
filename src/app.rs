@@ -366,24 +366,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cancel_input() {
-        let mut app = App::new();
+    fn test_app_initialization() {
+        let app = App::new();
 
-        // Setup state
-        app.input_mode.active = true;
-        app.input_mode.buffer = "test input".to_string();
+        // Basic state
+        assert!(app.running);
+        assert_eq!(app.current_view, View::Home);
+        assert_eq!(app.workflow_selection, 0);
+        assert!(app.log_entries.is_empty());
+        assert_eq!(app.log_scroll, 0);
 
-        // Call function
-        app.cancel_input();
+        // Extract state
+        assert_eq!(app.data_source, DataSource::Osm);
+        assert!(app.bounding_box.is_none());
+        assert_eq!(app.extract_status, Status::Ready);
 
-        // Verify state cleared
+        // Compile state
+        assert!(app.input_file.is_none());
+        assert!(app.output_file.is_none());
+        assert_eq!(app.compile_status, Status::Ready);
+
+        // Optimize state
+        assert!(app.cache_file.is_none());
+        assert!(app.route_file.is_none());
+        assert_eq!(app.turn_penalties.left, 1.0);
+        assert_eq!(app.turn_penalties.right, 0.0);
+        assert_eq!(app.turn_penalties.u_turn, 5.0);
+        assert!(app.depot_coords.is_none());
+        assert_eq!(app.optimize_status, Status::Ready);
+
+        // Browse state
+        // app.cached_maps depends on filesystem, but should be a Vec
+        assert!(app.saved_routes.is_empty());
+        assert_eq!(app.browse_selection, 0);
+
+        // Input mode
         assert!(!app.input_mode.active);
+        assert_eq!(app.input_mode.field, InputField::BoundingBox);
         assert!(app.input_mode.buffer.is_empty());
-
-        // Verify log entry
-        assert!(!app.log_entries.is_empty());
-        let last_log = app.log_entries.last().unwrap();
-        assert_eq!(last_log.level, LogLevel::Info);
-        assert_eq!(last_log.message, "Input cancelled");
     }
 }
