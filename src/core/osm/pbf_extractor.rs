@@ -30,6 +30,7 @@ pub struct OsmSegment {
     pub geometry: Vec<(f64, f64)>, // lon, lat pairs
 }
 
+#[derive(Debug)]
 pub struct OsmExtractor {
     pbf_path: String,
 }
@@ -203,5 +204,19 @@ mod tests {
         assert_eq!(props.get("class").unwrap().as_str().unwrap(), "residential");
         assert_eq!(props.get("name").unwrap().as_str().unwrap(), "Main Street");
         assert_eq!(props.get("oneway").unwrap().as_str().unwrap(), "yes");
+    }
+
+    #[test]
+    fn test_osm_extractor_new_invalid_path() {
+        let result = OsmExtractor::new("non_existent_file.osm.pbf".to_string());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("PBF file not found"));
+    }
+
+    #[test]
+    fn test_osm_extractor_new_valid_path() {
+        // Use the monaco.osm.pbf file that exists in the root
+        let result = OsmExtractor::new("monaco.osm.pbf".to_string());
+        assert!(result.is_ok());
     }
 }
