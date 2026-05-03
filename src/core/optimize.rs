@@ -309,7 +309,7 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
 
     // Sort odd vertices by latitude for spatial pruning
     let mut sorted_odd = odd_vertices.clone();
-    sorted_odd.sort_by(|&a, &b| nodes[a].lat.partial_cmp(&nodes[b].lat).unwrap());
+    sorted_odd.sort_by(|&a, &b| nodes[a].lat.partial_cmp(&nodes[b].lat).unwrap_or(std::cmp::Ordering::Equal));
 
     // Map each node index to its position in the sorted_odd list
     let mut pos_in_sorted = vec![0usize; n];
@@ -428,10 +428,10 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
 
     // Hierholzer's algorithm
     let mut adj_clone = adj.clone();
-    let mut stack = vec![start_node as u32];
-    let mut circuit: Vec<u32> = Vec::new();
+    let mut stack: Vec<(u32, Option<AdjEntry>)> = vec![(start_node as u32, None)];
+    let mut circuit_with_edges: Vec<(u32, Option<AdjEntry>)> = Vec::new();
 
-    while let Some(&v_u32) = stack.last() {
+    while let Some(&(v_u32, _)) = stack.last() {
         let v = v_u32 as usize;
         if let Some(edge) = adj_clone[v].pop() {
             // Remove reverse edge
@@ -443,10 +443,10 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
             {
                 adj_clone[edge.to as usize].swap_remove(pos);
             }
-            stack.push(edge.to);
+            stack.push((edge.to, Some(edge)));
         } else {
-            stack.pop();
-            circuit.push(v as u32);
+            let top = stack.pop().unwrap();
+            circuit_with_edges.push(top);
         }
     }
 
