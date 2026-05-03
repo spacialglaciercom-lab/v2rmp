@@ -423,31 +423,27 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
 
     // Hierholzer's algorithm
     let mut adj_clone = adj.clone();
-    let mut circuit_with_edges: Vec<(u32, Option<AdjEntry>)> = Vec::new();
     let mut stack = vec![(start_node as u32, None)];
+    let mut circuit_with_edges: Vec<(u32, Option<AdjEntry>)> = Vec::new();
 
-    while let Some(&(v_u32, edge_in)) = stack.last() {
+    while let Some(&(v_u32, _)) = stack.last() {
         let v = v_u32 as usize;
         if let Some(edge) = adj_clone[v].pop() {
-            if let Some(pos) = adj_clone[edge.to as usize]
-                .iter()
-                .position(|e| {
-                    e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m
-                })
-            {
+            // Remove reverse edge
+            if let Some(pos) = adj_clone[edge.to as usize].iter().position(|e| {
+                e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m
+            }) {
                 adj_clone[edge.to as usize].swap_remove(pos);
             }
             stack.push((edge.to, Some(edge)));
         } else {
-            stack.pop();
-            circuit_with_edges.push((v as u32, edge_in));
+            let (v, e) = stack.pop().unwrap();
+            circuit_with_edges.push((v, e));
         }
     }
     // circuit is in reverse order; reverse it
     circuit_with_edges.reverse();
 
-
-    // 7. Compute total distance, deadhead distance, and turn summary
 
     let mut total_distance_m = 0.0;
     let mut deadhead_distance_m = 0.0;
