@@ -132,7 +132,7 @@ impl OsmExtractor {
 }
 
 /// Convert OSM segment to GeoJSON Feature
-pub fn segment_to_feature(seg: OsmSegment) -> Feature {
+pub fn segment_to_feature(seg: OsmSegment) -> anyhow::Result<Feature> {
     let coordinates: Vec<Vec<f64>> = seg
         .geometry
         .into_iter()
@@ -159,13 +159,13 @@ pub fn segment_to_feature(seg: OsmSegment) -> Feature {
         props.insert("surface".to_string(), serde_json::Value::String(surface));
     }
 
-    Feature {
+    Ok(Feature {
         id: None,
         bbox: None,
         geometry: Some(geometry),
         properties: Some(props),
         foreign_members: None,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -196,7 +196,7 @@ mod tests {
             geometry: vec![(-74.0, 40.7), (-73.9, 40.8)],
         };
 
-        let feature = segment_to_feature(seg);
+        let feature = segment_to_feature(seg).unwrap();
         assert!(feature.geometry.is_some());
 
         let props = feature.properties.unwrap();
