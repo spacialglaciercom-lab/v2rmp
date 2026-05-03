@@ -240,6 +240,11 @@ impl App {
                         parts[2].parse::<f64>(),
                         parts[3].parse::<f64>(),
                     ) {
+                        if min_lon >= max_lon || min_lat >= max_lat {
+                            self.log(LogLevel::Error, "Invalid bounding box: min must be less than max".to_string());
+                            self.input_mode.active = false;
+                            return;
+                        }
                         let bbox = BoundingBox {
                             min_lon,
                             min_lat,
@@ -407,5 +412,25 @@ mod tests {
         assert!(!app.input_mode.active);
         assert_eq!(app.input_mode.field, InputField::BoundingBox);
         assert!(app.input_mode.buffer.is_empty());
+    }
+
+    #[test]
+    fn test_invalid_bbox_input() {
+        let mut app = App::new();
+        app.input_mode.field = InputField::BoundingBox;
+
+        // Invalid: min > max
+        app.input_mode.buffer = "10.0,20.0,5.0,25.0".to_string();
+        app.confirm_input();
+        assert!(app.bounding_box.is_none());
+        assert_eq!(app.log_entries.last().unwrap().level, LogLevel::Error);
+        assert!(app.log_entries.last().unwrap().message.contains("Invalid bounding box"));
+
+        // Valid
+        app.input_mode.active = true;
+        app.input_mode.buffer = "5.0,15.0,10.0,25.0".to_string();
+        app.confirm_input();
+        assert!(app.bounding_box.is_some());
+        assert_eq!(app.log_entries.last().unwrap().level, LogLevel::Success);
     }
 }
