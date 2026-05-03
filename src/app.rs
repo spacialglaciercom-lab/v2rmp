@@ -408,4 +408,120 @@ mod tests {
         assert_eq!(app.input_mode.field, InputField::BoundingBox);
         assert!(app.input_mode.buffer.is_empty());
     }
+
+    #[test]
+    fn test_confirm_input_empty() {
+        let mut app = App::new();
+        app.input_mode.active = true;
+        app.input_mode.buffer = "  ".to_string();
+        app.confirm_input();
+        assert!(!app.input_mode.active);
+    }
+
+    #[test]
+    fn test_confirm_input_bounding_box() {
+        let mut app = App::new();
+        app.start_input(InputField::BoundingBox);
+
+        // Valid
+        app.input_mode.buffer = "1.0,2.0,3.0,4.0".to_string();
+        app.confirm_input();
+        assert!(app.bounding_box.is_some());
+        let bbox = app.bounding_box.as_ref().unwrap();
+        assert_eq!(bbox.min_lon, 1.0);
+        assert_eq!(bbox.min_lat, 2.0);
+        assert_eq!(bbox.max_lon, 3.0);
+        assert_eq!(bbox.max_lat, 4.0);
+        assert!(!app.input_mode.active);
+
+        // Invalid numeric
+        app.start_input(InputField::BoundingBox);
+        app.input_mode.buffer = "1.0,abc,3.0,4.0".to_string();
+        app.bounding_box = None;
+        app.confirm_input();
+        assert!(app.bounding_box.is_none());
+
+        // Invalid format
+        app.start_input(InputField::BoundingBox);
+        app.input_mode.buffer = "1.0,2.0,3.0".to_string();
+        app.confirm_input();
+        assert!(app.bounding_box.is_none());
+    }
+
+    #[test]
+    fn test_confirm_input_files() {
+        let mut app = App::new();
+
+        // InputFile + OutputFile derivation
+        app.start_input(InputField::InputFile);
+        app.input_mode.buffer = "map.geojson".to_string();
+        app.confirm_input();
+        assert_eq!(app.input_file, Some("map.geojson".to_string()));
+        assert_eq!(app.output_file, Some("map.rmp".to_string()));
+
+        // OutputFile manual override
+        app.start_input(InputField::OutputFile);
+        app.input_mode.buffer = "custom.rmp".to_string();
+        app.confirm_input();
+        assert_eq!(app.output_file, Some("custom.rmp".to_string()));
+
+        // CacheFile
+        app.start_input(InputField::CacheFile);
+        app.input_mode.buffer = "cache.rmp".to_string();
+        app.confirm_input();
+        assert_eq!(app.cache_file, Some("cache.rmp".to_string()));
+
+        // RouteFile
+        app.start_input(InputField::RouteFile);
+        app.input_mode.buffer = "route.json".to_string();
+        app.confirm_input();
+        assert_eq!(app.route_file, Some("route.json".to_string()));
+    }
+
+    #[test]
+    fn test_confirm_input_penalties() {
+        let mut app = App::new();
+
+        // Left
+        app.start_input(InputField::LeftTurnPenalty);
+        app.input_mode.buffer = "2.5".to_string();
+        app.confirm_input();
+        assert_eq!(app.turn_penalties.left, 2.5);
+
+        // Right
+        app.start_input(InputField::RightTurnPenalty);
+        app.input_mode.buffer = "0.5".to_string();
+        app.confirm_input();
+        assert_eq!(app.turn_penalties.right, 0.5);
+
+        // U-turn
+        app.start_input(InputField::UTurnPenalty);
+        app.input_mode.buffer = "10.0".to_string();
+        app.confirm_input();
+        assert_eq!(app.turn_penalties.u_turn, 10.0);
+
+        // Invalid numeric
+        app.start_input(InputField::LeftTurnPenalty);
+        app.input_mode.buffer = "invalid".to_string();
+        app.confirm_input();
+        assert_eq!(app.turn_penalties.left, 2.5); // Should remain unchanged
+    }
+
+    #[test]
+    fn test_confirm_input_depot() {
+        let mut app = App::new();
+
+        // Valid
+        app.start_input(InputField::DepotCoordinates);
+        app.input_mode.buffer = "45.0,-122.0".to_string();
+        app.confirm_input();
+        assert_eq!(app.depot_coords, Some((45.0, -122.0)));
+
+        // Invalid format
+        app.start_input(InputField::DepotCoordinates);
+        app.input_mode.buffer = "45.0".to_string();
+        app.depot_coords = None;
+        app.confirm_input();
+        assert!(app.depot_coords.is_none());
+    }
 }
