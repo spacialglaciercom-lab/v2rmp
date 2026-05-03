@@ -241,16 +241,14 @@ impl App {
                         parts[2].parse::<f64>(),
                         parts[3].parse::<f64>(),
                     ) {
-                        self.bounding_box = Some(BoundingBox {
+                        let bbox = BoundingBox {
                             min_lon,
                             min_lat,
                             max_lon,
                             max_lat,
-                        });
-                        self.log(
-                            LogLevel::Success,
-                            format!("Bounding box set: {}", self.bounding_box.as_ref().unwrap()),
-                        );
+                        };
+                        self.log(LogLevel::Success, format!("Bounding box set: {}", bbox));
+                        self.bounding_box = Some(bbox);
                     } else {
                         self.log(LogLevel::Error, "Invalid coordinates".to_string());
                     }
