@@ -302,7 +302,10 @@ mod tests {
 
         let result = run_compile(&req);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Failed to open input GeoJSON"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Failed to open input GeoJSON"));
     }
 
     #[test]
@@ -319,7 +322,10 @@ mod tests {
 
         let result = run_compile(&req);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Failed to parse GeoJSON FeatureCollection"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Failed to parse GeoJSON FeatureCollection"));
 
         let _ = std::fs::remove_file(input_path);
     }
