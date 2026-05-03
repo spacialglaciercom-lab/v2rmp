@@ -407,5 +407,28 @@ mod tests {
         assert!(!app.input_mode.active);
         assert_eq!(app.input_mode.field, InputField::BoundingBox);
         assert!(app.input_mode.buffer.is_empty());
+
+    }
+
+    #[test]
+    fn test_log_truncation() {
+        let mut app = App::new();
+
+        // Add 501 entries
+        for i in 0..501 {
+            app.log(LogLevel::Info, format!("Message {}", i));
+        }
+
+        // Verify length is capped at 500
+        assert_eq!(app.log_entries.len(), 500);
+
+        // Verify oldest was removed (first entry should be "Message 1")
+        assert_eq!(app.log_entries[0].message, "Message 1");
+
+        // Verify latest is correct
+        assert_eq!(app.log_entries[499].message, "Message 500");
+
+        // Verify scroll position
+        assert_eq!(app.log_scroll, 499);
     }
 }

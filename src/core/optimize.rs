@@ -428,13 +428,12 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
 
     // Hierholzer's algorithm
     let mut adj_clone = adj.clone();
-    let mut stack = vec![start_node as u32];
-    let mut circuit: Vec<u32> = Vec::new();
+    let mut stack: Vec<(u32, Option<AdjEntry>)> = vec![(start_node as u32, None)];
+    let mut circuit_with_edges: Vec<(u32, Option<AdjEntry>)> = Vec::new();
 
-    while let Some(&v_u32) = stack.last() {
+    while let Some((v_u32, _)) = stack.last().cloned() {
         let v = v_u32 as usize;
         if let Some(edge) = adj_clone[v].pop() {
-            // Remove reverse edge
             if let Some(pos) = adj_clone[edge.to as usize]
                 .iter()
                 .position(|e| {
@@ -443,13 +442,13 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
             {
                 adj_clone[edge.to as usize].swap_remove(pos);
             }
-            stack.push(edge.to);
+            stack.push((edge.to, Some(edge)));
         } else {
-            stack.pop();
-            circuit.push(v as u32);
+            let (v, e) = stack.pop().unwrap();
+            circuit_with_edges.push((v, e));
+
         }
     }
-
     // circuit is in reverse order; reverse it
     circuit_with_edges.reverse();
     let circuit: Vec<u32> = circuit_with_edges.iter().map(|(v, _)| *v).collect();
