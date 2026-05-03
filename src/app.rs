@@ -317,7 +317,7 @@ impl App {
 
     pub fn cancel_input(&mut self) {
         self.input_mode.active = false;
-                self.input_mode.buffer.clear();
+        self.input_mode.buffer.clear();
         self.log(LogLevel::Info, "Input cancelled");
     }
 
