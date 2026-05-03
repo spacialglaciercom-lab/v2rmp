@@ -385,7 +385,7 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
                 .iter()
                 .position(|e| e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m)
             {
-                adj_clone[edge.to as usize].remove(pos);
+                adj_clone[edge.to as usize].swap_remove(pos);
             }
             stack.push(edge.to);
             found = true;
