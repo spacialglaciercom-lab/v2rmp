@@ -1,3 +1,4 @@
+use crate::app::App;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
@@ -5,23 +6,21 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
 };
-use crate::app::App;
 
 pub fn render(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(3), Constraint::Length(10)])
         .split(f.area());
-    
+
     let title = Block::default()
         .borders(Borders::ALL)
         .title(format!(" {} ", module_name()));
-    
-    let content = Paragraph::new("Module under construction")
-        .block(title);
-    
+
+    let content = Paragraph::new("Module under construction").block(title);
+
     f.render_widget(content, chunks[0]);
-    
+
     render_logs(f, app, chunks[1]);
 }
 
@@ -44,14 +43,16 @@ fn render_logs(f: &mut Frame, app: &App, area: Rect) {
                 crate::app::LogLevel::Error => Style::default().fg(Color::Red),
             };
             ListItem::new(Line::from(vec![
-                Span::styled(format!("[{}] ", entry.timestamp), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("[{}] ", entry.timestamp),
+                    Style::default().fg(Color::DarkGray),
+                ),
                 Span::styled(&entry.message, style),
             ]))
         })
         .collect();
 
-    let logs_widget = List::new(logs)
-        .block(Block::default().borders(Borders::ALL).title(" Logs "));
-    
+    let logs_widget = List::new(logs).block(Block::default().borders(Borders::ALL).title(" Logs "));
+
     f.render_widget(logs_widget, area);
 }
