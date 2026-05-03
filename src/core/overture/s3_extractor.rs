@@ -436,12 +436,6 @@ impl OvertureExtractor {
     }
 }
 
-impl Default for OvertureExtractor {
-    fn default() -> Self {
-        Self::new().expect("Failed to create Overture extractor")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
