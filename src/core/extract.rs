@@ -359,11 +359,35 @@ fn run_osm_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
 
     tracing::info!("Extracted {} segments from OSM PBF", segments.len());
 
-    let features: Vec<Feature> = segments.into_iter().map(osm::segment_to_feature).collect::<anyhow::Result<Vec<_>>>()?;
+    let features: Vec<Feature> = segments.into_iter().map(osm::segment_to_feature).collect();
 
     finalize_extraction(features, &req.output_path)
 }
 
+
+/// Build graph stats, serialize to GeoJSON, and write to file.
+fn finalize_extraction(features: Vec<Feature>, output_path: &str) -> anyhow::Result<ExtractResult> {
+    let (nodes, edges, total_km) = build_graph_stats(&features)?;
+
+    let geojson = FeatureCollection {
+        bbox: None,
+        features,
+        foreign_members: None,
+    };
+
+    let geojson_string = serde_json::to_string_pretty(&geojson)?;
+
+    File::create(output_path)?
+        .write_all(geojson_string.as_bytes())
+        .context("Failed to write GeoJSON output")?;
+
+    Ok(ExtractResult {
+        nodes,
+        edges,
+        total_km,
+        output_path: output_path.to_string(),
+    })
+}
 #[cfg(test)]
 mod tests {
     use super::*;
