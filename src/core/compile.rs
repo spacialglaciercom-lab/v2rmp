@@ -290,4 +290,37 @@ mod tests {
         let dist = haversine_distance_m(40.7128, -74.0060, 34.0522, -118.2437);
         assert!((dist - 3_935_000.0).abs() < 10_000.0);
     }
+
+    #[test]
+    fn test_run_compile_non_existent_file() {
+        let req = CompileRequest {
+            input_geojson: "/tmp/non_existent_file.geojson".to_string(),
+            output_rmp: "/tmp/output.rmp".to_string(),
+            compress: false,
+            road_classes: vec![],
+        };
+
+        let result = run_compile(&req);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Failed to open input GeoJSON"));
+    }
+
+    #[test]
+    fn test_run_compile_invalid_geojson() {
+        let input_path = "/tmp/v2rmp_test_invalid.geojson";
+        std::fs::write(input_path, "invalid json").unwrap();
+
+        let req = CompileRequest {
+            input_geojson: input_path.to_string(),
+            output_rmp: "/tmp/output.rmp".to_string(),
+            compress: false,
+            road_classes: vec![],
+        };
+
+        let result = run_compile(&req);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Failed to parse GeoJSON FeatureCollection"));
+
+        let _ = std::fs::remove_file(input_path);
+    }
 }
