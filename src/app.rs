@@ -319,7 +319,7 @@ impl App {
 
     pub fn cancel_input(&mut self) {
         self.input_mode.active = false;
-        self.input_mode.buffer.clear();
+                self.input_mode.buffer.clear();
         self.log(LogLevel::Info, "Input cancelled");
     }
 
@@ -363,5 +363,32 @@ impl App {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cancel_input() {
+        let mut app = App::new();
+
+        // Setup state
+        app.input_mode.active = true;
+        app.input_mode.buffer = "test input".to_string();
+
+        // Call function
+        app.cancel_input();
+
+        // Verify state cleared
+        assert!(!app.input_mode.active);
+        assert!(app.input_mode.buffer.is_empty());
+
+        // Verify log entry
+        assert!(!app.log_entries.is_empty());
+        let last_log = app.log_entries.last().unwrap();
+        assert_eq!(last_log.level, LogLevel::Info);
+        assert_eq!(last_log.message, "Input cancelled");
     }
 }
