@@ -68,7 +68,11 @@ pub fn run_compile(req: &CompileRequest) -> anyhow::Result<CompileResult> {
             .and_then(|props| props.get("oneway"))
             .and_then(|v| v.as_str())
             .map(|s| {
-                if matches!(s, "yes" | "1" | "true") { 1u8 } else { 0u8 }
+                if matches!(s, "yes" | "1" | "true") {
+                    1u8
+                } else {
+                    0u8
+                }
             })
             .unwrap_or(0);
 

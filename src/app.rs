@@ -153,7 +153,7 @@ impl App {
     fn scan_cached_maps() -> Vec<String> {
         use std::fs;
         let mut maps = Vec::new();
-        
+
         if let Ok(entries) = fs::read_dir(".") {
             for entry in entries.flatten() {
                 if let Ok(file_name) = entry.file_name().into_string() {
@@ -163,11 +163,10 @@ impl App {
                 }
             }
         }
-        
+
         maps.sort();
         maps
     }
-
 
     pub fn new() -> Self {
         Self {
@@ -300,9 +299,7 @@ impl App {
             InputField::DepotCoordinates => {
                 let parts: Vec<&str> = value.split(',').collect();
                 if parts.len() == 2 {
-                    if let (Ok(lat), Ok(lon)) =
-                        (parts[0].parse::<f64>(), parts[1].parse::<f64>())
-                    {
+                    if let (Ok(lat), Ok(lon)) = (parts[0].parse::<f64>(), parts[1].parse::<f64>()) {
                         self.depot_coords = Some((lat, lon));
                         self.log(
                             LogLevel::Success,

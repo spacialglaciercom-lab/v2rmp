@@ -215,43 +215,56 @@ impl OvertureExtractor {
 
             use arrow::array::{Array, BinaryArray, BooleanArray, StringArray};
 
-            let id_arr = batch.column_by_name("id")
+            let id_arr = batch
+                .column_by_name("id")
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>());
 
-            let road_class_arr = batch.column_by_name("road_class")
+            let road_class_arr = batch
+                .column_by_name("road_class")
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>());
 
-            let class_arr = batch.column_by_name("class")
+            let class_arr = batch
+                .column_by_name("class")
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>());
 
-            let subtype_arr = batch.column_by_name("subtype")
+            let subtype_arr = batch
+                .column_by_name("subtype")
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>());
 
-            let subclass_arr = batch.column_by_name("subclass")
+            let subclass_arr = batch
+                .column_by_name("subclass")
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>());
 
-            let surface_arr = batch.column_by_name("surface")
+            let surface_arr = batch
+                .column_by_name("surface")
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>());
 
-            let oneway_arr = batch.column_by_name("oneway")
+            let oneway_arr = batch
+                .column_by_name("oneway")
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>());
 
-            let directed_str_arr = batch.column_by_name("directed")
+            let directed_str_arr = batch
+                .column_by_name("directed")
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>());
 
-            let directed_bool_arr = batch.column_by_name("directed")
+            let directed_bool_arr = batch
+                .column_by_name("directed")
                 .and_then(|c| c.as_any().downcast_ref::<BooleanArray>());
 
-            let junction_arr = batch.column_by_name("junction")
+            let junction_arr = batch
+                .column_by_name("junction")
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>());
 
-            let osm_id_arr = batch.column_by_name("osm_id")
+            let osm_id_arr = batch
+                .column_by_name("osm_id")
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>());
 
-            let source_arr = batch.column_by_name("source")
+            let source_arr = batch
+                .column_by_name("source")
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>());
 
-            let geometry_arr = batch.column_by_name("geometry")
+            let geometry_arr = batch
+                .column_by_name("geometry")
                 .and_then(|c| c.as_any().downcast_ref::<BinaryArray>());
 
             for row_idx in 0..batch.num_rows() {
@@ -268,46 +281,103 @@ impl OvertureExtractor {
                 let name = None;
                 let class = class_arr
                     .and_then(|arr| {
-                        if arr.is_null(row_idx) { None } else { Some(arr.value(row_idx).to_string()) }
+                        if arr.is_null(row_idx) {
+                            None
+                        } else {
+                            Some(arr.value(row_idx).to_string())
+                        }
                     })
-                    .or_else(|| road_class_arr
-                        .and_then(|arr| if arr.is_null(row_idx) { None } else { Some(arr.value(row_idx).to_string()) }));
+                    .or_else(|| {
+                        road_class_arr.and_then(|arr| {
+                            if arr.is_null(row_idx) {
+                                None
+                            } else {
+                                Some(arr.value(row_idx).to_string())
+                            }
+                        })
+                    });
 
                 let subtype = subtype_arr.and_then(|arr| {
-                    if arr.is_null(row_idx) { None } else { Some(arr.value(row_idx).to_string()) }
+                    if arr.is_null(row_idx) {
+                        None
+                    } else {
+                        Some(arr.value(row_idx).to_string())
+                    }
                 });
                 let subclass = subclass_arr.and_then(|arr| {
-                    if arr.is_null(row_idx) { None } else { Some(arr.value(row_idx).to_string()) }
+                    if arr.is_null(row_idx) {
+                        None
+                    } else {
+                        Some(arr.value(row_idx).to_string())
+                    }
                 });
                 let surface = surface_arr.and_then(|arr| {
-                    if arr.is_null(row_idx) { None } else { Some(arr.value(row_idx).to_string()) }
+                    if arr.is_null(row_idx) {
+                        None
+                    } else {
+                        Some(arr.value(row_idx).to_string())
+                    }
                 });
 
                 let oneway = oneway_arr
                     .and_then(|arr| {
-                        if arr.is_null(row_idx) { None } else { Some(arr.value(row_idx).to_string()) }
+                        if arr.is_null(row_idx) {
+                            None
+                        } else {
+                            Some(arr.value(row_idx).to_string())
+                        }
                     })
-                    .or_else(|| directed_str_arr.and_then(|arr| {
-                        if arr.is_null(row_idx) { None } else { Some(arr.value(row_idx).to_string()) }
-                    }))
-                    .or_else(|| directed_bool_arr.and_then(|arr| {
-                        if arr.is_null(row_idx) { None } else { Some(arr.value(row_idx).to_string()) }
-                    }));
+                    .or_else(|| {
+                        directed_str_arr.and_then(|arr| {
+                            if arr.is_null(row_idx) {
+                                None
+                            } else {
+                                Some(arr.value(row_idx).to_string())
+                            }
+                        })
+                    })
+                    .or_else(|| {
+                        directed_bool_arr.and_then(|arr| {
+                            if arr.is_null(row_idx) {
+                                None
+                            } else {
+                                Some(arr.value(row_idx).to_string())
+                            }
+                        })
+                    });
 
                 let junction = junction_arr.and_then(|arr| {
-                    if arr.is_null(row_idx) { None } else { Some(arr.value(row_idx).to_string()) }
+                    if arr.is_null(row_idx) {
+                        None
+                    } else {
+                        Some(arr.value(row_idx).to_string())
+                    }
                 });
 
                 let osm_id = osm_id_arr
                     .and_then(|arr| {
-                        if arr.is_null(row_idx) { None } else { Some(arr.value(row_idx).to_string()) }
+                        if arr.is_null(row_idx) {
+                            None
+                        } else {
+                            Some(arr.value(row_idx).to_string())
+                        }
                     })
-                    .or_else(|| source_arr.and_then(|arr| {
-                        if arr.is_null(row_idx) { None } else { Some(arr.value(row_idx).to_string()) }
-                    }));
+                    .or_else(|| {
+                        source_arr.and_then(|arr| {
+                            if arr.is_null(row_idx) {
+                                None
+                            } else {
+                                Some(arr.value(row_idx).to_string())
+                            }
+                        })
+                    });
 
-                let Some(geom_arr) = geometry_arr else { continue };
-                if geom_arr.is_null(row_idx) { continue; }
+                let Some(geom_arr) = geometry_arr else {
+                    continue;
+                };
+                if geom_arr.is_null(row_idx) {
+                    continue;
+                }
                 let wkb_bytes = geom_arr.value(row_idx);
 
                 let wkb_geom = match wkb::reader::read_wkb(wkb_bytes) {
@@ -415,11 +485,7 @@ mod tests {
 
     #[test]
     fn test_geometry_bbox() {
-        let geom = Geometry::LineString(vec![
-            (-122.5, 37.7),
-            (-122.4, 37.8),
-            (-122.45, 37.75),
-        ]);
+        let geom = Geometry::LineString(vec![(-122.5, 37.7), (-122.4, 37.8), (-122.45, 37.75)]);
         let bbox = geom.bbox().unwrap();
         assert_eq!(bbox.min_lon, -122.5);
         assert_eq!(bbox.max_lon, -122.4);
