@@ -148,6 +148,12 @@ pub struct App {
     pub start_time: Instant,
 }
 
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl App {
     /// Scan current directory for .rmp cache files
     fn scan_cached_maps() -> Vec<String> {
@@ -240,16 +246,18 @@ impl App {
                         parts[2].parse::<f64>(),
                         parts[3].parse::<f64>(),
                     ) {
+                        if min_lon >= max_lon || min_lat >= max_lat {
+                            self.log(LogLevel::Error, "Invalid bounding box: min must be less than max".to_string());
+                            self.input_mode.active = false;
+                            return;
+                        }
                         let bbox = BoundingBox {
                             min_lon,
                             min_lat,
                             max_lon,
                             max_lat,
                         };
-                        self.log(
-                            LogLevel::Success,
-                            format!("Bounding box set: {bbox}"),
-                        );
+                        self.log(LogLevel::Success, format!("Bounding box set: {bbox}"));
                         self.bounding_box = Some(bbox);
                     } else {
                         self.log(LogLevel::Error, "Invalid coordinates".to_string());
@@ -317,7 +325,7 @@ impl App {
 
     pub fn cancel_input(&mut self) {
         self.input_mode.active = false;
-                self.input_mode.buffer.clear();
+        self.input_mode.buffer.clear();
         self.log(LogLevel::Info, "Input cancelled");
     }
 
@@ -407,5 +415,48 @@ mod tests {
         assert!(!app.input_mode.active);
         assert_eq!(app.input_mode.field, InputField::BoundingBox);
         assert!(app.input_mode.buffer.is_empty());
+
+    }
+
+    #[test]
+    fn test_log_truncation() {
+        let mut app = App::new();
+
+        // Add 501 entries
+        for i in 0..501 {
+            app.log(LogLevel::Info, format!("Message {}", i));
+        }
+
+        // Verify length is capped at 500
+        assert_eq!(app.log_entries.len(), 500);
+
+        // Verify oldest was removed (first entry should be "Message 1")
+        assert_eq!(app.log_entries[0].message, "Message 1");
+
+        // Verify latest is correct
+        assert_eq!(app.log_entries[499].message, "Message 500");
+
+        // Verify scroll position
+        assert_eq!(app.log_scroll, 499);
+    }
+
+    #[test]
+    fn test_invalid_bbox_input() {
+        let mut app = App::new();
+        app.input_mode.field = InputField::BoundingBox;
+
+        // Invalid: min > max
+        app.input_mode.buffer = "10.0,20.0,5.0,25.0".to_string();
+        app.confirm_input();
+        assert!(app.bounding_box.is_none());
+        assert_eq!(app.log_entries.last().unwrap().level, LogLevel::Error);
+        assert!(app.log_entries.last().unwrap().message.contains("Invalid bounding box"));
+
+        // Valid
+        app.input_mode.active = true;
+        app.input_mode.buffer = "5.0,15.0,10.0,25.0".to_string();
+        app.confirm_input();
+        assert!(app.bounding_box.is_some());
+        assert_eq!(app.log_entries.last().unwrap().level, LogLevel::Success);
     }
 }
