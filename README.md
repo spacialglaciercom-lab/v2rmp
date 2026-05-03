@@ -31,7 +31,7 @@ cargo install v2rmp
 ### From source
 
 ```bash
-git clone https://github.com/yourusername/v2rmp.git
+git clone https://github.com/spacialglaciercom-lab/v2rmp.git
 cd v2rmp
 cargo build --release
 ```
@@ -252,5 +252,5 @@ at your option.
 ## Support
 
 - Documentation: [docs.rs/v2rmp](https://docs.rs/v2rmp)
-- Issues: [GitHub Issues](https://github.com/yourusername/v2rmp/issues)
-- Discussions: [GitHub Discussions](https://github.com/yourusername/v2rmp/discussions)
+- Issues: [GitHub Issues](https://github.com/spacialglaciercom-lab/v2rmp/issues)
+- Discussions: [GitHub Discussions](https://github.com/spacialglaciercom-lab/v2rmp/discussions)
