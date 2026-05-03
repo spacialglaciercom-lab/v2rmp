@@ -58,14 +58,14 @@ pub struct TurnSummary {
 // ── Binary format structures ──────────────────────────────────────────
 
 /// A node in the road network (lat/lon in WGS-84).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RmpNode {
     pub lat: f64,
     pub lon: f64,
 }
 
 /// An edge in the road network.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RmpEdge {
     pub from: u32,
     pub to: u32,
@@ -304,7 +304,7 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
 
     // Sort odd vertices by latitude for spatial pruning
     let mut sorted_odd = odd_vertices.clone();
-    sorted_odd.sort_by(|&a, &b| nodes[a].lat.partial_cmp(&nodes[b].lat).unwrap_or(std::cmp::Ordering::Equal));
+    sorted_odd.sort_by(|&a, &b| nodes[a].lat.total_cmp(&nodes[b].lat));
 
     // Map each node index to its position in the sorted_odd list
     let mut pos_in_sorted = vec![0usize; n];
@@ -423,10 +423,10 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
 
     // Hierholzer's algorithm
     let mut adj_clone = adj.clone();
-    let mut stack: Vec<(u32, Option<AdjEntry>)> = vec![(start_node as u32, None)];
     let mut circuit_with_edges: Vec<(u32, Option<AdjEntry>)> = Vec::new();
+    let mut stack = vec![(start_node as u32, None)];
 
-    while let Some((v_u32, _)) = stack.last().cloned() {
+    while let Some(&(v_u32, edge_in)) = stack.last() {
         let v = v_u32 as usize;
         if let Some(edge) = adj_clone[v].pop() {
             if let Some(pos) = adj_clone[edge.to as usize]
@@ -439,14 +439,13 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
             }
             stack.push((edge.to, Some(edge)));
         } else {
-            let (v, e) = stack.pop().unwrap();
-            circuit_with_edges.push((v, e));
-
+            stack.pop();
+            circuit_with_edges.push((v as u32, edge_in));
         }
     }
     // circuit is in reverse order; reverse it
     circuit_with_edges.reverse();
-    let circuit: Vec<u32> = circuit_with_edges.iter().map(|(v, _)| *v).collect();
+
 
     // 7. Compute total distance, deadhead distance, and turn summary
 
@@ -480,11 +479,11 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         }
     }
     // 8. Turn classification
-    if circuit.len() > 2 {
-        for i in 1..circuit.len().saturating_sub(1) {
-            let prev = circuit[i - 1] as usize;
-            let curr = circuit[i] as usize;
-            let next = circuit[i + 1] as usize;
+    if circuit_with_edges.len() > 2 {
+        for i in 1..circuit_with_edges.len().saturating_sub(1) {
+            let prev = circuit_with_edges[i - 1].0 as usize;
+            let curr = circuit_with_edges[i].0 as usize;
+            let next = circuit_with_edges[i + 1].0 as usize;
 
             if prev == curr || curr == next {
                 continue;
@@ -526,7 +525,7 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     // 10. Write route file if requested
     if let Some(ref route_path) = req.route_file {
         let route_json = serde_json::json!({
-            "route": circuit,
+            "route": circuit_with_edges.iter().map(|(v, _)| *v).collect::<Vec<_>>(),
             "total_distance_km": total_distance_m / 1000.0,
             "deadhead_distance_km": deadhead_distance_m / 1000.0,
             "efficiency_pct": efficiency_pct,
@@ -571,7 +570,7 @@ impl NormalizeAngle for f64 {
 }
 
 /// Adjacency list entry for the graph
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct AdjEntry {
     to: u32,
     weight_m: f64,
