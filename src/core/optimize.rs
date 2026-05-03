@@ -297,7 +297,8 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     let odd_vertices: Vec<usize> = (0..n).filter(|&i| degrees[i] % 2 != 0).collect();
 
     // 4. Minimum weight perfect matching (greedy nearest-neighbor)
-    //    For each odd vertex, find its nearest unmatched odd vertex
+    //    For each odd vertex, find its nearest unmatched odd vertex.
+    //    Optimization: Use spatial pruning by sorting odd vertices by latitude.
     let mut duplicate_edges: Vec<(usize, usize, f64, usize)> = Vec::new(); // (from, to, weight, edge_idx)
     let mut matched = vec![false; n];
 
@@ -308,23 +309,80 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         }
     }
 
+    // Sort odd vertices by latitude for spatial pruning
+    let mut sorted_odd = odd_vertices.clone();
+    sorted_odd.sort_by(|&a, &b| nodes[a].lat.partial_cmp(&nodes[b].lat).unwrap());
+
+    // Map each node index to its position in the sorted_odd list
+    let mut pos_in_sorted = vec![0usize; n];
+    for (i, &idx) in sorted_odd.iter().enumerate() {
+        pos_in_sorted[idx] = i;
+    }
+
+    // Rough constant for meters per degree of latitude
+    const METERS_PER_LAT_DEGREE: f64 = 111_111.0;
+
     for &u in &odd_vertices {
         if matched[u] {
             continue;
         }
 
-        // Find nearest unmatched odd vertex
+        // Find nearest unmatched odd vertex using spatial pruning
         let mut best_v = None;
         let mut best_dist = f64::MAX;
+        let u_lat = nodes[u].lat;
+        let u_lon = nodes[u].lon;
+        let u_pos = pos_in_sorted[u];
 
-        for &v in &odd_vertices {
-            if v == u || matched[v] {
-                continue;
+        let mut forward_idx = u_pos + 1;
+        let mut backward_idx = u_pos.wrapping_sub(1);
+        let mut forward_done = forward_idx >= sorted_odd.len();
+        let mut backward_done = u_pos == 0;
+
+        while !forward_done || !backward_done {
+            // Check forward in sorted list
+            if !forward_done {
+                let v = sorted_odd[forward_idx];
+                let v_lat = nodes[v].lat;
+                // If latitude difference alone is greater than best_dist, we can prune forward
+                if (v_lat - u_lat) * METERS_PER_LAT_DEGREE >= best_dist {
+                    forward_done = true;
+                } else {
+                    if !matched[v] {
+                        let dist = haversine_m(u_lat, u_lon, v_lat, nodes[v].lon);
+                        if dist < best_dist {
+                            best_dist = dist;
+                            best_v = Some(v);
+                        }
+                    }
+                    forward_idx += 1;
+                    if forward_idx >= sorted_odd.len() {
+                        forward_done = true;
+                    }
+                }
             }
-            let dist = haversine_m(nodes[u].lat, nodes[u].lon, nodes[v].lat, nodes[v].lon);
-            if dist < best_dist {
-                best_dist = dist;
-                best_v = Some(v);
+
+            // Check backward in sorted list
+            if !backward_done {
+                let v = sorted_odd[backward_idx];
+                let v_lat = nodes[v].lat;
+                // If latitude difference alone is greater than best_dist, we can prune backward
+                if (u_lat - v_lat) * METERS_PER_LAT_DEGREE >= best_dist {
+                    backward_done = true;
+                } else {
+                    if !matched[v] {
+                        let dist = haversine_m(u_lat, u_lon, v_lat, nodes[v].lon);
+                        if dist < best_dist {
+                            best_dist = dist;
+                            best_v = Some(v);
+                        }
+                    }
+                    if backward_idx == 0 {
+                        backward_done = true;
+                    } else {
+                        backward_idx -= 1;
+                    }
+                }
             }
         }
 
