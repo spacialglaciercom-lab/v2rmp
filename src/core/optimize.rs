@@ -171,9 +171,7 @@ pub fn read_rmp_file(data: &[u8]) -> anyhow::Result<(Vec<RmpNode>, Vec<RmpEdge>)
     }
 
     // Verify CRC32
-    let expected_crc = u32::from_le_bytes(
-        data[edges_end..edges_end + 4].try_into()?,
-    );
+    let expected_crc = u32::from_le_bytes(data[edges_end..edges_end + 4].try_into()?);
     let actual_crc = crc32fast::hash(&data[..edges_end]);
     if expected_crc != actual_crc {
         anyhow::bail!(
@@ -381,10 +379,9 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         while !adj_clone[v].is_empty() {
             let edge = adj_clone[v].pop().unwrap();
             // Remove reverse edge
-            if let Some(pos) = adj_clone[edge.to as usize]
-                .iter()
-                .position(|e| e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m)
-            {
+            if let Some(pos) = adj_clone[edge.to as usize].iter().position(|e| {
+                e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m
+            }) {
                 adj_clone[edge.to as usize].remove(pos);
             }
             stack.push(edge.to);
@@ -589,8 +586,8 @@ mod tests {
     fn test_optimize_simple_network() {
         // Build a simple .rmp file in memory: a triangle with 3 nodes and 3 edges
         let nodes = vec![
-            (40.7128_f64, -74.006_f64),  // node 0
-            (40.748_f64, -73.985_f64),   // node 1
+            (40.7128_f64, -74.006_f64), // node 0
+            (40.748_f64, -73.985_f64),  // node 1
             (40.678_f64, -73.944_f64),  // node 2
         ];
         let edges = vec![
