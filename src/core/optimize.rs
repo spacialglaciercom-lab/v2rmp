@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::io::Read;
 use std::time::Instant;
 
@@ -425,7 +424,7 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         u_turn: 0,
         straight: 0,
     };
-    let mut edge_traversal_count: HashMap<usize, u32> = HashMap::new();
+    let mut edge_traversal_count = vec![0u32; edges.len()];
 
     for entry in circuit_with_edges.iter().skip(1) {
         if let Some(e) = &entry.1 {
@@ -434,9 +433,8 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
             if e.edge_idx == deadhead_edge_idx {
                 deadhead_distance_m += e.weight_m;
             } else {
-                let count = edge_traversal_count.entry(e.edge_idx).or_insert(0);
-                *count += 1;
-                if *count > 1 {
+                edge_traversal_count[e.edge_idx] += 1;
+                if edge_traversal_count[e.edge_idx] > 1 {
                     deadhead_distance_m += e.weight_m;
                 }
             }
