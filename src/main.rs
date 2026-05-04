@@ -24,7 +24,7 @@ fn main() -> anyhow::Result<()> {
 
     // App init
     let mut app = app::App::new();
-    app.log(app::LogLevel::Info, "rmpca v0.3.4 started");
+    app.log(app::LogLevel::Info, "rmpca v0.3.8 started");
     app.log(
         app::LogLevel::Info,
         "Ready — select a workflow step to begin",

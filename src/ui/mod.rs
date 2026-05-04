@@ -29,7 +29,7 @@ pub fn draw(f: &mut Frame, app: &App) {
 }
 
 fn draw_header(f: &mut Frame, area: ratatui::layout::Rect) {
-    let title = " rmpca - Route Optimization TUI [v0.3.4] ";
+    let title = " rmpca - Route Optimization TUI [v0.3.8] ";
     let block = ratatui::widgets::Block::default()
         .borders(ratatui::widgets::Borders::ALL)
         .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan));

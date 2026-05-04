@@ -9,6 +9,7 @@ A powerful Terminal User Interface (TUI) for route optimization using the Chines
 ## Features
 
 - 🗺️ **Data Extraction**: Extract road networks from Overture Maps S3 (Parquet) or OpenStreetMap PBF files
+- 🧹 **GeoJSON Cleaning**: Repair geometries, deduplicate edges, and optimize graph topology
 - 🔧 **Binary Compilation**: Convert GeoJSON to optimized `.rmp` binary format with CRC32 integrity checking
 - 🚗 **Route Optimization**: Solve the Chinese Postman Problem with:
   - Eulerian circuit finding (Hierholzer's algorithm)
@@ -244,8 +245,8 @@ at your option.
 ## Roadmap
 
 - [x] **v0.1.0**: Overture extraction, OSM PBF extraction, cached maps browser, basic optimization, TUI
-- [ ] **v0.2.0**: Async/threaded operations, comprehensive tests, performance optimizations
-- [ ] **v0.3.0**: Multi-depot support, advanced features
+- [ ] **v0.2.0**: Async/threaded operations, comprehensive tests (✅ 36 tests pass), performance optimizations
+- [ ] **v0.3.0**: Multi-depot support, advanced features (✅ GeoJSON Cleaning implemented)
 - [ ] **v0.4.0+**: Time windows, capacity constraints
 - [ ] **v1.0.0**: Stable API, backward compatibility guarantees
 

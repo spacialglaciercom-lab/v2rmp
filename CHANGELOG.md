@@ -48,6 +48,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [Unreleased]: https://github.com/yourusername/v2rmp/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/yourusername/v2rmp/releases/tag/v0.1.0
+## [0.3.8] - 2026-05-03
+
+### Added
+- Full TUI wiring to core logic (Extraction, Compilation, Optimization)
+- Road network cleaning module with geometry repair and graph optimization
+- New TUI view for GeoJSON cleaning
+- Enhanced file browser with filtering by extension and parent directory navigation
+- Improved test coverage for core algorithms and application state (36 unit tests)
+- CRC32 integrity checking for binary .rmp format
+
 ## [0.1.1] - 2026-05-03
 
 ### Added
