@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::clean::{clean_geojson, CleanOptions};
 use crate::core::compile::CompileRequest;
 use crate::core::extract::{BBoxRequest, ExtractRequest, ExtractSource, RoadClass};
-use crate::core::optimize::{OnewayMode, OptimizeRequest, TurnPenalties};
+use crate::core::optimize::{OnewayMode, OptimizeRequest, SolverMode, TurnPenalties};
 
 /// rmpca - Route optimization and data extraction
 #[derive(Parser)]
@@ -516,6 +516,7 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
         },
         depot,
         oneway_mode,
+        mode: SolverMode::Cpp,
         num_vehicles: args.vehicles,
         solver_id: args.solver,
     };
@@ -566,6 +567,7 @@ async fn run_vrp_cmd(args: VrpArgs, json: bool) -> Result<()> {
         turn_penalties: TurnPenalties::default(),
         depot,
         oneway_mode: OnewayMode::Respect,
+        mode: SolverMode::Vrp,
         num_vehicles: args.vehicles,
         solver_id,
     };
@@ -653,6 +655,7 @@ async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         turn_penalties: TurnPenalties::default(),
         depot,
         oneway_mode: OnewayMode::default(),
+        mode: SolverMode::Cpp,
         num_vehicles: 1,
         solver_id: "clarke_wright".to_string(),
     };

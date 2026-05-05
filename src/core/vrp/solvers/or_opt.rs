@@ -212,7 +212,7 @@ impl VRPSolver for OrOptSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::utils::build_haversine_matrix;
+    use super::super::super::utils::build_haversine_matrix;
 
     fn make_stop(lat: f64, lon: f64, label: &str) -> VRPSolverStop {
         VRPSolverStop { lat, lon, label: label.into(), demand: None, arrival_time: None }

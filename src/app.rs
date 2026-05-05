@@ -447,6 +447,28 @@ impl App {
                         );
                         self.current_view = View::Optimize;
                     }
+                    InputField::CleanInputFile => {
+                        self.clean_input_file = Some(path_str.clone());
+                        if self.clean_output_file.is_none() {
+                            let out = path_str
+                                .replace(".geojson", ".cleaned.geojson")
+                                .replace(".json", ".cleaned.json");
+                            self.clean_output_file = Some(out);
+                        }
+                        self.log(
+                            LogLevel::Success,
+                            format!("Clean input file selected: {}", path_str),
+                        );
+                        self.current_view = View::Clean;
+                    }
+                    InputField::CleanOutputFile => {
+                        self.clean_output_file = Some(path_str.clone());
+                        self.log(
+                            LogLevel::Success,
+                            format!("Clean output file selected: {}", path_str),
+                        );
+                        self.current_view = View::Clean;
+                    }
                     _ => {
                         self.current_view = View::Home;
                     }
@@ -598,7 +620,7 @@ impl App {
     pub fn navigate_up(&mut self) {
         match self.current_view {
             View::Home => {
-                self.workflow_selection = (self.workflow_selection + 4) % 5;
+                self.workflow_selection = (self.workflow_selection + 5) % 6;
             }
             View::BrowseMaps => {
                 let max = self.cached_maps.len().max(1);
@@ -619,7 +641,7 @@ impl App {
     pub fn navigate_down(&mut self) {
         match self.current_view {
             View::Home => {
-                self.workflow_selection = (self.workflow_selection + 1) % 5;
+                self.workflow_selection = (self.workflow_selection + 1) % 6;
             }
             View::BrowseMaps => {
                 let max = self.cached_maps.len().max(1);

@@ -91,18 +91,22 @@ fn handle_home_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                 app.log(crate::app::LogLevel::Info, "Switched to Compile Map view");
             }
             2 => {
+                app.current_view = View::Clean;
+                app.log(crate::app::LogLevel::Info, "Switched to Clean GeoJSON view");
+            }
+            3 => {
                 app.current_view = View::Optimize;
                 app.log(
                     crate::app::LogLevel::Info,
                     "Switched to Optimize Route view",
                 );
             }
-            3 => {
+            4 => {
                 app.current_view = View::BrowseMaps;
                 app.browse_selection = 0;
                 app.log(crate::app::LogLevel::Info, "Switched to Cached Maps view");
             }
-            4 => {
+            5 => {
                 app.current_view = View::BrowseRoutes;
                 app.browse_selection = 0;
                 app.log(crate::app::LogLevel::Info, "Switched to Saved Routes view");
@@ -324,7 +328,7 @@ async fn handle_optimize_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers)
                 app.log(crate::app::LogLevel::Info, format!("Starting VRP optimization with {}", solver_id));
 
                 // Build optimize request
-                use crate::core::optimize::{run_optimize, OnewayMode, OptimizeRequest};
+                use crate::core::optimize::{run_optimize, OnewayMode, OptimizeRequest, SolverMode};
 
                 let route_path = app.route_file.clone().or_else(|| {
                     Some(format!(
@@ -339,6 +343,7 @@ async fn handle_optimize_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers)
                     turn_penalties: penalties,
                     depot,
                     oneway_mode: OnewayMode::Respect,
+                    mode: SolverMode::Cpp,
                     num_vehicles,
                     solver_id,
                 };
