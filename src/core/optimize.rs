@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::time::Instant;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct TurnPenalties {
     pub left: f64,
     pub right: f64,
@@ -46,7 +46,7 @@ pub struct OptimizeResult {
     pub elapsed_ms: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct TurnSummary {
     pub left: u32,
     pub right: u32,
@@ -57,14 +57,14 @@ pub struct TurnSummary {
 // ── Binary format structures ──────────────────────────────────────────
 
 /// A node in the road network (lat/lon in WGS-84).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct RmpNode {
     pub lat: f64,
     pub lon: f64,
 }
 
 /// An edge in the road network.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct RmpEdge {
     pub from: u32,
     pub to: u32,
@@ -392,17 +392,16 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         0
     };
 
-    let mut adj_clone = adj.clone();
     let mut stack = vec![(start_node as u32, None)];
     let mut circuit_with_edges: Vec<(u32, Option<AdjEntry>)> = Vec::new();
 
     while let Some(&(v_u32, _)) = stack.last() {
         let v = v_u32 as usize;
-        if let Some(edge) = adj_clone[v].pop() {
-            if let Some(pos) = adj_clone[edge.to as usize].iter().position(|e| {
+        if let Some(edge) = adj[v].pop() {
+            if let Some(pos) = adj[edge.to as usize].iter().position(|e| {
                 e.to == v as u32 && e.edge_idx == edge.edge_idx && e.weight_m == edge.weight_m
             }) {
-                adj_clone[edge.to as usize].swap_remove(pos);
+                adj[edge.to as usize].swap_remove(pos);
             }
             stack.push((edge.to, Some(edge)));
         } else {
@@ -536,7 +535,7 @@ impl NormalizeAngle for f64 {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct AdjEntry {
     to: u32,
     weight_m: f64,
