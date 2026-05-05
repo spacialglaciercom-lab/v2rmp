@@ -268,7 +268,10 @@ fn parse_source(s: &str) -> Result<ExtractSource> {
 fn parse_depot(s: &str) -> Result<(f64, f64)> {
     let parts: Vec<f64> = s
         .split(',')
-        .map(|v| v.parse::<f64>().context(format!("Invalid depot value: {v}")))
+        .map(|v| {
+            v.parse::<f64>()
+                .context(format!("Invalid depot value: {v}"))
+        })
         .collect::<Result<Vec<f64>>>()?;
     if parts.len() != 2 {
         anyhow::bail!("Depot must be LAT,LON (2 values)");
@@ -310,9 +313,7 @@ fn run_extract_cmd(args: ExtractArgs, json: bool) -> Result<()> {
     if !json {
         tracing::info!("Starting extraction...");
         tracing::info!("Source: {:?}", source);
-        tracing::info!(
-            "Bounding box: [{min_lon:.4}, {min_lat:.4}, {max_lon:.4}, {max_lat:.4}]"
-        );
+        tracing::info!("Bounding box: [{min_lon:.4}, {min_lat:.4}, {max_lon:.4}, {max_lat:.4}]");
     }
 
     let req = ExtractRequest {
@@ -435,7 +436,11 @@ fn run_clean_cmd(args: CleanArgs, json: bool) -> Result<()> {
         })?;
     } else {
         tracing::info!("Cleaning complete!");
-        tracing::info!("Features: {} -> {}", stats.input_features, stats.output_features);
+        tracing::info!(
+            "Features: {} -> {}",
+            stats.input_features,
+            stats.output_features
+        );
         for w in &warnings {
             tracing::warn!("Warning: {w}");
         }
@@ -493,20 +498,26 @@ fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
 fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
     tracing::info!("VRP solving requested for {}", args.input);
     tracing::info!("Algorithm: {:?}", args.algo);
-    tracing::info!("Vehicles: {}, Depots: {}, Waypoints: {:?}", 
-        args.vehicles, 
+    tracing::info!(
+        "Vehicles: {}, Depots: {}, Waypoints: {:?}",
+        args.vehicles,
         args.depot.len(),
         args.waypoints
     );
-    
+
     // Parse all depots
-    let _depots: Vec<(f64, f64)> = args.depot.iter()
+    let _depots: Vec<(f64, f64)> = args
+        .depot
+        .iter()
         .map(|s| parse_depot(s))
         .collect::<Result<Vec<_>>>()?;
 
     // Placeholder for actual VRP logic
-    tracing::warn!("VRP implementation ({:?}) is currently a wireframe.", args.algo);
-    
+    tracing::warn!(
+        "VRP implementation ({:?}) is currently a wireframe.",
+        args.algo
+    );
+
     Ok(())
 }
 
@@ -538,8 +549,8 @@ fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         road_classes: RoadClass::all_vehicle(),
         output_path: extract_path.clone(),
     };
-    let extract_result =
-        crate::core::extract::run_extract(&extract_req).context("Pipeline failed at stage 'extract'")?;
+    let extract_result = crate::core::extract::run_extract(&extract_req)
+        .context("Pipeline failed at stage 'extract'")?;
 
     // Stage 2: Clean
     if !json {
@@ -547,8 +558,8 @@ fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
     }
     let input_data = std::fs::read_to_string(&extract_path)
         .context("Pipeline failed reading extracted GeoJSON")?;
-    let geojson: geojson::FeatureCollection = serde_json::from_str(&input_data)
-        .context("Pipeline failed parsing extracted GeoJSON")?;
+    let geojson: geojson::FeatureCollection =
+        serde_json::from_str(&input_data).context("Pipeline failed parsing extracted GeoJSON")?;
     let (cleaned, clean_stats, _warnings) = clean_geojson(&geojson, &CleanOptions::default())
         .context("Pipeline failed at stage 'clean'")?;
     let cleaned_str = serde_json::to_string_pretty(&cleaned)?;
@@ -566,8 +577,8 @@ fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         road_classes: vec![],
         clean_options: None,
     };
-    let compile_result =
-        crate::core::compile::run_compile(&compile_req).context("Pipeline failed at stage 'compile'")?;
+    let compile_result = crate::core::compile::run_compile(&compile_req)
+        .context("Pipeline failed at stage 'compile'")?;
 
     // Stage 4: Optimize
     if !json {
@@ -580,8 +591,8 @@ fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         depot,
         oneway_mode: OnewayMode::default(),
     };
-    let optimize_result =
-        crate::core::optimize::run_optimize(&optimize_req).context("Pipeline failed at stage 'optimize'")?;
+    let optimize_result = crate::core::optimize::run_optimize(&optimize_req)
+        .context("Pipeline failed at stage 'optimize'")?;
 
     // Output
     let pipeline_result = PipelineResult {

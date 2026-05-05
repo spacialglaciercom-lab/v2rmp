@@ -499,22 +499,29 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
 fn write_gpx(path: &str, circuit: &[u32], nodes: &[RmpNode]) -> anyhow::Result<()> {
     use std::io::Write;
     let mut file = std::fs::File::create(path)?;
-    
+
     writeln!(file, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>")?;
-    writeln!(file, "<gpx version=\"1.1\" creator=\"rmpca\" xmlns=\"http://www.topografix.com/GPX/1/1\">")?;
+    writeln!(
+        file,
+        "<gpx version=\"1.1\" creator=\"rmpca\" xmlns=\"http://www.topografix.com/GPX/1/1\">"
+    )?;
     writeln!(file, "  <trk>")?;
     writeln!(file, "    <name>Optimized Route</name>")?;
     writeln!(file, "    <trkseg>")?;
-    
+
     for &node_idx in circuit {
         let node = &nodes[node_idx as usize];
-        writeln!(file, "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"></trkpt>", node.lat, node.lon)?;
+        writeln!(
+            file,
+            "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"></trkpt>",
+            node.lat, node.lon
+        )?;
     }
-    
+
     writeln!(file, "    </trkseg>")?;
     writeln!(file, "  </trk>")?;
     writeln!(file, "</gpx>")?;
-    
+
     Ok(())
 }
 
