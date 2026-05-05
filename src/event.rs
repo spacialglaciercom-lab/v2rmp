@@ -87,12 +87,12 @@ fn handle_home_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                 app.log(crate::app::LogLevel::Info, "Switched to Extract Data view");
             }
             1 => {
-                app.current_view = View::Compile;
-                app.log(crate::app::LogLevel::Info, "Switched to Compile Map view");
-            }
-            2 => {
                 app.current_view = View::Clean;
                 app.log(crate::app::LogLevel::Info, "Switched to Clean GeoJSON view");
+            }
+            2 => {
+                app.current_view = View::Compile;
+                app.log(crate::app::LogLevel::Info, "Switched to Compile Map view");
             }
             3 => {
                 app.current_view = View::Optimize;
