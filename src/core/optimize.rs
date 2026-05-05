@@ -483,14 +483,7 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
 
     // 10. Write route file
     if let Some(ref route_path) = req.route_file {
-        let route_json = serde_json::json!({
-            "route": circuit,
-            "total_distance_km": total_distance_m / 1000.0,
-            "deadhead_distance_km": deadhead_distance_m / 1000.0,
-            "efficiency_pct": efficiency_pct,
-            "nodes": nodes.iter().enumerate().map(|(i, n)| serde_json::json!({ "id": i, "lat": n.lat, "lon": n.lon })).collect::<Vec<_>>(),
-        });
-        std::fs::write(route_path, serde_json::to_string_pretty(&route_json)?)?;
+        write_gpx(route_path, &circuit, &nodes)?;
     }
 
     Ok(OptimizeResult {
@@ -501,6 +494,28 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         turns,
         elapsed_ms: start.elapsed().as_millis() as u64,
     })
+}
+
+fn write_gpx(path: &str, circuit: &[u32], nodes: &[RmpNode]) -> anyhow::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(path)?;
+    
+    writeln!(file, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>")?;
+    writeln!(file, "<gpx version=\"1.1\" creator=\"rmpca\" xmlns=\"http://www.topografix.com/GPX/1/1\">")?;
+    writeln!(file, "  <trk>")?;
+    writeln!(file, "    <name>Optimized Route</name>")?;
+    writeln!(file, "    <trkseg>")?;
+    
+    for &node_idx in circuit {
+        let node = &nodes[node_idx as usize];
+        writeln!(file, "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"></trkpt>", node.lat, node.lon)?;
+    }
+    
+    writeln!(file, "    </trkseg>")?;
+    writeln!(file, "  </trk>")?;
+    writeln!(file, "</gpx>")?;
+    
+    Ok(())
 }
 
 trait NormalizeAngle {
@@ -593,6 +608,55 @@ mod tests {
         };
         let result = run_optimize(&req).unwrap();
         assert!(result.total_distance_km > 0.0);
+        let _ = std::fs::remove_file(temp_path);
+    }
+
+    #[test]
+    fn test_optimize_true_eulerian_circuit() {
+        // Build a network where all nodes have even degrees.
+        // A simple square with 4 nodes and 4 edges.
+        let nodes: Vec<(f64, f64)> = vec![
+            (0.0, 0.0), // node 0
+            (0.0, 1.0), // node 1
+            (1.0, 1.0), // node 2
+            (1.0, 0.0), // node 3
+        ];
+        let edges: Vec<(u32, u32, f64, u8)> = vec![
+            (0u32, 1u32, 1000.0, 0u8),
+            (1u32, 2u32, 1000.0, 0u8),
+            (2u32, 3u32, 1000.0, 0u8),
+            (3u32, 0u32, 1000.0, 0u8),
+        ];
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"RMP1");
+        buf.extend_from_slice(&(nodes.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&(edges.len() as u32).to_le_bytes());
+        for (lat, lon) in &nodes {
+            buf.extend_from_slice(&(*lat).to_le_bytes());
+            buf.extend_from_slice(&(*lon).to_le_bytes());
+        }
+        for (from, to, weight, oneway) in &edges {
+            buf.extend_from_slice(&(*from).to_le_bytes());
+            buf.extend_from_slice(&(*to).to_le_bytes());
+            buf.extend_from_slice(&(*weight).to_le_bytes());
+            buf.push(*oneway);
+        }
+        let crc = crc32fast::hash(&buf);
+        buf.extend_from_slice(&crc.to_le_bytes());
+        let temp_path = "/tmp/v2rmp_test_eulerian.rmp";
+        std::fs::write(temp_path, &buf).unwrap();
+        let req = OptimizeRequest {
+            cache_file: temp_path.to_string(),
+            route_file: None,
+            turn_penalties: TurnPenalties::default(),
+            depot: None,
+            oneway_mode: OnewayMode::Ignore,
+        };
+        let result = run_optimize(&req).unwrap();
+        // The total distance should be exactly the sum of the edge weights (4km)
+        // No deadheading is required for a true Eulerian circuit.
+        assert_eq!(result.deadhead_distance_km, 0.0);
+        assert_eq!(result.efficiency_pct, 100.0);
         let _ = std::fs::remove_file(temp_path);
     }
 }

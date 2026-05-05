@@ -144,10 +144,14 @@ pub struct OvertureExtractor {
 impl OvertureExtractor {
     /// Create a new extractor connected to Overture Maps S3
     pub fn new() -> Result<Self> {
+        let client_options = object_store::ClientOptions::new()
+            .with_timeout(std::time::Duration::from_secs(300));
+            
         let store = AmazonS3Builder::new()
             .with_bucket_name(OVERTURE_S3_BUCKET)
             .with_region(OVERTURE_S3_REGION)
-            .with_allow_http(true)
+            .with_skip_signature(true)
+            .with_client_options(client_options)
             .build()?;
 
         Ok(Self {
@@ -204,7 +208,10 @@ impl OvertureExtractor {
             .map(|path| {
                 let store = Arc::clone(&self.store);
                 let bbox = *bbox;
-                async move { Self::extract_from_file(store.as_ref(), &path, &bbox).await }
+                async move { 
+                    tracing::info!("Processing file: {}", path);
+                    Self::extract_from_file(store.as_ref(), &path, &bbox).await 
+                }
             })
             .buffer_unordered(10) // Process up to 10 files concurrently
             .collect::<Vec<_>>()

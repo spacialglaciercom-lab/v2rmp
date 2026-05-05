@@ -1,20 +1,31 @@
 mod app;
+mod cli;
 mod core;
 mod event;
 mod ui;
 
-use std::io;
-use std::time::Duration;
-
-use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
-use ratatui::backend::CrosstermBackend;
-use ratatui::Terminal;
-
 fn main() -> anyhow::Result<()> {
+    // No arguments = launch the TUI; any arguments = CLI mode
+    if std::env::args().len() == 1 {
+        run_tui()
+    } else {
+        cli::run()?;
+        Ok(())
+    }
+}
+
+fn run_tui() -> anyhow::Result<()> {
+    use std::io;
+    use std::time::Duration;
+
+    use crossterm::{
+        event::{DisableMouseCapture, EnableMouseCapture},
+        execute,
+        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    };
+    use ratatui::backend::CrosstermBackend;
+    use ratatui::Terminal;
+
     // Terminal setup
     enable_raw_mode()?;
     let mut stdout = io::stdout();

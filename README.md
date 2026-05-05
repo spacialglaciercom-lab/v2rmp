@@ -4,10 +4,12 @@
 [![Documentation](https://docs.rs/v2rmp/badge.svg)](https://docs.rs/v2rmp)
 [![License](https://img.shields.io/crates/l/v2rmp.svg)](LICENSE)
 
-A powerful Terminal User Interface (TUI) for route optimization using the Chinese Postman Problem (CPP) algorithm. Extract road networks from Overture Maps or OpenStreetMap, compile them into efficient binary formats, and optimize routes with turn penalties and depot constraints.
+A powerful Terminal User Interface (TUI) and Command-Line Interface (CLI) for route optimization using the Chinese Postman Problem (CPP) algorithm. Extract road networks from Overture Maps or OpenStreetMap, compile them into efficient binary formats, and optimize routes with turn penalties and depot constraints.
 
 ## Features
 
+- 🖥️ **Interactive TUI**: Beautiful terminal interface built with `ratatui`
+- 🤖 **Agent-Friendly CLI**: Full command-line interface with `--json` output for automation
 - 🗺️ **Data Extraction**: Extract road networks from Overture Maps S3 (Parquet) or OpenStreetMap PBF files
 - 🧹 **GeoJSON Cleaning**: Repair geometries, deduplicate edges, and optimize graph topology
 - 🔧 **Binary Compilation**: Convert GeoJSON to optimized `.rmp` binary format with CRC32 integrity checking
@@ -15,9 +17,8 @@ A powerful Terminal User Interface (TUI) for route optimization using the Chines
   - Eulerian circuit finding (Hierholzer's algorithm)
   - Turn penalties (left, right, u-turn)
   - Depot location support
-  - Oneway street handling (ignore/respect/reverse modes)
-  - Efficiency metrics and turn statistics
-- 🖥️ **Interactive TUI**: Beautiful terminal interface built with `ratatui`
+  - Oneway street handling
+- 🚛 **VRP (Preview)**: Multi-vehicle routing support (Greedy, Savings, Local Search)
 - 📁 **Cached Maps Browser**: Automatically scans for compiled `.rmp` files
 - ⚡ **Performance**: Concurrent S3 file processing, efficient graph algorithms
 
@@ -37,23 +38,57 @@ cd v2rmp
 cargo build --release
 ```
 
-## Quick Start
+## Modes of Operation
 
-### Launch the TUI
+### 1. Interactive TUI
+Launch the full interface by running `rmpca` without arguments.
 
 ```bash
 rmpca
 ```
 
-### Command-line extraction (alternative)
+### 2. Command-Line Interface (CLI)
+Use `rmpca <COMMAND>` for scripts, agents, and batch processing. All commands support a `--json` flag for structured output.
 
 ```bash
-# Extract from Overture Maps
-rmpca-extract --bbox "45.49,-73.59,45.52,-73.55" --output montreal.geojson
+# Full pipeline in one command
+rmpca pipeline --bbox "-74.02,40.68,-73.95,40.80)" --output-dir my_area/
 
-# Extract from OSM PBF file
-rmpca-extract --source osm --pbf-path data.osm.pbf --bbox "45.49,-73.59,45.52,-73.55" --output montreal.geojson
+# Extract only
+rmpca extract --bbox "-74.02,40.68,-73.95,40.80" --json
+
+# Clean data
+rmpca clean -i input.geojson -o cleaned.geojson
+
+# Compile to binary
+rmpca compile -i cleaned.geojson -o map.rmp
+
+# Optimize route (Outputs GPX)
+rmpca optimize -i map.rmp -o route.gpx --depot "40.71,-74.01"
+
+# Multi-vehicle VRP (Wireframe)
+rmpca vrp -i map.rmp --vehicles 5 --depot "40.71,-74.01" --algo savings
 ```
+
+## CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `extract` | Fetch data from Overture Maps or OSM |
+| `clean` | Repair and simplify GeoJSON networks |
+| `compile` | Convert GeoJSON to efficient `.rmp` binary |
+| `optimize` | CPP route optimization (Outputs GPX) |
+| `vrp` | Multi-agent Vehicle Routing Problem |
+| `pipeline` | Run extract → clean → compile → optimize |
+
+### AI Agent Integration
+The `--json` flag on any command ensures that `stdout` contains only structured JSON, while logs and errors go to `stderr`.
+
+```bash
+rmpca optimize -i city.rmp --json | jq .efficiency_pct
+```
+
+## Quick Start (TUI)
 
 ## Usage
 
