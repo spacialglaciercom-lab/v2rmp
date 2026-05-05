@@ -5,6 +5,7 @@ use crate::app::App;
 const MENU_ITEMS: &[&str] = &[
     "Extract Data (OSM/Overture)",
     "Compile Map (GeoJSON -> .rmp)",
+    "Clean GeoJSON",
     "Optimize Route",
     "Browse Cached Maps",
     "Browse Saved Routes",

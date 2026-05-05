@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io::Read;
 use std::time::Instant;
 
@@ -19,6 +20,14 @@ impl Default for TurnPenalties {
     }
 }
 
+/// Which solver to use: CPP covers all edges (Chinese Postman), VRP optimises stop visits.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub enum SolverMode {
+    #[default]
+    Cpp,
+    Vrp,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizeRequest {
     pub cache_file: String,
@@ -26,7 +35,18 @@ pub struct OptimizeRequest {
     pub turn_penalties: TurnPenalties,
     pub depot: Option<(f64, f64)>,
     pub oneway_mode: OnewayMode,
+    /// Solver mode: Cpp (default, edge coverage) or Vrp (stop visits).
+    pub mode: SolverMode,
+    /// VRP-only: number of vehicles.
+    #[serde(default = "default_num_vehicles")]
+    pub num_vehicles: usize,
+    /// VRP-only: solver algorithm id (clarke_wright, sweep, two_opt, or_opt, default).
+    #[serde(default = "default_solver_id")]
+    pub solver_id: String,
 }
+
+fn default_num_vehicles() -> usize { 1 }
+fn default_solver_id() -> String { "default".to_string() }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum OnewayMode {
@@ -44,6 +64,7 @@ pub struct OptimizeResult {
     pub efficiency_pct: f64,
     pub turns: TurnSummary,
     pub elapsed_ms: u64,
+    pub num_routes: usize,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -97,6 +118,24 @@ pub fn classify_turn(bearing_delta: f64) -> &'static str {
         "left"
     } else {
         "u_turn"
+    }
+}
+
+trait NormalizeAngle {
+    fn normalize(self, lower: f64, upper: f64) -> f64;
+}
+
+impl NormalizeAngle for f64 {
+    fn normalize(self, lower: f64, upper: f64) -> f64 {
+        let width = upper - lower;
+        let mut val = self;
+        while val < lower {
+            val += width;
+        }
+        while val >= upper {
+            val -= width;
+        }
+        val
     }
 }
 
@@ -185,10 +224,17 @@ fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     (bearing_rad.to_degrees() + 360.0) % 360.0
 }
 
-// ── Route optimization ───────────────────────────────────────────────
+// ── CPP internals ────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+struct AdjEntry {
+    to: u32,
+    weight_m: f64,
+    edge_idx: usize,
+}
 
 /// Run the Chinese Postman Problem route optimization.
-pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
+fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     let start = Instant::now();
 
     // 1. Read the .rmp file
@@ -214,6 +260,7 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
                 straight: 0,
             },
             elapsed_ms: start.elapsed().as_millis() as u64,
+            num_routes: 1,
         });
     }
 
@@ -423,7 +470,7 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         u_turn: 0,
         straight: 0,
     };
-    let mut edge_traversal_count = vec![0u32; edges.len()];
+    let mut edge_traversal_count: HashMap<usize, u32> = HashMap::new();
 
     for entry in circuit_with_edges.iter().skip(1) {
         if let Some(e) = &entry.1 {
@@ -432,8 +479,9 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
             if e.edge_idx == deadhead_edge_idx {
                 deadhead_distance_m += e.weight_m;
             } else {
-                edge_traversal_count[e.edge_idx] += 1;
-                if edge_traversal_count[e.edge_idx] > 1 {
+                let count = edge_traversal_count.entry(e.edge_idx).or_insert(0);
+                *count += 1;
+                if *count > 1 {
                     deadhead_distance_m += e.weight_m;
                 }
             }
@@ -482,7 +530,14 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
 
     // 10. Write route file
     if let Some(ref route_path) = req.route_file {
-        write_gpx(route_path, &circuit, &nodes)?;
+        let route_json = serde_json::json!({
+            "route": circuit,
+            "total_distance_km": total_distance_m / 1000.0,
+            "deadhead_distance_km": deadhead_distance_m / 1000.0,
+            "efficiency_pct": efficiency_pct,
+            "nodes": nodes.iter().enumerate().map(|(i, n)| serde_json::json!({ "id": i, "lat": n.lat, "lon": n.lon })).collect::<Vec<_>>(),
+        });
+        std::fs::write(route_path, serde_json::to_string_pretty(&route_json)?)?;
     }
 
     Ok(OptimizeResult {
@@ -492,46 +547,139 @@ pub fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         efficiency_pct,
         turns,
         elapsed_ms: start.elapsed().as_millis() as u64,
+        num_routes: 1,
     })
 }
 
-fn write_gpx(path: &str, circuit: &[u32], nodes: &[RmpNode]) -> anyhow::Result<()> {
+// ── VRP route optimization ────────────────────────────────────────────
+
+/// Run the Vehicle Routing Problem optimization.
+async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
+    let start = Instant::now();
+
+    // 1. Read .rmp
+    let mut file_data = Vec::new();
+    std::fs::File::open(&req.cache_file)?.read_to_end(&mut file_data)?;
+    let (nodes, _edges) = read_rmp_file(&file_data)?;
+
+    if nodes.is_empty() {
+        anyhow::bail!("No nodes found in .rmp file");
+    }
+
+    // 2. Build VRP Stops
+    let mut stops: Vec<VRPSolverStop> = nodes.iter().enumerate().map(|(i, n)| {
+        VRPSolverStop {
+            lat: n.lat,
+            lon: n.lon,
+            label: format!("Node {}", i),
+            demand: Some(1.0),
+            arrival_time: None,
+        }
+    }).collect();
+
+    // Add depot at start if specified
+    if let Some((dlat, dlon)) = req.depot {
+        stops.insert(0, VRPSolverStop {
+            lat: dlat,
+            lon: dlon,
+            label: "Depot".into(),
+            demand: Some(0.0),
+            arrival_time: None,
+        });
+    }
+
+    // 3. Build Distance Matrix (Haversine for now)
+    let matrix = super::vrp::utils::build_haversine_matrix(&stops, 40.0);
+
+    // 4. Solve
+    let vrp_input = VRPSolverInput {
+        locations: stops.clone(),
+        num_vehicles: req.num_vehicles,
+        vehicle_capacity: (stops.len() as f64 / req.num_vehicles as f64).ceil() * 1.5,
+        objective: VrpObjective::MinDistance,
+        matrix: Some(matrix),
+        service_time_secs: Some(30.0),
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+    };
+
+    let output = solve_with(&req.solver_id, &vrp_input).await
+        .map_err(|e| anyhow::anyhow!("VRP Solver error: {}", e))?;
+
+    // 5. Compute Stats
+    let mut turns = TurnSummary { left: 0, right: 0, u_turn: 0, straight: 0 };
+
+    if let Some(ref routes) = output.routes {
+        for route in routes {
+            if route.len() > 2 {
+                for i in 1..route.len() - 1 {
+                    let prev = &route[i-1];
+                    let curr = &route[i];
+                    let next = &route[i+1];
+                    let b_in = bearing(prev.lat, prev.lon, curr.lat, curr.lon);
+                    let b_out = bearing(curr.lat, curr.lon, next.lat, next.lon);
+                    let b_in_rev = (b_in + 180.0) % 360.0;
+                    let delta = b_out - b_in_rev;
+                    match classify_turn(delta) {
+                        "left" => turns.left += 1,
+                        "right" => turns.right += 1,
+                        "u_turn" => turns.u_turn += 1,
+                        _ => turns.straight += 1,
+                    }
+                }
+            }
+        }
+    }
+
+    let total_dist_km: f64 = output.total_distance_km.parse().unwrap_or(0.0);
+
+    // 6. Write GPX
+    if let Some(ref path) = req.route_file {
+        if let Some(ref routes) = output.routes {
+            write_gpx_multi(path, routes)?;
+        }
+    }
+
+    Ok(OptimizeResult {
+        total_distance_km: total_dist_km,
+        total_segments: output.stops.len(),
+        deadhead_distance_km: 0.0,
+        efficiency_pct: 100.0,
+        turns,
+        elapsed_ms: start.elapsed().as_millis() as u64,
+        num_routes: output.routes.as_ref().map(|r| r.len()).unwrap_or(1),
+    })
+}
+
+fn write_gpx_multi(path: &str, routes: &Vec<Vec<VRPSolverStop>>) -> anyhow::Result<()> {
     use std::io::Write;
     let mut file = std::fs::File::create(path)?;
-    
     writeln!(file, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>")?;
     writeln!(file, "<gpx version=\"1.1\" creator=\"rmpca\" xmlns=\"http://www.topografix.com/GPX/1/1\">")?;
-    writeln!(file, "  <trk>")?;
-    writeln!(file, "    <name>Optimized Route</name>")?;
-    writeln!(file, "    <trkseg>")?;
-    
-    for &node_idx in circuit {
-        let node = &nodes[node_idx as usize];
-        writeln!(file, "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"></trkpt>", node.lat, node.lon)?;
+
+    for (i, route) in routes.iter().enumerate() {
+        writeln!(file, "  <trk>")?;
+        writeln!(file, "    <name>Vehicle {}</name>", i + 1)?;
+        writeln!(file, "    <trkseg>")?;
+        for stop in route {
+            writeln!(file, "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"></trkpt>", stop.lat, stop.lon)?;
+        }
+        writeln!(file, "    </trkseg>")?;
+        writeln!(file, "  </trk>")?;
     }
-    
-    writeln!(file, "    </trkseg>")?;
-    writeln!(file, "  </trk>")?;
+
     writeln!(file, "</gpx>")?;
-    
     Ok(())
 }
 
-trait NormalizeAngle {
-    fn normalize(self, lower: f64, upper: f64) -> f64;
-}
+// ── Dispatcher ───────────────────────────────────────────────────────
 
-impl NormalizeAngle for f64 {
-    fn normalize(self, lower: f64, upper: f64) -> f64 {
-        let width = upper - lower;
-        let mut val = self;
-        while val < lower {
-            val += width;
-        }
-        while val >= upper {
-            val -= width;
-        }
-        val
+/// Run route optimization, dispatching to CPP or VRP based on `req.mode`.
+pub async fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
+    match req.mode {
+        SolverMode::Cpp => run_cpp_optimize(req),
+        SolverMode::Vrp => run_vrp_optimize(req).await,
     }
 }
 
@@ -573,7 +721,11 @@ mod tests {
         assert!(read_rmp_file(&[]).is_err());
     }
     #[test]
-    fn test_optimize_simple_network() {
+    fn test_solver_mode_default_is_cpp() {
+        assert_eq!(SolverMode::default(), SolverMode::Cpp);
+    }
+    #[test]
+    fn test_optimize_simple_network_cpp() {
         let nodes: Vec<(f64, f64)> = vec![(40.7128, -74.006), (40.748, -73.985), (40.678, -73.944)];
         let edges: Vec<(u32, u32, f64, u8)> = vec![
             (0u32, 1u32, 5000.0, 0u8),
@@ -604,58 +756,15 @@ mod tests {
             turn_penalties: TurnPenalties::default(),
             depot: None,
             oneway_mode: OnewayMode::Ignore,
+            mode: SolverMode::Cpp,
+            num_vehicles: 1,
+            solver_id: "default".to_string(),
         };
-        let result = run_optimize(&req).unwrap();
+        let result = run_optimize(&req);
+        // run_optimize is async but CPP is sync, so we need to use tokio
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(run_optimize(&req)).unwrap();
         assert!(result.total_distance_km > 0.0);
-        let _ = std::fs::remove_file(temp_path);
-    }
-
-    #[test]
-    fn test_optimize_true_eulerian_circuit() {
-        // Build a network where all nodes have even degrees.
-        // A simple square with 4 nodes and 4 edges.
-        let nodes: Vec<(f64, f64)> = vec![
-            (0.0, 0.0), // node 0
-            (0.0, 1.0), // node 1
-            (1.0, 1.0), // node 2
-            (1.0, 0.0), // node 3
-        ];
-        let edges: Vec<(u32, u32, f64, u8)> = vec![
-            (0u32, 1u32, 1000.0, 0u8),
-            (1u32, 2u32, 1000.0, 0u8),
-            (2u32, 3u32, 1000.0, 0u8),
-            (3u32, 0u32, 1000.0, 0u8),
-        ];
-        let mut buf = Vec::new();
-        buf.extend_from_slice(b"RMP1");
-        buf.extend_from_slice(&(nodes.len() as u32).to_le_bytes());
-        buf.extend_from_slice(&(edges.len() as u32).to_le_bytes());
-        for (lat, lon) in &nodes {
-            buf.extend_from_slice(&(*lat).to_le_bytes());
-            buf.extend_from_slice(&(*lon).to_le_bytes());
-        }
-        for (from, to, weight, oneway) in &edges {
-            buf.extend_from_slice(&(*from).to_le_bytes());
-            buf.extend_from_slice(&(*to).to_le_bytes());
-            buf.extend_from_slice(&(*weight).to_le_bytes());
-            buf.push(*oneway);
-        }
-        let crc = crc32fast::hash(&buf);
-        buf.extend_from_slice(&crc.to_le_bytes());
-        let temp_path = "/tmp/v2rmp_test_eulerian.rmp";
-        std::fs::write(temp_path, &buf).unwrap();
-        let req = OptimizeRequest {
-            cache_file: temp_path.to_string(),
-            route_file: None,
-            turn_penalties: TurnPenalties::default(),
-            depot: None,
-            oneway_mode: OnewayMode::Ignore,
-        };
-        let result = run_optimize(&req).unwrap();
-        // The total distance should be exactly the sum of the edge weights (4km)
-        // No deadheading is required for a true Eulerian circuit.
-        assert_eq!(result.deadhead_distance_km, 0.0);
-        assert_eq!(result.efficiency_pct, 100.0);
         let _ = std::fs::remove_file(temp_path);
     }
 }

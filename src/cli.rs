@@ -1,15 +1,15 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::core::clean::{clean_geojson, CleanOptions};
 use crate::core::compile::CompileRequest;
 use crate::core::extract::{BBoxRequest, ExtractRequest, ExtractSource, RoadClass};
-use crate::core::optimize::{OnewayMode, OptimizeRequest, TurnPenalties};
+use crate::core::optimize::{OnewayMode, OptimizeRequest, SolverMode, TurnPenalties};
 
 /// rmpca - Route optimization and data extraction
 #[derive(Parser)]
-#[command(name = "rmpca", version = "0.3.8")]
+#[command(name = "rmpca", version = "0.3.9")]
 #[command(about = "Route optimization and data extraction")]
 struct Cli {
     /// Output results as JSON (for machine / agent consumption)
@@ -34,11 +34,47 @@ enum Commands {
     Vrp(VrpArgs),
     /// Run the full pipeline: extract -> clean -> compile -> optimize
     Pipeline(PipelineArgs),
+    /// List available resources (maps, routes)
+    List(ListArgs),
+    /// Execute a JSON-encoded task plan
+    Agent(AgentArgs),
+}
+
+#[derive(clap::Args)]
+struct ListArgs {
+    /// Resource type to list
+    #[arg(value_enum, default_value = "maps")]
+    resource: ResourceType,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ResourceType {
+    Maps,
+    Routes,
+}
+
+#[derive(clap::Args)]
+struct AgentArgs {
+    /// Path to JSON task file (or '-' for stdin)
+    #[arg(short, long, default_value = "-")]
+    task: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum AgentTask {
+    Extract(ExtractArgs),
+    Compile(CompileArgs),
+    Clean(CleanArgs),
+    Optimize(OptimizeArgs),
+    Vrp(VrpArgs),
+    Pipeline(PipelineArgs),
 }
 
 // ── VRP ───────────────────────────────────────────────────────────────
 
-#[derive(clap::ValueEnum, Clone, Debug, Serialize)]
+#[derive(clap::ValueEnum, Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 enum VrpAlgorithm {
     /// Simple greedy nearest-neighbor approach
@@ -51,7 +87,7 @@ enum VrpAlgorithm {
     SimulatedAnnealing,
 }
 
-#[derive(clap::Args)]
+#[derive(clap::Args, Serialize, Deserialize)]
 struct VrpArgs {
     /// Input .rmp cache file
     #[arg(short, long)]
@@ -84,7 +120,7 @@ struct VrpArgs {
 
 // ── Extract ───────────────────────────────────────────────────────────
 
-#[derive(clap::Args)]
+#[derive(clap::Args, Serialize, Deserialize)]
 struct ExtractArgs {
     /// Bounding box: MIN_LON,MIN_LAT,MAX_LON,MAX_LAT
     #[arg(long, allow_hyphen_values = true)]
@@ -101,11 +137,15 @@ struct ExtractArgs {
     /// Output GeoJSON file path
     #[arg(short, long, default_value = "extract-output.geojson")]
     output: String,
+
+    /// Path to local OSM PBF file (required for source=osm)
+    #[arg(long)]
+    pbf: Option<String>,
 }
 
 // ── Compile ───────────────────────────────────────────────────────────
 
-#[derive(clap::Args)]
+#[derive(clap::Args, Serialize, Deserialize)]
 struct CompileArgs {
     /// Input GeoJSON file
     #[arg(short, long)]
@@ -122,7 +162,7 @@ struct CompileArgs {
 
 // ── Clean ─────────────────────────────────────────────────────────────
 
-#[derive(clap::Args)]
+#[derive(clap::Args, Serialize, Deserialize)]
 struct CleanArgs {
     /// Input GeoJSON file
     #[arg(short, long)]
@@ -159,7 +199,7 @@ struct CleanArgs {
 
 // ── Optimize ──────────────────────────────────────────────────────────
 
-#[derive(clap::Args)]
+#[derive(clap::Args, Serialize, Deserialize)]
 struct OptimizeArgs {
     /// Input .rmp cache file
     #[arg(short, long)]
@@ -188,11 +228,19 @@ struct OptimizeArgs {
     /// U-turn penalty (default: 5.0)
     #[arg(long, default_value_t = 5.0)]
     uturn_penalty: f64,
+
+    /// Number of vehicles (for VRP)
+    #[arg(short, long, default_value_t = 1)]
+    vehicles: usize,
+
+    /// Solver algorithm (clarke_wright, sweep, two_opt, or_opt, default)
+    #[arg(short, long, default_value = "clarke_wright")]
+    solver: String,
 }
 
 // ── Pipeline ──────────────────────────────────────────────────────────
 
-#[derive(clap::Args)]
+#[derive(clap::Args, Serialize, Deserialize)]
 struct PipelineArgs {
     /// Bounding box: MIN_LON,MIN_LAT,MAX_LON,MAX_LAT
     #[arg(long, allow_hyphen_values = true)]
@@ -302,7 +350,7 @@ fn init_tracing() {
 
 // ── Command handlers ──────────────────────────────────────────────────
 
-fn run_extract_cmd(args: ExtractArgs, json: bool) -> Result<()> {
+async fn run_extract_cmd(args: ExtractArgs, json: bool) -> Result<()> {
     let (min_lon, min_lat, max_lon, max_lat) = parse_bbox(&args.bbox)?;
     let road_classes = parse_road_classes(&args.road_classes)?;
     let source = parse_source(&args.source)?;
@@ -327,7 +375,13 @@ fn run_extract_cmd(args: ExtractArgs, json: bool) -> Result<()> {
         output_path: args.output.clone(),
     };
 
-    let result = crate::core::extract::run_extract(&req)?;
+    if let Some(pbf) = args.pbf {
+        // If PBF path is provided, we can pass it via env or update ExtractRequest
+        // For now, let's set the env var that run_osm_extract uses
+        std::env::set_var("OSM_PBF_PATH", pbf);
+    }
+
+    let result = crate::core::extract::run_extract(&req).await?;
 
     if json {
         output_json(&result)?;
@@ -444,7 +498,7 @@ fn run_clean_cmd(args: CleanArgs, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
+async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
     let depot = args.depot.as_deref().map(parse_depot).transpose()?;
     let oneway_mode = parse_oneway(&args.oneway)?;
 
@@ -462,18 +516,20 @@ fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
         },
         depot,
         oneway_mode,
+        mode: SolverMode::Cpp,
+        num_vehicles: args.vehicles,
+        solver_id: args.solver,
     };
 
-    let result = crate::core::optimize::run_optimize(&req)?;
+    let result = crate::core::optimize::run_optimize(&req).await?;
 
     if json {
         output_json(&result)?;
     } else {
         tracing::info!("Optimization complete!");
         tracing::info!("Total distance: {:.2} km", result.total_distance_km);
-        tracing::info!("Segments: {}", result.total_segments);
-        tracing::info!("Deadhead: {:.2} km", result.deadhead_distance_km);
-        tracing::info!("Efficiency: {:.1}%", result.efficiency_pct);
+        tracing::info!("Stops/Segments: {}", result.total_segments);
+        tracing::info!("Vehicles used: {}", result.num_routes);
         tracing::info!(
             "Turns: {} left, {} right, {} u-turn, {} straight",
             result.turns.left,
@@ -490,27 +546,47 @@ fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
-    tracing::info!("VRP solving requested for {}", args.input);
-    tracing::info!("Algorithm: {:?}", args.algo);
-    tracing::info!("Vehicles: {}, Depots: {}, Waypoints: {:?}", 
-        args.vehicles, 
-        args.depot.len(),
-        args.waypoints
-    );
-    
-    // Parse all depots
-    let _depots: Vec<(f64, f64)> = args.depot.iter()
-        .map(|s| parse_depot(s))
-        .collect::<Result<Vec<_>>>()?;
+async fn run_vrp_cmd(args: VrpArgs, json: bool) -> Result<()> {
+    // VRP command now uses the same core as optimize but focused on multi-vehicle
+    let depot = if args.depot.is_empty() {
+        None
+    } else {
+        Some(parse_depot(&args.depot[0])?)
+    };
 
-    // Placeholder for actual VRP logic
-    tracing::warn!("VRP implementation ({:?}) is currently a wireframe.", args.algo);
+    let solver_id = match args.algo {
+        VrpAlgorithm::Greedy => "default",
+        VrpAlgorithm::Savings => "clarke_wright",
+        VrpAlgorithm::LocalSearch => "or_opt",
+        VrpAlgorithm::SimulatedAnnealing => "sweep",
+    }.to_string();
+
+    let req = OptimizeRequest {
+        cache_file: args.input.clone(),
+        route_file: Some(format!("{}/route.gpx", args.output_dir)),
+        turn_penalties: TurnPenalties::default(),
+        depot,
+        oneway_mode: OnewayMode::Respect,
+        mode: SolverMode::Vrp,
+        num_vehicles: args.vehicles,
+        solver_id,
+    };
+
+    let result = crate::core::optimize::run_optimize(&req).await?;
+
+    if json {
+        output_json(&result)?;
+    } else {
+        tracing::info!("VRP Solving complete!");
+        tracing::info!("Total distance: {:.2} km", result.total_distance_km);
+        tracing::info!("Vehicles: {}", result.num_routes);
+        tracing::info!("Elapsed: {} ms", result.elapsed_ms);
+    }
     
     Ok(())
 }
 
-fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
+async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
     let (min_lon, min_lat, max_lon, max_lat) = parse_bbox(&args.bbox)?;
     let source = parse_source(&args.source)?;
     let depot = args.depot.as_deref().map(parse_depot).transpose()?;
@@ -539,7 +615,7 @@ fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         output_path: extract_path.clone(),
     };
     let extract_result =
-        crate::core::extract::run_extract(&extract_req).context("Pipeline failed at stage 'extract'")?;
+        crate::core::extract::run_extract(&extract_req).await.context("Pipeline failed at stage 'extract'")?;
 
     // Stage 2: Clean
     if !json {
@@ -579,9 +655,12 @@ fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         turn_penalties: TurnPenalties::default(),
         depot,
         oneway_mode: OnewayMode::default(),
+        mode: SolverMode::Cpp,
+        num_vehicles: 1,
+        solver_id: "clarke_wright".to_string(),
     };
     let optimize_result =
-        crate::core::optimize::run_optimize(&optimize_req).context("Pipeline failed at stage 'optimize'")?;
+        crate::core::optimize::run_optimize(&optimize_req).await.context("Pipeline failed at stage 'optimize'")?;
 
     // Output
     let pipeline_result = PipelineResult {
@@ -613,9 +692,9 @@ fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
             pipeline_result.compile.output_size_bytes
         );
         tracing::info!(
-            "Optimize: {:.2} km total, {:.1}% efficient",
+            "Optimize: {:.2} km total, {} vehicles",
             pipeline_result.optimize.total_distance_km,
-            pipeline_result.optimize.efficiency_pct
+            pipeline_result.optimize.num_routes
         );
         tracing::info!("Files in: {}/", args.output_dir);
     }
@@ -623,19 +702,75 @@ fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
     Ok(())
 }
 
+async fn run_agent_cmd(args: AgentArgs, json: bool) -> Result<()> {
+    let input: Box<dyn std::io::Read> = if args.task == "-" {
+        Box::new(std::io::stdin())
+    } else {
+        Box::new(std::fs::File::open(&args.task)?)
+    };
+
+    let task: AgentTask = serde_json::from_reader(input)
+        .context("Failed to parse agent task JSON")?;
+
+    match task {
+        AgentTask::Extract(a) => run_extract_cmd(a, json).await,
+        AgentTask::Compile(a) => run_compile_cmd(a, json),
+        AgentTask::Clean(a) => run_clean_cmd(a, json),
+        AgentTask::Optimize(a) => run_optimize_cmd(a, json).await,
+        AgentTask::Vrp(a) => run_vrp_cmd(a, json).await,
+        AgentTask::Pipeline(a) => run_pipeline_cmd(a, json).await,
+    }
+}
+
+fn run_list_cmd(args: ListArgs, json: bool) -> Result<()> {
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(".") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+                match args.resource {
+                    ResourceType::Maps => {
+                        if ext == "rmp" {
+                            files.push(path.display().to_string());
+                        }
+                    }
+                    ResourceType::Routes => {
+                        if ext == "gpx" || ext == "geojson" {
+                            files.push(path.display().to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if json {
+        output_json(&files)?;
+    } else {
+        println!("Available {:?}:", args.resource);
+        for f in files {
+            println!("  - {f}");
+        }
+    }
+    Ok(())
+}
+
 // ── Entry point ───────────────────────────────────────────────────────
 
-pub fn run() -> Result<()> {
+pub async fn run() -> Result<()> {
     let cli = Cli::parse();
     init_tracing();
 
     let result = match cli.command {
-        Commands::Extract(args) => run_extract_cmd(args, cli.json),
+        Commands::Extract(args) => run_extract_cmd(args, cli.json).await,
         Commands::Compile(args) => run_compile_cmd(args, cli.json),
         Commands::Clean(args) => run_clean_cmd(args, cli.json),
-        Commands::Optimize(args) => run_optimize_cmd(args, cli.json),
-        Commands::Vrp(args) => run_vrp_cmd(args, cli.json),
-        Commands::Pipeline(args) => run_pipeline_cmd(args, cli.json),
+        Commands::Optimize(args) => run_optimize_cmd(args, cli.json).await,
+        Commands::Vrp(args) => run_vrp_cmd(args, cli.json).await,
+        Commands::Pipeline(args) => run_pipeline_cmd(args, cli.json).await,
+        Commands::List(args) => run_list_cmd(args, cli.json),
+        Commands::Agent(args) => run_agent_cmd(args, cli.json).await,
     };
 
     if let Err(e) = result {
