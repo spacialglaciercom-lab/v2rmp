@@ -12,13 +12,13 @@ pub fn poll_event(timeout: Duration) -> anyhow::Result<Option<Event>> {
     }
 }
 
-pub fn handle_event(app: &mut App, ev: Event) -> anyhow::Result<()> {
+pub async fn handle_event(app: &mut App, ev: Event) -> anyhow::Result<()> {
     if let Event::Key(key) = ev {
         if app.input_mode.active {
             handle_input_mode(app, key.code, key.modifiers);
             return Ok(());
         }
-        handle_normal_mode(app, key.code, key.modifiers);
+        handle_normal_mode(app, key.code, key.modifiers).await;
     }
     Ok(())
 }
@@ -37,7 +37,7 @@ fn handle_input_mode(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
     }
 }
 
-fn handle_normal_mode(app: &mut App, code: KeyCode, mods: KeyModifiers) {
+async fn handle_normal_mode(app: &mut App, code: KeyCode, mods: KeyModifiers) {
     // Handle file browser separately
     if app.current_view == View::FileBrowser {
         handle_file_browser_keys(app, code);
@@ -61,16 +61,16 @@ fn handle_normal_mode(app: &mut App, code: KeyCode, mods: KeyModifiers) {
         }
         KeyCode::Up => app.navigate_up(),
         KeyCode::Down => app.navigate_down(),
-        _ => handle_view_keys(app, code, mods),
+        _ => handle_view_keys(app, code, mods).await,
     }
 }
 
-fn handle_view_keys(app: &mut App, code: KeyCode, mods: KeyModifiers) {
+async fn handle_view_keys(app: &mut App, code: KeyCode, mods: KeyModifiers) {
     match app.current_view {
         View::Home => handle_home_keys(app, code, mods),
-        View::Extract => handle_extract_keys(app, code, mods),
+        View::Extract => handle_extract_keys(app, code, mods).await,
         View::Compile => handle_compile_keys(app, code, mods),
-        View::Optimize => handle_optimize_keys(app, code, mods),
+        View::Optimize => handle_optimize_keys(app, code, mods).await,
         View::BrowseMaps => handle_browse_maps_keys(app, code),
         View::BrowseRoutes => handle_browse_routes_keys(app, code),
         View::FileBrowser => {} // Handled separately in handle_normal_mode
@@ -112,7 +112,7 @@ fn handle_home_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
     }
 }
 
-fn handle_extract_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+async fn handle_extract_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
     match code {
         KeyCode::Tab | KeyCode::Char('s') => {
             app.data_source = match app.data_source {
@@ -165,7 +165,7 @@ fn handle_extract_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                 };
 
                 // Execute extraction
-                match crate::core::extract::run_extract(&req) {
+                match crate::core::extract::run_extract(&req).await {
                     Ok(result) => {
                         app.extract_status = crate::app::Status::Done(format!(
                             "Extracted {} nodes, {} edges, {:.2} km → {}",
@@ -284,7 +284,7 @@ fn handle_compile_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
     }
 }
 
-fn handle_optimize_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+async fn handle_optimize_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
     match code {
         KeyCode::Char('c') | KeyCode::Char('C') => {
             app.start_file_browser(InputField::CacheFile);
@@ -304,22 +304,31 @@ fn handle_optimize_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
         KeyCode::Char('d') | KeyCode::Char('D') => {
             app.start_input(InputField::DepotCoordinates);
         }
+        KeyCode::Char('v') | KeyCode::Char('V') => {
+            app.start_input(InputField::NumVehicles);
+        }
+        KeyCode::Char('s') | KeyCode::Char('S') => {
+            app.start_input(InputField::SolverId);
+        }
         KeyCode::Enter => {
             if let Some(cache_path) = app.cache_file.clone() {
                 let penalties = app.turn_penalties.clone();
                 let depot = app.depot_coords;
+                let num_vehicles = app.num_vehicles;
+                let solver_id = app.solver_id.clone();
+                
                 app.optimize_status = crate::app::Status::Running {
                     progress: 0,
                     message: "Optimizing route...".to_string(),
                 };
-                app.log(crate::app::LogLevel::Info, "Starting route optimization");
+                app.log(crate::app::LogLevel::Info, format!("Starting VRP optimization with {}", solver_id));
 
                 // Build optimize request
                 use crate::core::optimize::{run_optimize, OnewayMode, OptimizeRequest};
 
                 let route_path = app.route_file.clone().or_else(|| {
                     Some(format!(
-                        "route_{}.json",
+                        "route_{}.gpx",
                         chrono::Local::now().format("%Y%m%d_%H%M%S")
                     ))
                 });
@@ -330,29 +339,22 @@ fn handle_optimize_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                     turn_penalties: penalties,
                     depot,
                     oneway_mode: OnewayMode::Respect,
+                    num_vehicles,
+                    solver_id,
                 };
 
                 // Execute optimization
-                match run_optimize(&req) {
+                match run_optimize(&req).await {
                     Ok(result) => {
                         app.optimize_status = crate::app::Status::Done(format!(
-                            "Route: {:.2} km, {:.1}% efficient, {} segments",
-                            result.total_distance_km, result.efficiency_pct, result.total_segments
+                            "Route: {:.2} km, {} vehicles, {} stops",
+                            result.total_distance_km, result.num_routes, result.total_segments
                         ));
                         app.log(
                             crate::app::LogLevel::Success,
                             format!(
-                                "Optimization complete: {:.2} km total distance",
-                                result.total_distance_km
-                            ),
-                        );
-                        app.log(
-                            crate::app::LogLevel::Info,
-                            format!(
-                                "Efficiency: {:.1}% ({:.2} km productive, {:.2} km deadhead)",
-                                result.efficiency_pct,
-                                result.total_distance_km - result.deadhead_distance_km,
-                                result.deadhead_distance_km
+                                "Optimization complete: {:.2} km total distance across {} routes",
+                                result.total_distance_km, result.num_routes
                             ),
                         );
                         app.log(

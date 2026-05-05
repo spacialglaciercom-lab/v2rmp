@@ -29,7 +29,7 @@ pub fn draw(f: &mut Frame, app: &App) {
 }
 
 fn draw_header(f: &mut Frame, area: ratatui::layout::Rect) {
-    let title = " rmpca - Route Optimization TUI [v0.3.8] ";
+    let title = " rmpca - Route Optimization TUI [v0.3.9] ";
     let block = ratatui::widgets::Block::default()
         .borders(ratatui::widgets::Borders::ALL)
         .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan));
@@ -178,6 +178,8 @@ pub fn draw_input_prompt(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         crate::app::InputField::RightTurnPenalty => "Right turn penalty",
         crate::app::InputField::UTurnPenalty => "U-turn penalty",
         crate::app::InputField::DepotCoordinates => "Depot coordinates (lat,lon)",
+        crate::app::InputField::NumVehicles => "Number of vehicles",
+        crate::app::InputField::SolverId => "Solver ID (clarke_wright, sweep, two_opt, or_opt, default)",
         crate::app::InputField::CleanInputFile => "Clean input GeoJSON file path",
         crate::app::InputField::CleanOutputFile => "Clean output GeoJSON file path",
     };

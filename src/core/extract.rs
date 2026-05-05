@@ -103,76 +103,122 @@ pub struct ExtractResult {
     pub output_path: String,
 }
 
-/// Extract road network from Overture Maps S3 Parquet files.
-///
-/// This is production implementation for Overture extraction.
-/// For OSM PBF, this currently returns a stub result.
-pub fn run_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
+/// Extract road network from Overture Maps S3 Parquet files or OSM PBF.
+pub async fn run_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
     match req.source {
-        ExtractSource::Overture => run_overture_extract(req),
-        ExtractSource::Osm => {
-            // TODO: Implement OSM PBF extraction using osmpbf crate
-            anyhow::bail!("OSM PBF extraction not yet implemented")
-        }
+        ExtractSource::Overture => run_overture_extract(req).await,
+        ExtractSource::Osm => run_osm_extract(req).await,
     }
 }
 
+/// Run OSM PBF extraction
+async fn run_osm_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
+    // Find the PBF file in the current directory or a default location if not specified
+    // In TUI mode, the user would have provided a path.
+    // For CLI, we might need an extra argument, but currently ExtractArgs doesn't have it.
+    // Let's assume the bbox string might contain a path for now if it's OSM, 
+    // or just look for any .pbf file.
+    
+    let pbf_path = std::env::var("OSM_PBF_PATH").unwrap_or_else(|_| "monaco.osm.pbf".to_string());
+    
+    if !std::path::Path::new(&pbf_path).exists() {
+        anyhow::bail!("OSM PBF file not found: {}. Set OSM_PBF_PATH env var.", pbf_path);
+    }
+
+    use crate::core::osm::pbf_extractor::{OsmExtractor, BBox as OsmBBox, segment_to_feature};
+
+    let extractor = OsmExtractor::new(pbf_path)?;
+    let bbox = OsmBBox {
+        min_lon: req.bbox.min_lon,
+        min_lat: req.bbox.min_lat,
+        max_lon: req.bbox.max_lon,
+        max_lat: req.bbox.max_lat,
+    };
+
+    let classes: Vec<String> = req.road_classes.iter().map(|rc| rc.as_str().to_string()).collect();
+    let segments = extractor.extract_bbox(&bbox, &classes)?;
+
+    let features: Vec<Feature> = segments
+        .into_iter()
+        .map(segment_to_feature)
+        .collect();
+
+    // Build graph statistics
+    let (nodes, edges, total_km) = build_graph_stats(&features)?;
+
+    // Write GeoJSON output
+    let geojson = FeatureCollection {
+        bbox: None,
+        features,
+        foreign_members: None,
+    };
+
+    let geojson_string = serde_json::to_string_pretty(&geojson)?;
+    let output_path = &req.output_path;
+
+    std::fs::File::create(output_path)?
+        .write_all(geojson_string.as_bytes())
+        .context("Failed to write GeoJSON output")?;
+
+    Ok(ExtractResult {
+        nodes,
+        edges,
+        total_km,
+        output_path: output_path.clone(),
+    })
+}
+
 /// Run Overture extraction from S3
-fn run_overture_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
-    let runtime = tokio::runtime::Runtime::new()
-        .context("Failed to create Tokio runtime for async S3 operations")?;
+async fn run_overture_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
+    let bbox: BBox = req.bbox.clone().into();
+    let extractor = OvertureExtractor::new()?;
 
-    runtime.block_on(async {
-        let bbox: BBox = req.bbox.clone().into();
-        let extractor = OvertureExtractor::new()?;
+    tracing::info!(
+        "Extracting Overture data for bbox: [{:.4}, {:.4}, {:.4}, {:.4}]",
+        bbox.min_lon,
+        bbox.min_lat,
+        bbox.max_lon,
+        bbox.max_lat
+    );
 
-        tracing::info!(
-            "Extracting Overture data for bbox: [{:.4}, {:.4}, {:.4}, {:.4}]",
-            bbox.min_lon,
-            bbox.min_lat,
-            bbox.max_lon,
-            bbox.max_lat
-        );
+    let segments = extractor.extract_bbox(&bbox).await?;
 
-        let segments = extractor.extract_bbox(&bbox).await?;
+    tracing::info!("Extracted {} segments from Overture S3", segments.len());
 
-        tracing::info!("Extracted {} segments from Overture S3", segments.len());
+    // Convert segments to GeoJSON features
+    let features: Vec<Feature> = segments
+        .into_iter()
+        .filter(|seg| should_include_segment(seg, &req.road_classes))
+        .map(segment_to_feature)
+        .collect();
 
-        // Convert segments to GeoJSON features
-        let features: Vec<Feature> = segments
-            .into_iter()
-            .filter(|seg| should_include_segment(seg, &req.road_classes))
-            .map(segment_to_feature)
-            .collect();
+    tracing::info!(
+        "After road class filtering: {} road segments",
+        features.len()
+    );
 
-        tracing::info!(
-            "After road class filtering: {} road segments",
-            features.len()
-        );
+    // Build graph statistics
+    let (nodes, edges, total_km) = build_graph_stats(&features)?;
 
-        // Build graph statistics
-        let (nodes, edges, total_km) = build_graph_stats(&features)?;
+    // Write GeoJSON output
+    let geojson = FeatureCollection {
+        bbox: None,
+        features,
+        foreign_members: None,
+    };
 
-        // Write GeoJSON output
-        let geojson = FeatureCollection {
-            bbox: None,
-            features,
-            foreign_members: None,
-        };
+    let geojson_string = serde_json::to_string_pretty(&geojson)?;
+    let output_path = &req.output_path;
 
-        let geojson_string = serde_json::to_string_pretty(&geojson)?;
-        let output_path = &req.output_path;
+    File::create(output_path)?
+        .write_all(geojson_string.as_bytes())
+        .context("Failed to write GeoJSON output")?;
 
-        File::create(output_path)?
-            .write_all(geojson_string.as_bytes())
-            .context("Failed to write GeoJSON output")?;
-
-        Ok(ExtractResult {
-            nodes,
-            edges,
-            total_km,
-            output_path: output_path.clone(),
-        })
+    Ok(ExtractResult {
+        nodes,
+        edges,
+        total_km,
+        output_path: output_path.clone(),
     })
 }
 
