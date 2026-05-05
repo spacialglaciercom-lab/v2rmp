@@ -3,7 +3,7 @@
 //! Queries Overture Maps transportation segments from S3 Parquet files,
 //! filters by bounding box and road class, and builds a road network graph.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use arrow::array::{Array, BinaryArray, BooleanArray, StringArray, StructArray};
 use futures_util::stream::{self, StreamExt};
 use geo_traits::{
@@ -21,6 +21,12 @@ use wkb::reader::read_wkb;
 pub const OVERTURE_S3_BUCKET: &str = "overturemaps-us-west-2";
 pub const OVERTURE_S3_REGION: &str = "us-west-2";
 pub const OVERTURE_RELEASE: &str = "2026-04-15.0";
+
+/// Maximum number of retries for individual file downloads
+const MAX_FILE_RETRIES: usize = 3;
+
+/// Delay between retries for file downloads (milliseconds)
+const RETRY_DELAY_MS: u64 = 1000;
 
 pub fn segment_path() -> String {
     format!(
@@ -144,15 +150,18 @@ pub struct OvertureExtractor {
 impl OvertureExtractor {
     /// Create a new extractor connected to Overture Maps S3
     pub fn new() -> Result<Self> {
-        let client_options = object_store::ClientOptions::new()
-            .with_timeout(std::time::Duration::from_secs(300));
-            
+        let client_options =
+            object_store::ClientOptions::new().with_timeout(std::time::Duration::from_secs(300));
+
         let store = AmazonS3Builder::new()
             .with_bucket_name(OVERTURE_S3_BUCKET)
             .with_region(OVERTURE_S3_REGION)
             .with_skip_signature(true)
             .with_client_options(client_options)
-            .build()?;
+            .build()
+            .context("Failed to create S3 client for Overture Maps. \
+                      Check network connectivity and DNS resolution for \
+                      s3.us-west-2.amazonaws.com")?;
 
         Ok(Self {
             store: Arc::new(store),
@@ -190,7 +199,9 @@ impl OvertureExtractor {
         let mut stream = self.store.list(Some(&prefix));
 
         while let Some(item) = stream.next().await {
-            let meta = item?;
+            let meta = item.context("Failed to list S3 objects. \
+                                      This usually indicates a network connectivity issue \
+                                      or DNS resolution failure for s3.us-west-2.amazonaws.com")?;
             if meta.location.to_string().ends_with(".parquet") {
                 files.push(meta.location);
             }
@@ -203,17 +214,17 @@ impl OvertureExtractor {
 
         let mut segments = Vec::new();
 
-        // Process files in parallel
+        // Process files in parallel with reduced concurrency to avoid S3 rate limiting
         let file_results = stream::iter(files)
             .map(|path| {
                 let store = Arc::clone(&self.store);
                 let bbox = *bbox;
-                async move { 
+                async move {
                     tracing::info!("Processing file: {}", path);
-                    Self::extract_from_file(store.as_ref(), &path, &bbox).await 
+                    Self::extract_from_file(store.as_ref(), &path, &bbox).await
                 }
             })
-            .buffer_unordered(10) // Process up to 10 files concurrently
+            .buffer_unordered(4) // Reduced from 10 to avoid overwhelming S3
             .collect::<Vec<_>>()
             .await;
 
@@ -228,6 +239,53 @@ impl OvertureExtractor {
 
         tracing::info!("Extracted {} total segments from S3", segments.len());
         Ok(segments)
+    }
+
+    /// Extract segments from a single file with retry logic
+    async fn extract_from_file_with_retry(
+        store: &dyn ObjectStore,
+        path: &Path,
+        bbox: &BBox,
+    ) -> Result<Vec<OvertureSegment>> {
+        let mut last_err = None;
+        for attempt in 0..=MAX_FILE_RETRIES {
+            match Self::extract_from_file(store, path, bbox).await {
+                Ok(segments) => return Ok(segments),
+                Err(e) => {
+                    let is_retryable = Self::is_retryable_error(&e);
+                    last_err = Some(e);
+                    if is_retryable && attempt < MAX_FILE_RETRIES {
+                        let delay = std::time::Duration::from_millis(
+                            RETRY_DELAY_MS * 2u64.pow(attempt as u32),
+                        );
+                        tracing::warn!(
+                            "Attempt {}/{} failed for {}, retrying in {:?}: {}",
+                            attempt + 1,
+                            MAX_FILE_RETRIES + 1,
+                            path,
+                            delay,
+                            last_err.as_ref().unwrap()
+                        );
+                        tokio::time::sleep(delay).await;
+                    } else if !is_retryable {
+                        tracing::error!("Non-retryable error for {}: {}", path, last_err.as_ref().unwrap());
+                        break;
+                    }
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("Unknown error")))
+    }
+
+    /// Check if an error is retryable (network/timeout related)
+    fn is_retryable_error(err: &anyhow::Error) -> bool {
+        let err_str = err.to_string();
+        // Retry on network/timeout/connectivity errors but not on data parsing errors
+        err_str.contains("error sending request")
+            || err_str.contains("timeout")
+            || err_str.contains("connection")
+            || err_str.contains("reset")
+            || err_str.contains("broken pipe")
     }
 
     /// Convert a WKB geometry (via geo_traits GeometryTrait) into our Geometry enum.
@@ -281,12 +339,20 @@ impl OvertureExtractor {
         bbox: &BBox,
     ) -> Result<Vec<OvertureSegment>> {
         // Download the file
-        let bytes = store.get(path).await?.bytes().await?;
+        let bytes = store
+            .get(path)
+            .await
+            .with_context(|| format!("Failed to initiate download from S3 for {}", path))?
+            .bytes()
+            .await
+            .with_context(|| format!("Failed to download file content from S3 for {}", path))?;
 
         // Create parquet reader
-        let reader = ParquetRecordBatchReaderBuilder::try_new(bytes)?
+        let reader = ParquetRecordBatchReaderBuilder::try_new(bytes)
+            .with_context(|| format!("Failed to create Parquet reader for {}", path))?
             .with_batch_size(1024)
-            .build()?;
+            .build()
+            .with_context(|| format!("Failed to build Parquet reader for {}", path))?;
 
         let mut segments = Vec::new();
 

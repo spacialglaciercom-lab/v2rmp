@@ -28,7 +28,8 @@ struct Args {
     verbose: bool,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Initialize logging
@@ -114,7 +115,7 @@ fn main() -> Result<()> {
         output_path: args.output,
     };
 
-    let result = v2rmp::core::extract::run_extract(&request)?;
+    let result = v2rmp::core::extract::run_extract(&request).await?;
 
     tracing::info!("Extraction complete!");
     tracing::info!("Nodes: {}", result.nodes);

@@ -6,6 +6,7 @@ const MENU_ITEMS: &[&str] = &[
     "Extract Data (OSM/Overture)",
     "Clean GeoJSON (Repair & Optimize)",
     "Compile Map (GeoJSON -> .rmp)",
+    "Clean GeoJSON",
     "Optimize Route",
     "Browse Cached Maps",
     "Browse Saved Routes",
