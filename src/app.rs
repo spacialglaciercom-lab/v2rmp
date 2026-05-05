@@ -582,7 +582,7 @@ impl App {
     pub fn navigate_up(&mut self) {
         match self.current_view {
             View::Home => {
-                self.workflow_selection = (self.workflow_selection + 4) % 5;
+                self.workflow_selection = (self.workflow_selection + 5) % 6;
             }
             View::BrowseMaps => {
                 let max = self.cached_maps.len().max(1);
@@ -603,7 +603,7 @@ impl App {
     pub fn navigate_down(&mut self) {
         match self.current_view {
             View::Home => {
-                self.workflow_selection = (self.workflow_selection + 1) % 5;
+                self.workflow_selection = (self.workflow_selection + 1) % 6;
             }
             View::BrowseMaps => {
                 let max = self.cached_maps.len().max(1);
