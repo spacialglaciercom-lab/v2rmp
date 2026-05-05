@@ -217,6 +217,10 @@ struct OptimizeArgs {
     #[arg(long, default_value = "respect")]
     oneway: String,
 
+    /// Solver mode: cpp (edge coverage) or vrp (stop visits) (default: cpp)
+    #[arg(short, long, default_value = "cpp")]
+    mode: String,
+
     /// Left turn penalty (default: 1.0)
     #[arg(long, default_value_t = 1.0)]
     left_penalty: f64,
@@ -229,12 +233,12 @@ struct OptimizeArgs {
     #[arg(long, default_value_t = 5.0)]
     uturn_penalty: f64,
 
-    /// Number of vehicles (for VRP)
-    #[arg(short, long, default_value_t = 1)]
+    /// Number of vehicles (for VRP mode only)
+    #[arg(long, default_value_t = 1)]
     vehicles: usize,
 
-    /// Solver algorithm (clarke_wright, sweep, two_opt, or_opt, default)
-    #[arg(short, long, default_value = "clarke_wright")]
+    /// Solver algorithm for VRP mode (clarke_wright, sweep, two_opt, or_opt, default)
+    #[arg(long, default_value = "default")]
     solver: String,
 }
 
@@ -506,9 +510,13 @@ fn run_clean_cmd(args: CleanArgs, json: bool) -> Result<()> {
 async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
     let depot = args.depot.as_deref().map(parse_depot).transpose()?;
     let oneway_mode = parse_oneway(&args.oneway)?;
+    let mode = match args.mode.to_lowercase().as_str() {
+        "vrp" => SolverMode::Vrp,
+        _ => SolverMode::Cpp,
+    };
 
     if !json {
-        tracing::info!("Optimizing route from {}", args.input);
+        tracing::info!("Optimizing route from {} (mode: {})", args.input, if mode == SolverMode::Vrp { "VRP" } else { "CPP" });
     }
 
     let req = OptimizeRequest {
@@ -521,7 +529,7 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
         },
         depot,
         oneway_mode,
-        mode: SolverMode::Cpp,
+        mode,
         num_vehicles: args.vehicles,
         solver_id: args.solver,
     };

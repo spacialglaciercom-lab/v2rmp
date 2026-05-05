@@ -325,7 +325,7 @@ async fn handle_optimize_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers)
                     progress: 0,
                     message: "Optimizing route...".to_string(),
                 };
-                app.log(crate::app::LogLevel::Info, format!("Starting VRP optimization with {}", solver_id));
+                app.log(crate::app::LogLevel::Info, format!("Starting optimization (mode: VRP, solver: {})", solver_id));
 
                 // Build optimize request
                 use crate::core::optimize::{run_optimize, OnewayMode, OptimizeRequest, SolverMode};
@@ -343,7 +343,7 @@ async fn handle_optimize_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers)
                     turn_penalties: penalties,
                     depot,
                     oneway_mode: OnewayMode::Respect,
-                    mode: SolverMode::Cpp,
+                    mode: SolverMode::Vrp,
                     num_vehicles,
                     solver_id,
                 };
