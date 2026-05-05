@@ -655,21 +655,29 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
 fn write_gpx_multi(path: &str, routes: &Vec<Vec<VRPSolverStop>>) -> anyhow::Result<()> {
     use std::io::Write;
     let mut file = std::fs::File::create(path)?;
-    writeln!(file, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>")?;
-    writeln!(file, "<gpx version=\"1.1\" creator=\"rmpca\" xmlns=\"http://www.topografix.com/GPX/1/1\">")?;
 
-    for (i, route) in routes.iter().enumerate() {
-        writeln!(file, "  <trk>")?;
-        writeln!(file, "    <name>Vehicle {}</name>", i + 1)?;
-        writeln!(file, "    <trkseg>")?;
-        for stop in route {
-            writeln!(file, "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"></trkpt>", stop.lat, stop.lon)?;
-        }
-        writeln!(file, "    </trkseg>")?;
-        writeln!(file, "  </trk>")?;
+    writeln!(file, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>")?;
+    writeln!(
+        file,
+        "<gpx version=\"1.1\" creator=\"rmpca\" xmlns=\"http://www.topografix.com/GPX/1/1\">"
+    )?;
+    writeln!(file, "  <trk>")?;
+    writeln!(file, "    <name>Optimized Route</name>")?;
+    writeln!(file, "    <trkseg>")?;
+
+    for &node_idx in circuit {
+        let node = &nodes[node_idx as usize];
+        writeln!(
+            file,
+            "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"></trkpt>",
+            node.lat, node.lon
+        )?;
     }
 
+    writeln!(file, "    </trkseg>")?;
+    writeln!(file, "  </trk>")?;
     writeln!(file, "</gpx>")?;
+
     Ok(())
 }
 

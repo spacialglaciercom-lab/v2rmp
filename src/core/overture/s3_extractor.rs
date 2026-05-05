@@ -150,9 +150,8 @@ pub struct OvertureExtractor {
 impl OvertureExtractor {
     /// Create a new extractor connected to Overture Maps S3
     pub fn new() -> Result<Self> {
-        let client_options = object_store::ClientOptions::new()
-            .with_timeout(std::time::Duration::from_secs(600))
-            .with_connect_timeout(std::time::Duration::from_secs(30));
+        let client_options =
+            object_store::ClientOptions::new().with_timeout(std::time::Duration::from_secs(300));
 
         let store = AmazonS3Builder::new()
             .with_bucket_name(OVERTURE_S3_BUCKET)
@@ -222,7 +221,7 @@ impl OvertureExtractor {
                 let bbox = *bbox;
                 async move {
                     tracing::info!("Processing file: {}", path);
-                    Self::extract_from_file_with_retry(store.as_ref(), &path, &bbox).await
+                    Self::extract_from_file(store.as_ref(), &path, &bbox).await
                 }
             })
             .buffer_unordered(4) // Reduced from 10 to avoid overwhelming S3
