@@ -281,6 +281,8 @@ pub enum InputField {
     RightTurnPenalty,
     UTurnPenalty,
     DepotCoordinates,
+    NumVehicles,
+    SolverId,
     CleanInputFile,
     CleanOutputFile,
 }
@@ -314,6 +316,8 @@ pub struct App {
     pub route_file: Option<String>,
     pub turn_penalties: TurnPenalties,
     pub depot_coords: Option<(f64, f64)>,
+    pub num_vehicles: usize,
+    pub solver_id: String,
     pub optimize_status: Status,
 
     // Browse state
@@ -365,6 +369,8 @@ impl App {
             route_file: None,
             turn_penalties: TurnPenalties::default(),
             depot_coords: None,
+            num_vehicles: 1,
+            solver_id: "clarke_wright".to_string(),
             optimize_status: Status::Ready,
 
             cached_maps: Vec::new(),
@@ -568,6 +574,16 @@ impl App {
                         );
                     }
                 }
+            }
+            InputField::NumVehicles => {
+                if let Ok(v) = value.parse::<usize>() {
+                    self.num_vehicles = v;
+                    self.log(LogLevel::Success, format!("Number of vehicles set: {}", v));
+                }
+            }
+            InputField::SolverId => {
+                self.solver_id = value.clone();
+                self.log(LogLevel::Success, format!("Solver ID set: {}", value));
             }
         }
         self.input_mode.active = false;

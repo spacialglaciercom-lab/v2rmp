@@ -1,20 +1,23 @@
+#![allow(dead_code)]
+#![allow(unused_imports)]
 mod app;
 mod cli;
 mod core;
 mod event;
 mod ui;
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     // No arguments = launch the TUI; any arguments = CLI mode
     if std::env::args().len() == 1 {
-        run_tui()
+        run_tui().await
     } else {
-        cli::run()?;
+        cli::run().await?;
         Ok(())
     }
 }
 
-fn run_tui() -> anyhow::Result<()> {
+async fn run_tui() -> anyhow::Result<()> {
     use std::io;
     use std::time::Duration;
 
@@ -35,7 +38,7 @@ fn run_tui() -> anyhow::Result<()> {
 
     // App init
     let mut app = app::App::new();
-    app.log(app::LogLevel::Info, "rmpca v0.3.8 started");
+    app.log(app::LogLevel::Info, "rmpca v0.3.9 started");
     app.log(
         app::LogLevel::Info,
         "Ready — select a workflow step to begin",
@@ -47,7 +50,7 @@ fn run_tui() -> anyhow::Result<()> {
         terminal.draw(|f| ui::draw(f, &app))?;
 
         if let Some(ev) = event::poll_event(tick_rate)? {
-            event::handle_event(&mut app, ev)?;
+            event::handle_event(&mut app, ev).await?;
         }
     }
 
