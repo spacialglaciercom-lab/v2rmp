@@ -1,14 +1,14 @@
 [package]
 name = "v2rmp"
-version = "0.3.8"
+version = "0.4.0"
 edition = "2021"
-description = "rmpca — Route Optimization TUI"
+description = "rmpca — Route Optimization TUI & Agent Engine"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/spacialglaciercom-lab/v2rmp"
 homepage = "https://github.com/spacialglaciercom-lab/v2rmp"
 readme = "README.md"
-keywords = ["route", "optimization", "tui", "gis", "osm"]
-categories = ["command-line-utilities", "visualization"]
+keywords = ["vrp", "route-optimization", "tui", "agent", "osm"]
+categories = ["command-line-utilities", "algorithms", "visualization"]
 exclude = [
     "monaco.osm.pbf",
     "target/",
@@ -35,6 +35,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = "0.4"
 anyhow = "1"
+async-trait = "0.1"
+lazy_static = "1.4"
+reqwest = { version = "0.12", features = ["json"] }
+osmpbf = "0.3"
 clap = { version = "4.5", features = ["derive"] }
 dirs = "5.0"
 shellexpand = "3.1"

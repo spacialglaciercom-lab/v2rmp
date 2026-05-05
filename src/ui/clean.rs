@@ -2,7 +2,6 @@ use ratatui::Frame;
 
 use crate::app::{App, Status};
 
-#[allow(dead_code)]
 pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let block = ratatui::widgets::Block::default()
         .title(" Clean GeoJSON ")
@@ -150,12 +149,10 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     super::draw_input_prompt(f, app, area);
 }
 
-#[allow(dead_code)]
 fn span_raw(s: &str) -> ratatui::text::Span<'static> {
     ratatui::text::Span::raw(s.to_string())
 }
 
-#[allow(dead_code)]
 fn span_val(s: String, highlighted: bool) -> ratatui::text::Span<'static> {
     if highlighted {
         ratatui::text::Span::styled(
@@ -172,7 +169,6 @@ fn span_val(s: String, highlighted: bool) -> ratatui::text::Span<'static> {
     }
 }
 
-#[allow(dead_code)]
 fn ratui_line(spans: Vec<ratatui::text::Span<'static>>) -> ratatui::text::Line<'static> {
     ratatui::text::Line::from(spans)
 }

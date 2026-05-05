@@ -29,7 +29,7 @@ pub fn draw(f: &mut Frame, app: &App) {
 }
 
 fn draw_header(f: &mut Frame, area: ratatui::layout::Rect) {
-    let title = " rmpca - Route Optimization TUI [v0.3.8] ";
+    let title = " rmpca - Route Optimization TUI [v0.3.9] ";
     let block = ratatui::widgets::Block::default()
         .borders(ratatui::widgets::Borders::ALL)
         .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan));
@@ -52,7 +52,7 @@ fn draw_main(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         View::BrowseRoutes => browse_routes::draw(f, app, area),
         View::FileBrowser => file_browser::draw(f, app, area),
         View::Help => draw_help(f, area),
-        View::Clean => home::draw(f, app, area),
+        View::Clean => clean::draw(f, app, area),
     }
 }
 
@@ -114,7 +114,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             "[↑↓] Navigate  [Enter] Select  [Backspace] Parent  [h] Toggle hidden  [Esc] Cancel"
         }
         View::Help => "[Esc] Home  [q] Quit",
-        View::Clean => "[Esc] Home  [q] Quit",
+        View::Clean => "[Esc] Home  [I] Input file  [O] Output file  [Space] Toggle  [Enter] Run clean",
     };
 
     let paragraph = ratatui::widgets::Paragraph::new(ratatui::text::Span::styled(
@@ -151,8 +151,9 @@ fn draw_help(f: &mut Frame, area: ratatui::layout::Rect) {
         ratatui::text::Line::from("Workflow Steps:"),
         ratatui::text::Line::from("  1. Extract road data from OSM or Overture"),
         ratatui::text::Line::from("  2. Compile GeoJSON into binary .rmp format"),
-        ratatui::text::Line::from("  3. Optimize route with turn penalties"),
-        ratatui::text::Line::from("  4. Browse cached maps and saved routes"),
+        ratatui::text::Line::from("  3. Clean GeoJSON (repair, dedupe, simplify)"),
+        ratatui::text::Line::from("  4. Optimize route with turn penalties"),
+        ratatui::text::Line::from("  5. Browse cached maps and saved routes"),
         ratatui::text::Line::from(""),
         ratatui::text::Line::from("Core algorithms: CPP (Eulerian circuit), TSP (2-opt),"),
         ratatui::text::Line::from("VRP (OR-Tools), haversine distance, bearing-based turns."),
@@ -178,6 +179,8 @@ pub fn draw_input_prompt(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         crate::app::InputField::RightTurnPenalty => "Right turn penalty",
         crate::app::InputField::UTurnPenalty => "U-turn penalty",
         crate::app::InputField::DepotCoordinates => "Depot coordinates (lat,lon)",
+        crate::app::InputField::NumVehicles => "Number of vehicles",
+        crate::app::InputField::SolverId => "Solver ID (clarke_wright, sweep, two_opt, or_opt, default)",
         crate::app::InputField::CleanInputFile => "Clean input GeoJSON file path",
         crate::app::InputField::CleanOutputFile => "Clean output GeoJSON file path",
     };
