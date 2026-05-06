@@ -10,10 +10,19 @@ struct SolveResult {
     total_time: f64,
 }
 
-fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize, balance_load: bool) -> SolveResult {
+fn solve(
+    matrix: &DistMatrix,
+    locations: &[VRPSolverStop],
+    num_vehicles: usize,
+    balance_load: bool,
+) -> SolveResult {
     let n = matrix.len();
     if n <= 1 {
-        return SolveResult { routes: vec![vec![0]], total_distance: 0.0, total_time: 0.0 };
+        return SolveResult {
+            routes: vec![vec![0]],
+            total_distance: 0.0,
+            total_time: 0.0,
+        };
     }
 
     let depot = &locations[0];
@@ -23,7 +32,9 @@ fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize, 
         let lb = &locations[b];
         let angle_a = (la.lat - depot.lat).atan2(la.lon - depot.lon);
         let angle_b = (lb.lat - depot.lat).atan2(lb.lon - depot.lon);
-        angle_a.partial_cmp(&angle_b).unwrap_or(std::cmp::Ordering::Equal)
+        angle_a
+            .partial_cmp(&angle_b)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     let per_route = (stop_indices.len() as f64 / num_vehicles as f64).ceil() as usize;
@@ -32,9 +43,13 @@ fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize, 
     for v in 0..num_vehicles {
         let start = v * per_route;
         let end = std::cmp::min(start + per_route, stop_indices.len());
-        if start >= stop_indices.len() { break; }
+        if start >= stop_indices.len() {
+            break;
+        }
         let segment = &stop_indices[start..end];
-        if segment.is_empty() { continue; }
+        if segment.is_empty() {
+            continue;
+        }
 
         let mut route = vec![0];
         let mut rem: std::collections::HashSet<usize> = segment.iter().copied().collect();
@@ -57,7 +72,13 @@ fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize, 
         routes.push(route);
     }
 
-    let intermediate_count = |r: &[usize]| -> usize { if r.len() > 2 { r.len() - 2 } else { 0 } };
+    let intermediate_count = |r: &[usize]| -> usize {
+        if r.len() > 2 {
+            r.len() - 2
+        } else {
+            0
+        }
+    };
 
     let mut improved = true;
     let max_passes = 100;
@@ -69,33 +90,51 @@ fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize, 
 
         'outer: for ri in 0..routes.len() {
             let route_a_len = routes[ri].len();
-            if route_a_len < 3 { continue; }
+            if route_a_len < 3 {
+                continue;
+            }
 
             for k in 1..=3usize {
                 for pos in 1..(route_a_len.saturating_sub(k - 1)) {
-                    if pos + k > route_a_len - 1 { break; }
+                    if pos + k > route_a_len - 1 {
+                        break;
+                    }
                     let chain_first = routes[ri][pos];
                     let chain_last = routes[ri][pos + k - 1];
                     let prev = routes[ri][pos - 1];
                     let next_idx = pos + k;
-                    let next = if next_idx < routes[ri].len() { routes[ri][next_idx] } else { routes[ri][0] };
+                    let next = if next_idx < routes[ri].len() {
+                        routes[ri][next_idx]
+                    } else {
+                        routes[ri][0]
+                    };
 
-                    let remove_gain = matrix_get_dist(matrix, prev, chain_first) + matrix_get_dist(matrix, chain_last, next) - matrix_get_dist(matrix, prev, next);
+                    let remove_gain = matrix_get_dist(matrix, prev, chain_first)
+                        + matrix_get_dist(matrix, chain_last, next)
+                        - matrix_get_dist(matrix, prev, next);
 
                     let mut best_gain = 1e-9;
                     let mut best_rj: Option<usize> = None;
                     let mut best_ins: Option<usize> = None;
                     let mut best_rev = false;
 
-                    for rj in 0..routes.len() {
+                    for (rj, _) in routes.iter().enumerate() {
                         let route_b_len = routes[rj].len();
                         for ins in 0..route_b_len.saturating_sub(1) {
-                            if rj == ri && ins >= pos.saturating_sub(1) && ins < pos + k { continue; }
+                            if rj == ri && ins >= pos.saturating_sub(1) && ins < pos + k {
+                                continue;
+                            }
 
                             let a_node = routes[rj][ins];
-                            let b_node = if ins + 1 < route_b_len { routes[rj][ins + 1] } else { routes[rj][0] };
+                            let b_node = if ins + 1 < route_b_len {
+                                routes[rj][ins + 1]
+                            } else {
+                                routes[rj][0]
+                            };
 
-                            let cost_fwd = matrix_get_dist(matrix, a_node, chain_first) + matrix_get_dist(matrix, chain_last, b_node) - matrix_get_dist(matrix, a_node, b_node);
+                            let cost_fwd = matrix_get_dist(matrix, a_node, chain_first)
+                                + matrix_get_dist(matrix, chain_last, b_node)
+                                - matrix_get_dist(matrix, a_node, b_node);
                             if remove_gain - cost_fwd > best_gain {
                                 best_gain = remove_gain - cost_fwd;
                                 best_rj = Some(rj);
@@ -104,7 +143,9 @@ fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize, 
                             }
 
                             if k > 1 {
-                                let cost_rev = matrix_get_dist(matrix, a_node, chain_last) + matrix_get_dist(matrix, chain_first, b_node) - matrix_get_dist(matrix, a_node, b_node);
+                                let cost_rev = matrix_get_dist(matrix, a_node, chain_last)
+                                    + matrix_get_dist(matrix, chain_first, b_node)
+                                    - matrix_get_dist(matrix, a_node, b_node);
                                 if remove_gain - cost_rev > best_gain {
                                     best_gain = remove_gain - cost_rev;
                                     best_rj = Some(rj);
@@ -121,19 +162,33 @@ fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize, 
                     if balance_load && rj_val != ri {
                         let new_count_a = intermediate_count(&routes[ri]).saturating_sub(k);
                         let new_count_b = intermediate_count(&routes[rj_val]).saturating_add(k);
-                        let counts: Vec<usize> = routes.iter().enumerate().map(|(idx, r)| {
-                            if idx == ri { new_count_a }
-                            else if idx == rj_val { new_count_b }
-                            else { intermediate_count(r) }
-                        }).collect();
+                        let counts: Vec<usize> = routes
+                            .iter()
+                            .enumerate()
+                            .map(|(idx, r)| {
+                                if idx == ri {
+                                    new_count_a
+                                } else if idx == rj_val {
+                                    new_count_b
+                                } else {
+                                    intermediate_count(r)
+                                }
+                            })
+                            .collect();
                         let max_c = *counts.iter().max().unwrap_or(&0);
                         let min_c = *counts.iter().min().unwrap_or(&0);
-                        if max_c - min_c > 1 { continue; }
+                        if max_c - min_c > 1 {
+                            continue;
+                        }
                     }
 
                     improved = true;
                     let chain: Vec<usize> = routes[ri][pos..pos + k].to_vec();
-                    let insert_chain: Vec<usize> = if best_rev { chain.iter().copied().rev().collect() } else { chain.clone() };
+                    let insert_chain: Vec<usize> = if best_rev {
+                        chain.iter().copied().rev().collect()
+                    } else {
+                        chain.clone()
+                    };
 
                     if rj_val == ri {
                         let mut r = routes[ri].clone();
@@ -164,7 +219,11 @@ fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize, 
 
     let final_routes: Vec<Vec<usize>> = routes.into_iter().filter(|r| r.len() > 2).collect();
     if final_routes.is_empty() {
-        return SolveResult { routes: vec![vec![0, 0]], total_distance: 0.0, total_time: 0.0 };
+        return SolveResult {
+            routes: vec![vec![0, 0]],
+            total_distance: 0.0,
+            total_time: 0.0,
+        };
     }
 
     let mut total_distance = 0.0;
@@ -176,19 +235,32 @@ fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize, 
         }
     }
 
-    SolveResult { routes: final_routes, total_distance, total_time }
+    SolveResult {
+        routes: final_routes,
+        total_distance,
+        total_time,
+    }
 }
 
 pub struct OrOptSolver;
 
 #[async_trait::async_trait]
 impl VRPSolver for OrOptSolver {
-    fn id(&self) -> &str { "or_opt" }
-    fn label(&self) -> &str { "Or-Opt (local search)" }
-    fn requires_matrix(&self) -> bool { true }
+    fn id(&self) -> &str {
+        "or_opt"
+    }
+    fn label(&self) -> &str {
+        "Or-Opt (local search)"
+    }
+    fn requires_matrix(&self) -> bool {
+        true
+    }
 
     async fn solve(&self, input: &VRPSolverInput) -> Result<VRPSolverOutput, String> {
-        let matrix = input.matrix.as_ref().ok_or("Or-Opt solver requires a distance matrix")?;
+        let matrix = input
+            .matrix
+            .as_ref()
+            .ok_or("Or-Opt solver requires a distance matrix")?;
         let balance_load = input.objective == VrpObjective::BalanceLoad;
         let result = solve(matrix, &input.locations, input.num_vehicles, balance_load);
         let routes: Vec<Vec<VRPSolverStop>> = result
@@ -206,16 +278,24 @@ impl VRPSolver for OrOptSolver {
             unassigned: None,
         })
     }
-    fn clone_box(&self) -> Box<dyn VRPSolver> { Box::new(OrOptSolver) }
+    fn clone_box(&self) -> Box<dyn VRPSolver> {
+        Box::new(OrOptSolver)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::super::utils::build_haversine_matrix;
+    use super::*;
 
     fn make_stop(lat: f64, lon: f64, label: &str) -> VRPSolverStop {
-        VRPSolverStop { lat, lon, label: label.into(), demand: None, arrival_time: None }
+        VRPSolverStop {
+            lat,
+            lon,
+            label: label.into(),
+            demand: None,
+            arrival_time: None,
+        }
     }
 
     fn make_input(locations: Vec<VRPSolverStop>, num_vehicles: usize) -> VRPSolverInput {

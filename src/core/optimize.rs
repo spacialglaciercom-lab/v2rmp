@@ -1,3 +1,5 @@
+use crate::core::vrp::registry::solve_with;
+use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Read;
@@ -45,8 +47,12 @@ pub struct OptimizeRequest {
     pub solver_id: String,
 }
 
-fn default_num_vehicles() -> usize { 1 }
-fn default_solver_id() -> String { "default".to_string() }
+fn default_num_vehicles() -> usize {
+    1
+}
+fn default_solver_id() -> String {
+    "default".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum OnewayMode {
@@ -567,25 +573,30 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
     }
 
     // 2. Build VRP Stops
-    let mut stops: Vec<VRPSolverStop> = nodes.iter().enumerate().map(|(i, n)| {
-        VRPSolverStop {
+    let mut stops: Vec<VRPSolverStop> = nodes
+        .iter()
+        .enumerate()
+        .map(|(i, n)| VRPSolverStop {
             lat: n.lat,
             lon: n.lon,
             label: format!("Node {}", i),
             demand: Some(1.0),
             arrival_time: None,
-        }
-    }).collect();
+        })
+        .collect();
 
     // Add depot at start if specified
     if let Some((dlat, dlon)) = req.depot {
-        stops.insert(0, VRPSolverStop {
-            lat: dlat,
-            lon: dlon,
-            label: "Depot".into(),
-            demand: Some(0.0),
-            arrival_time: None,
-        });
+        stops.insert(
+            0,
+            VRPSolverStop {
+                lat: dlat,
+                lon: dlon,
+                label: "Depot".into(),
+                demand: Some(0.0),
+                arrival_time: None,
+            },
+        );
     }
 
     // 3. Build Distance Matrix (Haversine for now)
@@ -604,19 +615,25 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         window_close: None,
     };
 
-    let output = solve_with(&req.solver_id, &vrp_input).await
+    let output = solve_with(&req.solver_id, &vrp_input)
+        .await
         .map_err(|e| anyhow::anyhow!("VRP Solver error: {}", e))?;
 
     // 5. Compute Stats
-    let mut turns = TurnSummary { left: 0, right: 0, u_turn: 0, straight: 0 };
+    let mut turns = TurnSummary {
+        left: 0,
+        right: 0,
+        u_turn: 0,
+        straight: 0,
+    };
 
     if let Some(ref routes) = output.routes {
         for route in routes {
             if route.len() > 2 {
                 for i in 1..route.len() - 1 {
-                    let prev = &route[i-1];
+                    let prev = &route[i - 1];
                     let curr = &route[i];
-                    let next = &route[i+1];
+                    let next = &route[i + 1];
                     let b_in = bearing(prev.lat, prev.lon, curr.lat, curr.lon);
                     let b_out = bearing(curr.lat, curr.lon, next.lat, next.lon);
                     let b_in_rev = (b_in + 180.0) % 360.0;
@@ -652,7 +669,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
     })
 }
 
-fn write_gpx_multi(path: &str, routes: &Vec<Vec<VRPSolverStop>>) -> anyhow::Result<()> {
+fn write_gpx_multi(path: &str, routes: &[Vec<VRPSolverStop>]) -> anyhow::Result<()> {
     use std::io::Write;
     let mut file = std::fs::File::create(path)?;
 
@@ -661,21 +678,20 @@ fn write_gpx_multi(path: &str, routes: &Vec<Vec<VRPSolverStop>>) -> anyhow::Resu
         file,
         "<gpx version=\"1.1\" creator=\"rmpca\" xmlns=\"http://www.topografix.com/GPX/1/1\">"
     )?;
-    writeln!(file, "  <trk>")?;
-    writeln!(file, "    <name>Optimized Route</name>")?;
-    writeln!(file, "    <trkseg>")?;
-
-    for &node_idx in circuit {
-        let node = &nodes[node_idx as usize];
-        writeln!(
-            file,
-            "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"></trkpt>",
-            node.lat, node.lon
-        )?;
+    for (i, route) in routes.iter().enumerate() {
+        writeln!(file, "  <trk>")?;
+        writeln!(file, "    <name>Optimized Route {}</name>", i + 1)?;
+        writeln!(file, "    <trkseg>")?;
+        for stop in route {
+            writeln!(
+                file,
+                "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"></trkpt>",
+                stop.lat, stop.lon
+            )?;
+        }
+        writeln!(file, "    </trkseg>")?;
+        writeln!(file, "  </trk>")?;
     }
-
-    writeln!(file, "    </trkseg>")?;
-    writeln!(file, "  </trk>")?;
     writeln!(file, "</gpx>")?;
 
     Ok(())
@@ -689,13 +705,6 @@ pub async fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         SolverMode::Cpp => run_cpp_optimize(req),
         SolverMode::Vrp => run_vrp_optimize(req).await,
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct AdjEntry {
-    to: u32,
-    weight_m: f64,
-    edge_idx: usize,
 }
 
 #[cfg(test)]
@@ -768,7 +777,7 @@ mod tests {
             num_vehicles: 1,
             solver_id: "default".to_string(),
         };
-        let result = run_optimize(&req);
+        let _result = run_optimize(&req);
         // run_optimize is async but CPP is sync, so we need to use tokio
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(run_optimize(&req)).unwrap();

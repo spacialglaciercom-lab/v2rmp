@@ -114,7 +114,9 @@ fn draw_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             "[↑↓] Navigate  [Enter] Select  [Backspace] Parent  [h] Toggle hidden  [Esc] Cancel"
         }
         View::Help => "[Esc] Home  [q] Quit",
-        View::Clean => "[Esc] Home  [I] Input file  [O] Output file  [Space] Toggle  [Enter] Run clean",
+        View::Clean => {
+            "[Esc] Home  [I] Input file  [O] Output file  [Space] Toggle  [Enter] Run clean"
+        }
     };
 
     let paragraph = ratatui::widgets::Paragraph::new(ratatui::text::Span::styled(
@@ -180,7 +182,9 @@ pub fn draw_input_prompt(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         crate::app::InputField::UTurnPenalty => "U-turn penalty",
         crate::app::InputField::DepotCoordinates => "Depot coordinates (lat,lon)",
         crate::app::InputField::NumVehicles => "Number of vehicles",
-        crate::app::InputField::SolverId => "Solver ID (clarke_wright, sweep, two_opt, or_opt, default)",
+        crate::app::InputField::SolverId => {
+            "Solver ID (clarke_wright, sweep, two_opt, or_opt, default)"
+        }
         crate::app::InputField::CleanInputFile => "Clean input GeoJSON file path",
         crate::app::InputField::CleanOutputFile => "Clean output GeoJSON file path",
     };

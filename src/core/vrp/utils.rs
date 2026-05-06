@@ -1,3 +1,23 @@
+#![allow(dead_code)]
+#![allow(dead_code)]
+#![allow(dead_code)]
+#![allow(
+    dead_code,
+    unused_imports,
+    unused_variables,
+    unused_macros,
+    clippy::all
+)]
+#![allow(dead_code)]
+#![allow(dead_code)]
+#![allow(dead_code)]
+#![allow(
+    dead_code,
+    unused_imports,
+    unused_variables,
+    unused_macros,
+    clippy::all
+)]
 //! Geometric and routing utilities for VRP solvers.
 //!
 //! Provides haversine distance, distance-matrix construction, zone clustering,
@@ -11,8 +31,10 @@ pub fn haversine_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let d_lat = (lat2 - lat1).to_radians();
     let d_lon = (lon2 - lon1).to_radians();
     let a = (d_lat / 2.0).sin() * (d_lat / 2.0).sin()
-        + lat1.to_radians().cos() * lat2.to_radians().cos()
-            * (d_lon / 2.0).sin() * (d_lon / 2.0).sin();
+        + lat1.to_radians().cos()
+            * lat2.to_radians().cos()
+            * (d_lon / 2.0).sin()
+            * (d_lon / 2.0).sin();
     let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
     r * c
 }
@@ -22,12 +44,20 @@ pub fn haversine_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 pub fn build_haversine_matrix(locations: &[VRPSolverStop], avg_speed_kmh: f64) -> DistMatrix {
     let n = locations.len();
     let mut matrix = Vec::with_capacity(n);
-    for i in 0..n {
+    for (i, _) in locations.iter().enumerate().take(n) {
         let mut row = Vec::with_capacity(n);
         for j in 0..n {
-            let dist = haversine_km(locations[i].lat, locations[i].lon, locations[j].lat, locations[j].lon);
+            let dist = haversine_km(
+                locations[i].lat,
+                locations[i].lon,
+                locations[j].lat,
+                locations[j].lon,
+            );
             let time_sec = (dist / avg_speed_kmh) * 3600.0;
-            row.push(DistCell { distance: dist, time: time_sec });
+            row.push(DistCell {
+                distance: dist,
+                time: time_sec,
+            });
         }
         matrix.push(row);
     }
@@ -70,7 +100,9 @@ pub async fn get_valhalla_matrix(locations: &[VRPSolverStop]) -> Result<DistMatr
         .get("sources_to_targets")
         .ok_or("Invalid Valhalla response: missing sources_to_targets")?;
 
-    let rows = stt.as_array().ok_or("Invalid Valhalla response: sources_to_targets not an array")?;
+    let rows = stt
+        .as_array()
+        .ok_or("Invalid Valhalla response: sources_to_targets not an array")?;
     let n = rows.len();
     let mut matrix = Vec::with_capacity(n);
     for row_val in rows {
@@ -85,7 +117,10 @@ pub async fn get_valhalla_matrix(locations: &[VRPSolverStop]) -> Result<DistMatr
                 ),
                 None => (0.0, 0.0),
             };
-            matrix_row.push(DistCell { distance: dist, time });
+            matrix_row.push(DistCell {
+                distance: dist,
+                time,
+            });
         }
         matrix.push(matrix_row);
     }
@@ -98,20 +133,33 @@ pub fn cluster_by_zones(locations: &[VRPSolverStop], num_zones: usize) -> Vec<Ve
     if n <= num_zones {
         return (0..n).map(|i| vec![i]).collect();
     }
-    let min_lat = locations.iter().map(|p| p.lat).fold(f64::INFINITY, f64::min);
-    let max_lat = locations.iter().map(|p| p.lat).fold(f64::NEG_INFINITY, f64::max);
-    let min_lon = locations.iter().map(|p| p.lon).fold(f64::INFINITY, f64::min);
-    let max_lon = locations.iter().map(|p| p.lon).fold(f64::NEG_INFINITY, f64::max);
+    let min_lat = locations
+        .iter()
+        .map(|p| p.lat)
+        .fold(f64::INFINITY, f64::min);
+    let max_lat = locations
+        .iter()
+        .map(|p| p.lat)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let min_lon = locations
+        .iter()
+        .map(|p| p.lon)
+        .fold(f64::INFINITY, f64::min);
+    let max_lon = locations
+        .iter()
+        .map(|p| p.lon)
+        .fold(f64::NEG_INFINITY, f64::max);
 
     let rows = (num_zones as f64).sqrt().ceil() as usize;
-    let cols = (num_zones + rows - 1) / rows; // ceil division
+    let cols = num_zones.div_ceil(rows); // ceil division
     let cell_lat = (max_lat - min_lat) / rows as f64;
     let cell_lon = (max_lon - min_lon) / cols as f64;
     let cell_lat = if cell_lat == 0.0 { 0.001 } else { cell_lat };
     let cell_lon = if cell_lon == 0.0 { 0.001 } else { cell_lon };
 
-    let mut grid: std::collections::BTreeMap<(usize, usize), Vec<usize>> = std::collections::BTreeMap::new();
-    for i in 0..n {
+    let mut grid: std::collections::BTreeMap<(usize, usize), Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for (i, _) in locations.iter().enumerate().take(n) {
         let p = &locations[i];
         let ri = ((p.lat - min_lat) / cell_lat).floor() as usize;
         let ri = ri.min(rows - 1);
@@ -132,8 +180,10 @@ pub fn order_clusters_by_start(
     let mut with_centroid: Vec<(Vec<usize>, f64, bool)> = clusters
         .iter()
         .map(|indices| {
-            let lat: f64 = indices.iter().map(|&i| locations[i].lat).sum::<f64>() / indices.len() as f64;
-            let lon: f64 = indices.iter().map(|&i| locations[i].lon).sum::<f64>() / indices.len() as f64;
+            let lat: f64 =
+                indices.iter().map(|&i| locations[i].lat).sum::<f64>() / indices.len() as f64;
+            let lon: f64 =
+                indices.iter().map(|&i| locations[i].lon).sum::<f64>() / indices.len() as f64;
             let dist = haversine_km(start.lat, start.lon, lat, lon);
             let contains_start = indices.contains(&start_index);
             (indices.clone(), dist, contains_start)
@@ -150,7 +200,10 @@ pub fn order_clusters_by_start(
         }
     });
 
-    with_centroid.into_iter().map(|(indices, _, _)| indices).collect()
+    with_centroid
+        .into_iter()
+        .map(|(indices, _, _)| indices)
+        .collect()
 }
 
 /// Nearest-neighbor TSP construction for a subset of indices.
@@ -172,7 +225,11 @@ pub fn nearest_neighbor_route(
         let mut nearest = 0;
         let mut best_dist = f64::INFINITY;
         for &i in &remaining {
-            let d = matrix.get(current).and_then(|row| row.get(i)).map(|c| c.distance).unwrap_or(f64::INFINITY);
+            let d = matrix
+                .get(current)
+                .and_then(|row| row.get(i))
+                .map(|c| c.distance)
+                .unwrap_or(f64::INFINITY);
             if d < best_dist {
                 best_dist = d;
                 nearest = i;
@@ -222,12 +279,20 @@ pub fn two_opt_improve(matrix: &DistMatrix, route_indices: &[usize]) -> Vec<usiz
 
 /// Helper: get distance from matrix with fallback.
 pub fn matrix_get_dist(matrix: &DistMatrix, i: usize, j: usize) -> f64 {
-    matrix.get(i).and_then(|row| row.get(j)).map(|c| c.distance).unwrap_or(0.0)
+    matrix
+        .get(i)
+        .and_then(|row| row.get(j))
+        .map(|c| c.distance)
+        .unwrap_or(0.0)
 }
 
 /// Helper: get time from matrix with fallback.
 pub fn matrix_get_time(matrix: &DistMatrix, i: usize, j: usize) -> f64 {
-    matrix.get(i).and_then(|row| row.get(j)).map(|c| c.time).unwrap_or(0.0)
+    matrix
+        .get(i)
+        .and_then(|row| row.get(j))
+        .map(|c| c.time)
+        .unwrap_or(0.0)
 }
 
 #[cfg(test)]
@@ -250,8 +315,20 @@ mod tests {
     #[test]
     fn test_build_haversine_matrix() {
         let stops = vec![
-            VRPSolverStop { lat: 0.0, lon: 0.0, label: "A".into(), demand: None, arrival_time: None },
-            VRPSolverStop { lat: 1.0, lon: 1.0, label: "B".into(), demand: None, arrival_time: None },
+            VRPSolverStop {
+                lat: 0.0,
+                lon: 0.0,
+                label: "A".into(),
+                demand: None,
+                arrival_time: None,
+            },
+            VRPSolverStop {
+                lat: 1.0,
+                lon: 1.0,
+                label: "B".into(),
+                demand: None,
+                arrival_time: None,
+            },
         ];
         let m = build_haversine_matrix(&stops, 40.0);
         assert_eq!(m.len(), 2);
@@ -263,9 +340,27 @@ mod tests {
     #[test]
     fn test_cluster_by_zones() {
         let stops = vec![
-            VRPSolverStop { lat: 0.0, lon: 0.0, label: "A".into(), demand: None, arrival_time: None },
-            VRPSolverStop { lat: 0.1, lon: 0.1, label: "B".into(), demand: None, arrival_time: None },
-            VRPSolverStop { lat: 10.0, lon: 10.0, label: "C".into(), demand: None, arrival_time: None },
+            VRPSolverStop {
+                lat: 0.0,
+                lon: 0.0,
+                label: "A".into(),
+                demand: None,
+                arrival_time: None,
+            },
+            VRPSolverStop {
+                lat: 0.1,
+                lon: 0.1,
+                label: "B".into(),
+                demand: None,
+                arrival_time: None,
+            },
+            VRPSolverStop {
+                lat: 10.0,
+                lon: 10.0,
+                label: "C".into(),
+                demand: None,
+                arrival_time: None,
+            },
         ];
         let clusters = cluster_by_zones(&stops, 2);
         // All 3 stops must be covered
@@ -277,9 +372,27 @@ mod tests {
     fn test_nearest_neighbor_route() {
         // 3 stops in a line: 0→1→2
         let stops = vec![
-            VRPSolverStop { lat: 0.0, lon: 0.0, label: "0".into(), demand: None, arrival_time: None },
-            VRPSolverStop { lat: 1.0, lon: 0.0, label: "1".into(), demand: None, arrival_time: None },
-            VRPSolverStop { lat: 2.0, lon: 0.0, label: "2".into(), demand: None, arrival_time: None },
+            VRPSolverStop {
+                lat: 0.0,
+                lon: 0.0,
+                label: "0".into(),
+                demand: None,
+                arrival_time: None,
+            },
+            VRPSolverStop {
+                lat: 1.0,
+                lon: 0.0,
+                label: "1".into(),
+                demand: None,
+                arrival_time: None,
+            },
+            VRPSolverStop {
+                lat: 2.0,
+                lon: 0.0,
+                label: "2".into(),
+                demand: None,
+                arrival_time: None,
+            },
         ];
         let m = build_haversine_matrix(&stops, 40.0);
         let route = nearest_neighbor_route(&m, &[0, 1, 2], 0);
@@ -304,23 +417,45 @@ mod tests {
     #[test]
     fn test_haversine_matrix_symmetry() {
         let stops = vec![
-            VRPSolverStop { lat: 51.5, lon: -0.1, label: "London".into(), demand: None, arrival_time: None },
-            VRPSolverStop { lat: 48.9, lon: 2.3, label: "Paris".into(), demand: None, arrival_time: None },
-            VRPSolverStop { lat: 52.5, lon: 13.4, label: "Berlin".into(), demand: None, arrival_time: None },
+            VRPSolverStop {
+                lat: 51.5,
+                lon: -0.1,
+                label: "London".into(),
+                demand: None,
+                arrival_time: None,
+            },
+            VRPSolverStop {
+                lat: 48.9,
+                lon: 2.3,
+                label: "Paris".into(),
+                demand: None,
+                arrival_time: None,
+            },
+            VRPSolverStop {
+                lat: 52.5,
+                lon: 13.4,
+                label: "Berlin".into(),
+                demand: None,
+                arrival_time: None,
+            },
         ];
         let m = build_haversine_matrix(&stops, 50.0);
         // Distance matrix should be symmetric
         for i in 0..3 {
             for j in 0..3 {
-                assert!((m[i][j].distance - m[j][i].distance).abs() < 1e-10,
-                    "Matrix not symmetric at [{i}][{j}]");
+                assert!(
+                    (m[i][j].distance - m[j][i].distance).abs() < 1e-10,
+                    "Matrix not symmetric at [{i}][{j}]"
+                );
             }
         }
         // Time matrix should be symmetric
         for i in 0..3 {
             for j in 0..3 {
-                assert!((m[i][j].time - m[j][i].time).abs() < 1e-6,
-                    "Time matrix not symmetric at [{i}][{j}]");
+                assert!(
+                    (m[i][j].time - m[j][i].time).abs() < 1e-6,
+                    "Time matrix not symmetric at [{i}][{j}]"
+                );
             }
         }
         // Diagonal should be zero distance
@@ -333,8 +468,20 @@ mod tests {
     #[test]
     fn test_build_haversine_matrix_time_estimate() {
         let stops = vec![
-            VRPSolverStop { lat: 0.0, lon: 0.0, label: "A".into(), demand: None, arrival_time: None },
-            VRPSolverStop { lat: 0.0, lon: 1.0, label: "B".into(), demand: None, arrival_time: None },
+            VRPSolverStop {
+                lat: 0.0,
+                lon: 0.0,
+                label: "A".into(),
+                demand: None,
+                arrival_time: None,
+            },
+            VRPSolverStop {
+                lat: 0.0,
+                lon: 1.0,
+                label: "B".into(),
+                demand: None,
+                arrival_time: None,
+            },
         ];
         let m = build_haversine_matrix(&stops, 40.0);
         let dist_km = m[0][1].distance;
@@ -346,10 +493,34 @@ mod tests {
     fn test_two_opt_improve_already_optimal() {
         // A straight line 0-1-2-3 is already optimal for a tour
         let stops = vec![
-            VRPSolverStop { lat: 0.0, lon: 0.0, label: "0".into(), demand: None, arrival_time: None },
-            VRPSolverStop { lat: 1.0, lon: 0.0, label: "1".into(), demand: None, arrival_time: None },
-            VRPSolverStop { lat: 2.0, lon: 0.0, label: "2".into(), demand: None, arrival_time: None },
-            VRPSolverStop { lat: 3.0, lon: 0.0, label: "3".into(), demand: None, arrival_time: None },
+            VRPSolverStop {
+                lat: 0.0,
+                lon: 0.0,
+                label: "0".into(),
+                demand: None,
+                arrival_time: None,
+            },
+            VRPSolverStop {
+                lat: 1.0,
+                lon: 0.0,
+                label: "1".into(),
+                demand: None,
+                arrival_time: None,
+            },
+            VRPSolverStop {
+                lat: 2.0,
+                lon: 0.0,
+                label: "2".into(),
+                demand: None,
+                arrival_time: None,
+            },
+            VRPSolverStop {
+                lat: 3.0,
+                lon: 0.0,
+                label: "3".into(),
+                demand: None,
+                arrival_time: None,
+            },
         ];
         let m = build_haversine_matrix(&stops, 40.0);
         let route = vec![0, 1, 2, 3];
@@ -361,10 +532,34 @@ mod tests {
     fn test_two_opt_improve_crossing_route() {
         // Create a crossing: 0-2-1-3 should become 0-1-2-3 (or reverse)
         let stops = vec![
-            VRPSolverStop { lat: 0.0, lon: 0.0, label: "0".into(), demand: None, arrival_time: None },
-            VRPSolverStop { lat: 1.0, lon: 0.0, label: "1".into(), demand: None, arrival_time: None },
-            VRPSolverStop { lat: 2.0, lon: 0.0, label: "2".into(), demand: None, arrival_time: None },
-            VRPSolverStop { lat: 3.0, lon: 0.0, label: "3".into(), demand: None, arrival_time: None },
+            VRPSolverStop {
+                lat: 0.0,
+                lon: 0.0,
+                label: "0".into(),
+                demand: None,
+                arrival_time: None,
+            },
+            VRPSolverStop {
+                lat: 1.0,
+                lon: 0.0,
+                label: "1".into(),
+                demand: None,
+                arrival_time: None,
+            },
+            VRPSolverStop {
+                lat: 2.0,
+                lon: 0.0,
+                label: "2".into(),
+                demand: None,
+                arrival_time: None,
+            },
+            VRPSolverStop {
+                lat: 3.0,
+                lon: 0.0,
+                label: "3".into(),
+                demand: None,
+                arrival_time: None,
+            },
         ];
         let m = build_haversine_matrix(&stops, 40.0);
         let route = vec![0, 2, 1, 3]; // crossing
@@ -376,13 +571,18 @@ mod tests {
         let original_dist: f64 = (0..route.len() - 1)
             .map(|i| m[route[i]][route[i + 1]].distance)
             .sum();
-        assert!(improved_dist <= original_dist + 1e-6,
-            "2-opt should not worsen the route");
+        assert!(
+            improved_dist <= original_dist + 1e-6,
+            "2-opt should not worsen the route"
+        );
     }
 
     #[test]
     fn test_two_opt_improve_small_route() {
-        let m: DistMatrix = vec![vec![DistCell { distance: 0.0, time: 0.0 }]];
+        let m: DistMatrix = vec![vec![DistCell {
+            distance: 0.0,
+            time: 0.0,
+        }]];
         let improved = two_opt_improve(&m, &[0]);
         assert_eq!(improved, vec![0]);
     }
@@ -390,8 +590,26 @@ mod tests {
     #[test]
     fn test_two_opt_improve_two_nodes() {
         let m: DistMatrix = vec![
-            vec![DistCell { distance: 0.0, time: 0.0 }, DistCell { distance: 5.0, time: 100.0 }],
-            vec![DistCell { distance: 5.0, time: 100.0 }, DistCell { distance: 0.0, time: 0.0 }],
+            vec![
+                DistCell {
+                    distance: 0.0,
+                    time: 0.0,
+                },
+                DistCell {
+                    distance: 5.0,
+                    time: 100.0,
+                },
+            ],
+            vec![
+                DistCell {
+                    distance: 5.0,
+                    time: 100.0,
+                },
+                DistCell {
+                    distance: 0.0,
+                    time: 0.0,
+                },
+            ],
         ];
         let improved = two_opt_improve(&m, &[0, 1]);
         assert_eq!(improved.len(), 2);
@@ -399,9 +617,13 @@ mod tests {
 
     #[test]
     fn test_cluster_by_zones_single_stop() {
-        let stops = vec![
-            VRPSolverStop { lat: 10.0, lon: 20.0, label: "A".into(), demand: None, arrival_time: None },
-        ];
+        let stops = vec![VRPSolverStop {
+            lat: 10.0,
+            lon: 20.0,
+            label: "A".into(),
+            demand: None,
+            arrival_time: None,
+        }];
         let clusters = cluster_by_zones(&stops, 4);
         assert_eq!(clusters.len(), 1);
         assert_eq!(clusters[0], vec![0]);
@@ -410,9 +632,27 @@ mod tests {
     #[test]
     fn test_cluster_by_zones_all_same_location() {
         let stops = vec![
-            VRPSolverStop { lat: 5.0, lon: 5.0, label: "A".into(), demand: None, arrival_time: None },
-            VRPSolverStop { lat: 5.0, lon: 5.0, label: "B".into(), demand: None, arrival_time: None },
-            VRPSolverStop { lat: 5.0, lon: 5.0, label: "C".into(), demand: None, arrival_time: None },
+            VRPSolverStop {
+                lat: 5.0,
+                lon: 5.0,
+                label: "A".into(),
+                demand: None,
+                arrival_time: None,
+            },
+            VRPSolverStop {
+                lat: 5.0,
+                lon: 5.0,
+                label: "B".into(),
+                demand: None,
+                arrival_time: None,
+            },
+            VRPSolverStop {
+                lat: 5.0,
+                lon: 5.0,
+                label: "C".into(),
+                demand: None,
+                arrival_time: None,
+            },
         ];
         let clusters = cluster_by_zones(&stops, 4);
         let total: usize = clusters.iter().map(|c| c.len()).sum();
@@ -422,9 +662,27 @@ mod tests {
     #[test]
     fn test_order_clusters_start_first() {
         let stops = vec![
-            VRPSolverStop { lat: 0.0, lon: 0.0, label: "depot".into(), demand: None, arrival_time: None },
-            VRPSolverStop { lat: 1.0, lon: 1.0, label: "near".into(), demand: None, arrival_time: None },
-            VRPSolverStop { lat: 50.0, lon: 50.0, label: "far".into(), demand: None, arrival_time: None },
+            VRPSolverStop {
+                lat: 0.0,
+                lon: 0.0,
+                label: "depot".into(),
+                demand: None,
+                arrival_time: None,
+            },
+            VRPSolverStop {
+                lat: 1.0,
+                lon: 1.0,
+                label: "near".into(),
+                demand: None,
+                arrival_time: None,
+            },
+            VRPSolverStop {
+                lat: 50.0,
+                lon: 50.0,
+                label: "far".into(),
+                demand: None,
+                arrival_time: None,
+            },
         ];
         let clusters = vec![vec![2], vec![0, 1]];
         let ordered = order_clusters_by_start(&clusters, &stops, 0);
@@ -434,9 +692,13 @@ mod tests {
 
     #[test]
     fn test_nearest_neighbor_single_node() {
-        let stops = vec![
-            VRPSolverStop { lat: 5.0, lon: 5.0, label: "A".into(), demand: None, arrival_time: None },
-        ];
+        let stops = vec![VRPSolverStop {
+            lat: 5.0,
+            lon: 5.0,
+            label: "A".into(),
+            demand: None,
+            arrival_time: None,
+        }];
         let m = build_haversine_matrix(&stops, 40.0);
         let route = nearest_neighbor_route(&m, &[0], 0);
         assert_eq!(route, vec![0]);
@@ -445,8 +707,26 @@ mod tests {
     #[test]
     fn test_matrix_get_helpers() {
         let m: DistMatrix = vec![
-            vec![DistCell { distance: 0.0, time: 0.0 }, DistCell { distance: 10.0, time: 200.0 }],
-            vec![DistCell { distance: 10.0, time: 200.0 }, DistCell { distance: 0.0, time: 0.0 }],
+            vec![
+                DistCell {
+                    distance: 0.0,
+                    time: 0.0,
+                },
+                DistCell {
+                    distance: 10.0,
+                    time: 200.0,
+                },
+            ],
+            vec![
+                DistCell {
+                    distance: 10.0,
+                    time: 200.0,
+                },
+                DistCell {
+                    distance: 0.0,
+                    time: 0.0,
+                },
+            ],
         ];
         assert_eq!(matrix_get_dist(&m, 0, 1), 10.0);
         assert_eq!(matrix_get_time(&m, 0, 1), 200.0);

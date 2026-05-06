@@ -316,19 +316,24 @@ async fn handle_optimize_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers)
         }
         KeyCode::Enter => {
             if let Some(cache_path) = app.cache_file.clone() {
-                let penalties = app.turn_penalties.clone();
+                let penalties = app.turn_penalties;
                 let depot = app.depot_coords;
                 let num_vehicles = app.num_vehicles;
                 let solver_id = app.solver_id.clone();
-                
+
                 app.optimize_status = crate::app::Status::Running {
                     progress: 0,
                     message: "Optimizing route...".to_string(),
                 };
-                app.log(crate::app::LogLevel::Info, format!("Starting optimization (mode: VRP, solver: {})", solver_id));
+                app.log(
+                    crate::app::LogLevel::Info,
+                    format!("Starting optimization (mode: VRP, solver: {})", solver_id),
+                );
 
                 // Build optimize request
-                use crate::core::optimize::{run_optimize, OnewayMode, OptimizeRequest, SolverMode};
+                use crate::core::optimize::{
+                    run_optimize, OnewayMode, OptimizeRequest, SolverMode,
+                };
 
                 let route_path = app.route_file.clone().or_else(|| {
                     Some(format!(
