@@ -200,6 +200,7 @@ struct CleanArgs {
 // ── Optimize ──────────────────────────────────────────────────────────
 
 #[derive(clap::Args, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 struct OptimizeArgs {
     /// Input .rmp cache file
     #[arg(short, long)]
@@ -219,6 +220,7 @@ struct OptimizeArgs {
 
     /// Solver mode: cpp (edge coverage) or vrp (stop visits) (default: cpp)
     #[arg(short, long, default_value = "cpp")]
+    #[serde(default = "default_mode")]
     mode: String,
 
     /// Left turn penalty (default: 1.0)
@@ -788,4 +790,7 @@ pub async fn run() -> Result<()> {
     }
 
     Ok(())
+}
+fn default_mode() -> String {
+    "cpp".to_string()
 }
