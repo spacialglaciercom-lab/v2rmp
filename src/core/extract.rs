@@ -116,16 +116,19 @@ async fn run_osm_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> 
     // Find the PBF file in the current directory or a default location if not specified
     // In TUI mode, the user would have provided a path.
     // For CLI, we might need an extra argument, but currently ExtractArgs doesn't have it.
-    // Let's assume the bbox string might contain a path for now if it's OSM, 
+    // Let's assume the bbox string might contain a path for now if it's OSM,
     // or just look for any .pbf file.
-    
+
     let pbf_path = std::env::var("OSM_PBF_PATH").unwrap_or_else(|_| "monaco.osm.pbf".to_string());
-    
+
     if !std::path::Path::new(&pbf_path).exists() {
-        anyhow::bail!("OSM PBF file not found: {}. Set OSM_PBF_PATH env var.", pbf_path);
+        anyhow::bail!(
+            "OSM PBF file not found: {}. Set OSM_PBF_PATH env var.",
+            pbf_path
+        );
     }
 
-    use crate::core::osm::pbf_extractor::{OsmExtractor, BBox as OsmBBox, segment_to_feature};
+    use crate::core::osm::pbf_extractor::{segment_to_feature, BBox as OsmBBox, OsmExtractor};
 
     let extractor = OsmExtractor::new(pbf_path)?;
     let bbox = OsmBBox {
@@ -135,13 +138,14 @@ async fn run_osm_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> 
         max_lat: req.bbox.max_lat,
     };
 
-    let classes: Vec<String> = req.road_classes.iter().map(|rc| rc.as_str().to_string()).collect();
+    let classes: Vec<String> = req
+        .road_classes
+        .iter()
+        .map(|rc| rc.as_str().to_string())
+        .collect();
     let segments = extractor.extract_bbox(&bbox, &classes)?;
 
-    let features: Vec<Feature> = segments
-        .into_iter()
-        .map(segment_to_feature)
-        .collect();
+    let features: Vec<Feature> = segments.into_iter().map(segment_to_feature).collect();
 
     // Build graph statistics
     let (nodes, edges, total_km) = build_graph_stats(&features)?;

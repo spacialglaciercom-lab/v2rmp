@@ -17,7 +17,11 @@ struct SolveResult {
 fn solve(matrix: &DistMatrix, num_vehicles: usize) -> SolveResult {
     let n = matrix.len();
     if n <= 1 {
-        return SolveResult { routes: vec![vec![0]], total_distance: 0.0, total_time: 0.0 };
+        return SolveResult {
+            routes: vec![vec![0]],
+            total_distance: 0.0,
+            total_time: 0.0,
+        };
     }
 
     let max_intermediate = ((n - 1) as f64 / num_vehicles as f64).ceil() as usize;
@@ -26,7 +30,8 @@ fn solve(matrix: &DistMatrix, num_vehicles: usize) -> SolveResult {
     let mut savings: Vec<(usize, usize, f64)> = Vec::new();
     for i in 1..n {
         for j in (i + 1)..n {
-            let s = matrix_get_dist(matrix, 0, i) + matrix_get_dist(matrix, 0, j) - matrix_get_dist(matrix, i, j);
+            let s = matrix_get_dist(matrix, 0, i) + matrix_get_dist(matrix, 0, j)
+                - matrix_get_dist(matrix, i, j);
             savings.push((i, j, s));
         }
     }
@@ -38,7 +43,13 @@ fn solve(matrix: &DistMatrix, num_vehicles: usize) -> SolveResult {
         routes.iter().position(|r| r.contains(&node))
     };
 
-    let intermediate_count = |r: &[usize]| -> usize { if r.len() > 2 { r.len() - 2 } else { 0 } };
+    let intermediate_count = |r: &[usize]| -> usize {
+        if r.len() > 2 {
+            r.len() - 2
+        } else {
+            0
+        }
+    };
 
     for &(i, j, _) in &savings {
         if routes.len() <= num_vehicles {
@@ -61,11 +72,7 @@ fn solve(matrix: &DistMatrix, num_vehicles: usize) -> SolveResult {
         let end_of_a = ra[ra.len() - 2];
         let start_of_b = rb[1];
 
-        let merged = if end_of_a == i && start_of_b == j {
-            let mut m = ra[..ra.len() - 1].to_vec();
-            m.extend_from_slice(&rb[1..]);
-            Some(m)
-        } else if end_of_a == j && start_of_b == i {
+        let merged = if (end_of_a == i && start_of_b == j) || (end_of_a == j && start_of_b == i) {
             let mut m = ra[..ra.len() - 1].to_vec();
             m.extend_from_slice(&rb[1..]);
             Some(m)
@@ -74,11 +81,7 @@ fn solve(matrix: &DistMatrix, num_vehicles: usize) -> SolveResult {
             let rb_rev: Vec<usize> = rb.iter().copied().rev().collect();
             let end_rev_a = ra_rev[ra_rev.len() - 2];
             let start_rev_b = rb_rev[1];
-            if end_rev_a == i && start_rev_b == j {
-                let mut m = ra_rev[..ra_rev.len() - 1].to_vec();
-                m.extend_from_slice(&rb_rev[1..]);
-                Some(m)
-            } else if end_rev_a == j && start_rev_b == i {
+            if (end_rev_a == i && start_rev_b == j) || (end_rev_a == j && start_rev_b == i) {
                 let mut m = ra_rev[..ra_rev.len() - 1].to_vec();
                 m.extend_from_slice(&rb_rev[1..]);
                 Some(m)
@@ -119,10 +122,29 @@ fn solve(matrix: &DistMatrix, num_vehicles: usize) -> SolveResult {
                 let rb = &routes[j];
 
                 let candidates: Vec<Vec<usize>> = vec![
-                    { let mut m = ra[..ra.len() - 1].to_vec(); m.extend_from_slice(&rb[1..]); m },
-                    { let mut m = ra[..ra.len() - 1].to_vec(); m.extend(rb[1..rb.len() - 1].iter().rev()); m.push(0); m },
-                    { let mut m = vec![0]; m.extend(rb[1..rb.len() - 1].iter().rev()); m.extend_from_slice(&ra[1..]); m },
-                    { let mut m = vec![0]; m.extend_from_slice(&rb[1..]); m.extend_from_slice(&ra[1..]); m },
+                    {
+                        let mut m = ra[..ra.len() - 1].to_vec();
+                        m.extend_from_slice(&rb[1..]);
+                        m
+                    },
+                    {
+                        let mut m = ra[..ra.len() - 1].to_vec();
+                        m.extend(rb[1..rb.len() - 1].iter().rev());
+                        m.push(0);
+                        m
+                    },
+                    {
+                        let mut m = vec![0];
+                        m.extend(rb[1..rb.len() - 1].iter().rev());
+                        m.extend_from_slice(&ra[1..]);
+                        m
+                    },
+                    {
+                        let mut m = vec![0];
+                        m.extend_from_slice(&rb[1..]);
+                        m.extend_from_slice(&ra[1..]);
+                        m
+                    },
                 ];
 
                 for merged in &candidates {
@@ -166,19 +188,32 @@ fn solve(matrix: &DistMatrix, num_vehicles: usize) -> SolveResult {
         }
     }
 
-    SolveResult { routes, total_distance, total_time }
+    SolveResult {
+        routes,
+        total_distance,
+        total_time,
+    }
 }
 
 pub struct ClarkeWrightSolver;
 
 #[async_trait::async_trait]
 impl VRPSolver for ClarkeWrightSolver {
-    fn id(&self) -> &str { "clarke_wright" }
-    fn label(&self) -> &str { "Clarke-Wright Savings" }
-    fn requires_matrix(&self) -> bool { true }
+    fn id(&self) -> &str {
+        "clarke_wright"
+    }
+    fn label(&self) -> &str {
+        "Clarke-Wright Savings"
+    }
+    fn requires_matrix(&self) -> bool {
+        true
+    }
 
     async fn solve(&self, input: &VRPSolverInput) -> Result<VRPSolverOutput, String> {
-        let matrix = input.matrix.as_ref().ok_or("Clarke-Wright solver requires a distance matrix")?;
+        let matrix = input
+            .matrix
+            .as_ref()
+            .ok_or("Clarke-Wright solver requires a distance matrix")?;
         let result = solve(matrix, input.num_vehicles);
         let routes: Vec<Vec<VRPSolverStop>> = result
             .routes
@@ -195,16 +230,24 @@ impl VRPSolver for ClarkeWrightSolver {
             unassigned: None,
         })
     }
-    fn clone_box(&self) -> Box<dyn VRPSolver> { Box::new(ClarkeWrightSolver) }
+    fn clone_box(&self) -> Box<dyn VRPSolver> {
+        Box::new(ClarkeWrightSolver)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::super::utils::build_haversine_matrix;
+    use super::*;
 
     fn make_stop(lat: f64, lon: f64, label: &str) -> VRPSolverStop {
-        VRPSolverStop { lat, lon, label: label.into(), demand: None, arrival_time: None }
+        VRPSolverStop {
+            lat,
+            lon,
+            label: label.into(),
+            demand: None,
+            arrival_time: None,
+        }
     }
 
     fn make_input(locations: Vec<VRPSolverStop>, num_vehicles: usize) -> VRPSolverInput {

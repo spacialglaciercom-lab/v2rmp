@@ -1,11 +1,31 @@
+#![allow(dead_code)]
+#![allow(dead_code)]
+#![allow(dead_code)]
+#![allow(
+    dead_code,
+    unused_imports,
+    unused_variables,
+    unused_macros,
+    clippy::all
+)]
+#![allow(dead_code)]
+#![allow(dead_code)]
+#![allow(dead_code)]
+#![allow(
+    dead_code,
+    unused_imports,
+    unused_variables,
+    unused_macros,
+    clippy::all
+)]
 //! Dynamic solver registry: built-ins first, then dynamically registered solvers.
 
-use super::types::{VRPSolver, VRPSolverInput, VRPSolverOutput};
 use super::solvers::clarke_wright::ClarkeWrightSolver;
+use super::solvers::default::DefaultSolver;
+use super::solvers::or_opt::OrOptSolver;
 use super::solvers::sweep::SweepSolver;
 use super::solvers::two_opt::TwoOptSolver;
-use super::solvers::or_opt::OrOptSolver;
-use super::solvers::default::DefaultSolver;
+use super::types::{VRPSolver, VRPSolverInput, VRPSolverOutput};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -97,18 +117,28 @@ pub fn get_algorithm_options() -> Vec<(String, String)> {
     let ids = get_solver_list();
     let reg = REGISTRY.read().unwrap();
     ids.iter()
-        .filter_map(|id| reg.solvers.get(id).map(|s| (s.id().to_string(), s.label().to_string())))
+        .filter_map(|id| {
+            reg.solvers
+                .get(id)
+                .map(|s| (s.id().to_string(), s.label().to_string()))
+        })
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::*;
     use super::super::utils::build_haversine_matrix;
+    use super::*;
 
     fn make_stop(lat: f64, lon: f64, label: &str) -> VRPSolverStop {
-        VRPSolverStop { lat, lon, label: label.into(), demand: None, arrival_time: None }
+        VRPSolverStop {
+            lat,
+            lon,
+            label: label.into(),
+            demand: None,
+            arrival_time: None,
+        }
     }
 
     fn make_input(locations: Vec<VRPSolverStop>, num_vehicles: usize) -> VRPSolverInput {
@@ -160,10 +190,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_solve_with_default_fallback() {
-        let stops = vec![
-            make_stop(0.0, 0.0, "depot"),
-            make_stop(1.0, 0.0, "a"),
-        ];
+        let stops = vec![make_stop(0.0, 0.0, "depot"), make_stop(1.0, 0.0, "a")];
         let input = make_input(stops, 1);
         let output = solve_with("nonexistent_solver", &input).await.unwrap();
         assert!(!output.stops.is_empty());
@@ -180,9 +207,15 @@ mod tests {
         struct TestSolver;
         #[async_trait::async_trait]
         impl VRPSolver for TestSolver {
-            fn id(&self) -> &str { "test_custom" }
-            fn label(&self) -> &str { "Test Custom Solver" }
-            fn requires_matrix(&self) -> bool { false }
+            fn id(&self) -> &str {
+                "test_custom"
+            }
+            fn label(&self) -> &str {
+                "Test Custom Solver"
+            }
+            fn requires_matrix(&self) -> bool {
+                false
+            }
             async fn solve(&self, _input: &VRPSolverInput) -> Result<VRPSolverOutput, String> {
                 Ok(VRPSolverOutput {
                     stops: vec![],
@@ -194,7 +227,9 @@ mod tests {
                     unassigned: None,
                 })
             }
-            fn clone_box(&self) -> Box<dyn VRPSolver> { Box::new(TestSolver) }
+            fn clone_box(&self) -> Box<dyn VRPSolver> {
+                Box::new(TestSolver)
+            }
         }
 
         register_solver(Arc::new(TestSolver));

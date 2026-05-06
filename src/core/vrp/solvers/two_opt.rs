@@ -12,7 +12,11 @@ struct SolveResult {
 fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize) -> SolveResult {
     let n = matrix.len();
     if n <= 1 {
-        return SolveResult { routes: vec![vec![0]], total_distance: 0.0, total_time: 0.0 };
+        return SolveResult {
+            routes: vec![vec![0]],
+            total_distance: 0.0,
+            total_time: 0.0,
+        };
     }
 
     let depot = &locations[0];
@@ -22,7 +26,9 @@ fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize) 
         let lb = &locations[b];
         let angle_a = (la.lat - depot.lat).atan2(la.lon - depot.lon);
         let angle_b = (lb.lat - depot.lat).atan2(lb.lon - depot.lon);
-        angle_a.partial_cmp(&angle_b).unwrap_or(std::cmp::Ordering::Equal)
+        angle_a
+            .partial_cmp(&angle_b)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     let per_route = (stop_indices.len() as f64 / num_vehicles as f64).ceil() as usize;
@@ -31,9 +37,13 @@ fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize) 
     for v in 0..num_vehicles {
         let start = v * per_route;
         let end = std::cmp::min(start + per_route, stop_indices.len());
-        if start >= stop_indices.len() { break; }
+        if start >= stop_indices.len() {
+            break;
+        }
         let segment = &stop_indices[start..end];
-        if segment.is_empty() { continue; }
+        if segment.is_empty() {
+            continue;
+        }
 
         let mut route = vec![0];
         let mut rem: std::collections::HashSet<usize> = segment.iter().copied().collect();
@@ -79,7 +89,11 @@ fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize) 
 
     let final_routes: Vec<Vec<usize>> = routes.into_iter().filter(|r| r.len() > 2).collect();
     if final_routes.is_empty() {
-        return SolveResult { routes: vec![vec![0, 0]], total_distance: 0.0, total_time: 0.0 };
+        return SolveResult {
+            routes: vec![vec![0, 0]],
+            total_distance: 0.0,
+            total_time: 0.0,
+        };
     }
 
     let mut total_distance = 0.0;
@@ -91,19 +105,32 @@ fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize) 
         }
     }
 
-    SolveResult { routes: final_routes, total_distance, total_time }
+    SolveResult {
+        routes: final_routes,
+        total_distance,
+        total_time,
+    }
 }
 
 pub struct TwoOptSolver;
 
 #[async_trait::async_trait]
 impl VRPSolver for TwoOptSolver {
-    fn id(&self) -> &str { "two_opt" }
-    fn label(&self) -> &str { "2-Opt (route untangling)" }
-    fn requires_matrix(&self) -> bool { true }
+    fn id(&self) -> &str {
+        "two_opt"
+    }
+    fn label(&self) -> &str {
+        "2-Opt (route untangling)"
+    }
+    fn requires_matrix(&self) -> bool {
+        true
+    }
 
     async fn solve(&self, input: &VRPSolverInput) -> Result<VRPSolverOutput, String> {
-        let matrix = input.matrix.as_ref().ok_or("2-Opt solver requires a distance matrix")?;
+        let matrix = input
+            .matrix
+            .as_ref()
+            .ok_or("2-Opt solver requires a distance matrix")?;
         let result = solve(matrix, &input.locations, input.num_vehicles);
         let routes: Vec<Vec<VRPSolverStop>> = result
             .routes
@@ -120,16 +147,24 @@ impl VRPSolver for TwoOptSolver {
             unassigned: None,
         })
     }
-    fn clone_box(&self) -> Box<dyn VRPSolver> { Box::new(TwoOptSolver) }
+    fn clone_box(&self) -> Box<dyn VRPSolver> {
+        Box::new(TwoOptSolver)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::super::utils::build_haversine_matrix;
+    use super::*;
 
     fn make_stop(lat: f64, lon: f64, label: &str) -> VRPSolverStop {
-        VRPSolverStop { lat, lon, label: label.into(), demand: None, arrival_time: None }
+        VRPSolverStop {
+            lat,
+            lon,
+            label: label.into(),
+            demand: None,
+            arrival_time: None,
+        }
     }
 
     fn make_input(locations: Vec<VRPSolverStop>, num_vehicles: usize) -> VRPSolverInput {

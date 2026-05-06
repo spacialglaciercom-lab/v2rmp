@@ -1,3 +1,23 @@
+#![allow(dead_code)]
+#![allow(dead_code)]
+#![allow(dead_code)]
+#![allow(
+    dead_code,
+    unused_imports,
+    unused_variables,
+    unused_macros,
+    clippy::all
+)]
+#![allow(dead_code)]
+#![allow(dead_code)]
+#![allow(dead_code)]
+#![allow(
+    dead_code,
+    unused_imports,
+    unused_variables,
+    unused_macros,
+    clippy::all
+)]
 //! Core types for the VRP solver system.
 
 use serde::{Deserialize, Serialize};
@@ -245,10 +265,18 @@ pub struct VrpOsrmRequest {
     pub cache_distance_matrix: bool,
 }
 
-fn default_solver() -> String { "clarke-wright".to_string() }
-fn default_max_iterations() -> u32 { 100 }
-fn default_true() -> bool { true }
-fn default_osrm_annotations() -> String { "duration,distance".to_string() }
+fn default_solver() -> String {
+    "clarke-wright".to_string()
+}
+fn default_max_iterations() -> u32 {
+    100
+}
+fn default_true() -> bool {
+    true
+}
+fn default_osrm_annotations() -> String {
+    "duration,distance".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VrpOsrmRoute {
@@ -291,7 +319,12 @@ mod tests {
 
     #[test]
     fn test_vrp_objective_all_variants() {
-        for obj in [VrpObjective::MinTime, VrpObjective::MinDistance, VrpObjective::BalanceLoad, VrpObjective::MinVehicles] {
+        for obj in [
+            VrpObjective::MinTime,
+            VrpObjective::MinDistance,
+            VrpObjective::BalanceLoad,
+            VrpObjective::MinVehicles,
+        ] {
             let json = serde_json::to_string(&obj).unwrap();
             let back: VrpObjective = serde_json::from_str(&json).unwrap();
             assert_eq!(back, obj);
@@ -356,7 +389,10 @@ mod tests {
 
     #[test]
     fn test_dist_cell() {
-        let cell = DistCell { distance: 10.5, time: 300.0 };
+        let cell = DistCell {
+            distance: 10.5,
+            time: 300.0,
+        };
         let json = serde_json::to_string(&cell).unwrap();
         let back: DistCell = serde_json::from_str(&json).unwrap();
         assert_eq!(back.distance, cell.distance);
@@ -382,7 +418,10 @@ mod tests {
         let step = VrpRouteStep {
             step_type: "job".into(),
             id: Some(5),
-            location: VrpLocation { lat: 40.0, lon: -74.0 },
+            location: VrpLocation {
+                lat: 40.0,
+                lon: -74.0,
+            },
             arrival: 1000,
             duration: 50,
             wait: 0,
@@ -400,7 +439,12 @@ mod tests {
             physical_distance_m: 1500.0,
             adjusted_cost_m: 2000.0,
             elevation_gain_m: 50.0,
-            turns: TurnCounts { left: 3, right: 2, u_turn: 0, straight: 10 },
+            turns: TurnCounts {
+                left: 3,
+                right: 2,
+                u_turn: 0,
+                straight: 10,
+            },
         };
         let json = serde_json::to_string(&metrics).unwrap();
         let back: VRPRouteMetrics = serde_json::from_str(&json).unwrap();

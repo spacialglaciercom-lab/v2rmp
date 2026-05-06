@@ -516,7 +516,15 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
     };
 
     if !json {
-        tracing::info!("Optimizing route from {} (mode: {})", args.input, if mode == SolverMode::Vrp { "VRP" } else { "CPP" });
+        tracing::info!(
+            "Optimizing route from {} (mode: {})",
+            args.input,
+            if mode == SolverMode::Vrp {
+                "VRP"
+            } else {
+                "CPP"
+            }
+        );
     }
 
     let req = OptimizeRequest {
@@ -710,8 +718,8 @@ async fn run_agent_cmd(args: AgentArgs, json: bool) -> Result<()> {
         Box::new(std::fs::File::open(&args.task)?)
     };
 
-    let task: AgentTask = serde_json::from_reader(input)
-        .context("Failed to parse agent task JSON")?;
+    let task: AgentTask =
+        serde_json::from_reader(input).context("Failed to parse agent task JSON")?;
 
     match task {
         AgentTask::Extract(a) => run_extract_cmd(a, json).await,

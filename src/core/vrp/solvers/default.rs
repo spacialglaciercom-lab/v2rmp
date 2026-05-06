@@ -2,23 +2,32 @@
 
 use super::super::types::*;
 use super::super::utils::{
-    cluster_by_zones, matrix_get_dist, matrix_get_time,
-    nearest_neighbor_route, order_clusters_by_start, two_opt_improve,
+    cluster_by_zones, matrix_get_dist, matrix_get_time, nearest_neighbor_route,
+    order_clusters_by_start, two_opt_improve,
 };
 
 pub struct DefaultSolver;
 
 #[async_trait::async_trait]
 impl VRPSolver for DefaultSolver {
-    fn id(&self) -> &str { "default" }
-    fn label(&self) -> &str { "Default (Zone-cluster + 2-Opt)" }
-    fn requires_matrix(&self) -> bool { true }
+    fn id(&self) -> &str {
+        "default"
+    }
+    fn label(&self) -> &str {
+        "Default (Zone-cluster + 2-Opt)"
+    }
+    fn requires_matrix(&self) -> bool {
+        true
+    }
 
     async fn solve(&self, input: &VRPSolverInput) -> Result<VRPSolverOutput, String> {
-        let matrix = input.matrix.as_ref().ok_or("Default solver requires a distance matrix")?;
+        let matrix = input
+            .matrix
+            .as_ref()
+            .ok_or("Default solver requires a distance matrix")?;
         let n = input.locations.len();
 
-        let num_zones = std::cmp::min(6, std::cmp::max(2, (n as f64).sqrt().ceil() as usize));
+        let num_zones = ((n as f64).sqrt().ceil() as usize).clamp(2, 6);
         let clusters = cluster_by_zones(&input.locations, num_zones);
         let ordered_clusters = order_clusters_by_start(&clusters, &input.locations, 0);
 
@@ -42,7 +51,10 @@ impl VRPSolver for DefaultSolver {
         }
 
         Ok(VRPSolverOutput {
-            stops: improved.iter().map(|&i| input.locations[i].clone()).collect(),
+            stops: improved
+                .iter()
+                .map(|&i| input.locations[i].clone())
+                .collect(),
             routes: None,
             total_distance_km: format!("{:.2}", total_dist),
             total_time_min: (total_time / 60.0).round() as u32,
@@ -51,16 +63,24 @@ impl VRPSolver for DefaultSolver {
             unassigned: None,
         })
     }
-    fn clone_box(&self) -> Box<dyn VRPSolver> { Box::new(DefaultSolver) }
+    fn clone_box(&self) -> Box<dyn VRPSolver> {
+        Box::new(DefaultSolver)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::super::utils::build_haversine_matrix;
+    use super::*;
 
     fn make_stop(lat: f64, lon: f64, label: &str) -> VRPSolverStop {
-        VRPSolverStop { lat, lon, label: label.into(), demand: None, arrival_time: None }
+        VRPSolverStop {
+            lat,
+            lon,
+            label: label.into(),
+            demand: None,
+            arrival_time: None,
+        }
     }
 
     fn make_input(locations: Vec<VRPSolverStop>, num_vehicles: usize) -> VRPSolverInput {
