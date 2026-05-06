@@ -1,9 +1,11 @@
 use crate::core::vrp::registry::solve_with;
 use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::io::Read;
 use std::time::Instant;
+
+use crate::core::vrp::registry::solve_with;
+use crate::core::vrp::types::{VrpObjective, VRPSolverInput, VRPSolverStop};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct TurnPenalties {
@@ -232,7 +234,7 @@ fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 
 // ── CPP internals ────────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct AdjEntry {
     to: u32,
     weight_m: f64,
@@ -476,7 +478,7 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         u_turn: 0,
         straight: 0,
     };
-    let mut edge_traversal_count: HashMap<usize, u32> = HashMap::new();
+    let mut edge_traversal_count = vec![0u32; edges.len()];
 
     for entry in circuit_with_edges.iter().skip(1) {
         if let Some(e) = &entry.1 {
@@ -485,9 +487,8 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
             if e.edge_idx == deadhead_edge_idx {
                 deadhead_distance_m += e.weight_m;
             } else {
-                let count = edge_traversal_count.entry(e.edge_idx).or_insert(0);
-                *count += 1;
-                if *count > 1 {
+                edge_traversal_count[e.edge_idx] += 1;
+                if edge_traversal_count[e.edge_idx] > 1 {
                     deadhead_distance_m += e.weight_m;
                 }
             }
