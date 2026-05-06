@@ -614,6 +614,7 @@ async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         output_path: extract_path.clone(),
     };
     let extract_result = crate::core::extract::run_extract(&extract_req)
+        .await
         .context("Pipeline failed at stage 'extract'")?;
 
     // Stage 2: Clean
@@ -659,6 +660,7 @@ async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         solver_id: "clarke_wright".to_string(),
     };
     let optimize_result = crate::core::optimize::run_optimize(&optimize_req)
+        .await
         .context("Pipeline failed at stage 'optimize'")?;
 
     // Output
@@ -716,7 +718,7 @@ async fn run_agent_cmd(args: AgentArgs, json: bool) -> Result<()> {
         AgentTask::Compile(a) => run_compile_cmd(a, json),
         AgentTask::Clean(a) => run_clean_cmd(a, json),
         AgentTask::Optimize(a) => run_optimize_cmd(a, json).await,
-        AgentTask::Vrp(a) => run_vrp_cmd(a, json).await,
+        AgentTask::Vrp(a) => run_vrp_cmd(a, json),
         AgentTask::Pipeline(a) => run_pipeline_cmd(a, json).await,
     }
 }
@@ -766,7 +768,7 @@ pub async fn run() -> Result<()> {
         Commands::Compile(args) => run_compile_cmd(args, cli.json),
         Commands::Clean(args) => run_clean_cmd(args, cli.json),
         Commands::Optimize(args) => run_optimize_cmd(args, cli.json).await,
-        Commands::Vrp(args) => run_vrp_cmd(args, cli.json).await,
+        Commands::Vrp(args) => run_vrp_cmd(args, cli.json),
         Commands::Pipeline(args) => run_pipeline_cmd(args, cli.json).await,
         Commands::List(args) => run_list_cmd(args, cli.json),
         Commands::Agent(args) => run_agent_cmd(args, cli.json).await,
