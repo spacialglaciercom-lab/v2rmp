@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::io::Read;
 use std::time::Instant;
+
+use crate::core::vrp::registry::solve_with;
+use crate::core::vrp::types::{VrpObjective, VRPSolverInput, VRPSolverStop};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct TurnPenalties {
@@ -226,7 +228,7 @@ fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 
 // ── CPP internals ────────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct AdjEntry {
     to: u32,
     weight_m: f64,
@@ -470,7 +472,7 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         u_turn: 0,
         straight: 0,
     };
-    let mut edge_traversal_count: HashMap<usize, u32> = HashMap::new();
+    let mut edge_traversal_count = vec![0u32; edges.len()];
 
     for entry in circuit_with_edges.iter().skip(1) {
         if let Some(e) = &entry.1 {
@@ -479,9 +481,8 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
             if e.edge_idx == deadhead_edge_idx {
                 deadhead_distance_m += e.weight_m;
             } else {
-                let count = edge_traversal_count.entry(e.edge_idx).or_insert(0);
-                *count += 1;
-                if *count > 1 {
+                edge_traversal_count[e.edge_idx] += 1;
+                if edge_traversal_count[e.edge_idx] > 1 {
                     deadhead_distance_m += e.weight_m;
                 }
             }
@@ -661,21 +662,24 @@ fn write_gpx_multi(path: &str, routes: &Vec<Vec<VRPSolverStop>>) -> anyhow::Resu
         file,
         "<gpx version=\"1.1\" creator=\"rmpca\" xmlns=\"http://www.topografix.com/GPX/1/1\">"
     )?;
-    writeln!(file, "  <trk>")?;
-    writeln!(file, "    <name>Optimized Route</name>")?;
-    writeln!(file, "    <trkseg>")?;
 
-    for &node_idx in circuit {
-        let node = &nodes[node_idx as usize];
-        writeln!(
-            file,
-            "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"></trkpt>",
-            node.lat, node.lon
-        )?;
+    for (i, route) in routes.iter().enumerate() {
+        writeln!(file, "  <trk>")?;
+        writeln!(file, "    <name>Route {}</name>", i + 1)?;
+        writeln!(file, "    <trkseg>")?;
+
+        for stop in route {
+            writeln!(
+                file,
+                "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"></trkpt>",
+                stop.lat, stop.lon
+            )?;
+        }
+
+        writeln!(file, "    </trkseg>")?;
+        writeln!(file, "  </trk>")?;
     }
 
-    writeln!(file, "    </trkseg>")?;
-    writeln!(file, "  </trk>")?;
     writeln!(file, "</gpx>")?;
 
     Ok(())
@@ -689,13 +693,6 @@ pub async fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         SolverMode::Cpp => run_cpp_optimize(req),
         SolverMode::Vrp => run_vrp_optimize(req).await,
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct AdjEntry {
-    to: u32,
-    weight_m: f64,
-    edge_idx: usize,
 }
 
 #[cfg(test)]
@@ -768,7 +765,6 @@ mod tests {
             num_vehicles: 1,
             solver_id: "default".to_string(),
         };
-        let result = run_optimize(&req);
         // run_optimize is async but CPP is sync, so we need to use tokio
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(run_optimize(&req)).unwrap();
