@@ -4,9 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::time::Instant;
 
-use crate::core::vrp::registry::solve_with;
-use crate::core::vrp::types::{VrpObjective, VRPSolverInput, VRPSolverStop};
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct TurnPenalties {
     pub left: f64,
