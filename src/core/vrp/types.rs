@@ -65,6 +65,7 @@ pub enum VrpObjective {
     MinVehicles,
 }
 
+
 /// Per-route metrics (physical distance, adjusted cost, elevation, turns).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VRPRouteMetrics {
