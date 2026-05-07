@@ -205,4 +205,15 @@ mod tests {
         assert_eq!(props.get("name").unwrap().as_str().unwrap(), "Main Street");
         assert_eq!(props.get("oneway").unwrap().as_str().unwrap(), "yes");
     }
+
+    #[test]
+    fn test_osm_extractor_new_not_found() {
+        let path = "non_existent_file.pbf".to_string();
+        let result = OsmExtractor::new(path.clone());
+
+        assert!(result.is_err());
+        if let Err(err) = result {
+            assert_eq!(err.to_string(), format!("PBF file not found: {}", path));
+        }
+    }
 }
