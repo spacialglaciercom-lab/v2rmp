@@ -684,6 +684,19 @@ mod tests {
         assert_eq!(app.workflow_selection, 0);
     }
 
+
+    #[test]
+    fn test_app_cancel_input() {
+        let mut app = App::new();
+        app.input_mode.active = true;
+        app.input_mode.buffer = String::from("some text");
+
+        app.cancel_input();
+
+        assert!(!app.input_mode.active);
+        assert!(app.input_mode.buffer.is_empty());
+        assert_eq!(app.log_entries.last().unwrap().message, "Input cancelled");
+    }
     #[test]
     fn test_app_logging() {
         let mut app = App::new();
