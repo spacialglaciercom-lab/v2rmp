@@ -83,10 +83,10 @@ impl FileBrowser {
         self.entries.clear();
 
         // Add parent directory entry if not at root
-        if self.current_path.parent().is_some() {
+        if let Some(parent) = self.current_path.parent() {
             self.entries.push(FileEntry {
                 name: "..".to_string(),
-                path: self.current_path.parent().unwrap().to_path_buf(),
+                path: parent.to_path_buf(),
                 is_dir: true,
                 size: None,
                 modified: None,
@@ -667,10 +667,42 @@ mod tests {
     #[test]
     fn test_app_initialization() {
         let app = App::new();
-        assert_eq!(app.current_view, View::Home);
         assert!(app.running);
+        assert_eq!(app.workflow_selection, 0);
         assert!(app.log_entries.is_empty());
+        assert_eq!(app.log_scroll, 0);
+
+        assert_eq!(app.data_source, DataSource::Osm);
         assert!(app.bounding_box.is_none());
+        assert_eq!(app.extract_status, Status::Ready);
+
+        assert!(app.input_file.is_none());
+        assert!(app.output_file.is_none());
+        assert_eq!(app.compile_status, Status::Ready);
+
+        assert_eq!(app.clean_options, CleanOptions::default());
+        assert!(app.clean_input_file.is_none());
+        assert!(app.clean_output_file.is_none());
+        assert_eq!(app.clean_status, Status::Ready);
+        assert_eq!(app.clean_selection, 0);
+
+        assert!(app.cache_file.is_none());
+        assert!(app.route_file.is_none());
+        assert_eq!(app.turn_penalties, TurnPenalties::default());
+        assert!(app.depot_coords.is_none());
+        assert_eq!(app.num_vehicles, 1);
+        assert_eq!(app.solver_id, "clarke_wright");
+        assert_eq!(app.optimize_status, Status::Ready);
+
+        assert!(app.cached_maps.is_empty());
+        assert!(app.saved_routes.is_empty());
+        assert_eq!(app.browse_selection, 0);
+
+        assert!(app.file_browser.is_none());
+
+        assert!(!app.input_mode.active);
+        assert_eq!(app.input_mode.field, InputField::BoundingBox);
+        assert!(app.input_mode.buffer.is_empty());
     }
 
     #[test]
