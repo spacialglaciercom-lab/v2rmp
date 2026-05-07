@@ -9,7 +9,7 @@ use crate::core::optimize::{OnewayMode, OptimizeRequest, SolverMode, TurnPenalti
 
 /// rmpca - Route optimization and data extraction
 #[derive(Parser)]
-#[command(name = "rmpca", version = "0.3.9")]
+#[command(name = "rmpca", version = "0.4.2")]
 #[command(about = "Route optimization and data extraction")]
 struct Cli {
     /// Output results as JSON (for machine / agent consumption)
@@ -74,6 +74,87 @@ enum AgentTask {
 
 // ── VRP ───────────────────────────────────────────────────────────────
 
+// ── Custom Serde Deserializers for Agent Payloads ──────────────────────
+
+fn deserialize_depot_opt<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum DepotInput {
+        String(String),
+        Array([f64; 2]),
+    }
+
+    let opt = Option::<DepotInput>::deserialize(deserializer)?;
+    Ok(opt.map(|input| match input {
+        DepotInput::String(s) => s,
+        DepotInput::Array([lat, lon]) => format!("{},{}", lat, lon),
+    }))
+}
+
+fn deserialize_depots_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum DepotInput {
+        String(String),
+        Array([f64; 2]),
+    }
+
+    let inputs = Vec::<DepotInput>::deserialize(deserializer).unwrap_or_default();
+    Ok(inputs
+        .into_iter()
+        .map(|input| match input {
+            DepotInput::String(s) => s,
+            DepotInput::Array([lat, lon]) => format!("{},{}", lat, lon),
+        })
+        .collect())
+}
+
+fn deserialize_bbox<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum BboxInput {
+        String(String),
+        Array([f64; 4]),
+    }
+
+    let input = BboxInput::deserialize(deserializer)?;
+    Ok(match input {
+        BboxInput::String(s) => s,
+        BboxInput::Array([min_lon, min_lat, max_lon, max_lat]) => {
+            format!("{},{},{},{}", min_lon, min_lat, max_lon, max_lat)
+        }
+    })
+}
+
+fn default_output_dir() -> String {
+    "routes/".to_string()
+}
+
+fn default_vehicles() -> usize {
+    1
+}
+
+fn default_vrp_algo() -> VrpAlgorithm {
+    VrpAlgorithm::Greedy
+}
+
+fn default_source() -> String {
+    "overture".to_string()
+}
+
+fn default_extract_output() -> String {
+    "extract-output.geojson".to_string()
+}
+
 #[derive(clap::ValueEnum, Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 enum VrpAlgorithm {
@@ -88,6 +169,7 @@ enum VrpAlgorithm {
 }
 
 #[derive(clap::Args, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 struct VrpArgs {
     /// Input .rmp cache file
     #[arg(short, long)]
@@ -95,57 +177,70 @@ struct VrpArgs {
 
     /// Output directory for agent GPX routes
     #[arg(short, long, default_value = "routes/")]
+    #[serde(default = "default_output_dir")]
     output_dir: String,
 
     /// Number of vehicles/agents
     #[arg(short, long, default_value_t = 1)]
+    #[serde(default = "default_vehicles", alias = "num_vehicles")]
     vehicles: usize,
 
     /// Algorithm to use for VRP
     #[arg(short, long, value_enum, default_value_t = VrpAlgorithm::Greedy)]
+    #[serde(default = "default_vrp_algo")]
     algo: VrpAlgorithm,
 
     /// Vehicle capacity (if applicable)
     #[arg(long)]
+    #[serde(default)]
     capacity: Option<f64>,
 
     /// Depot coordinates: LAT,LON (can be specified multiple times)
     #[arg(long, action = clap::ArgAction::Append)]
+    #[serde(default, deserialize_with = "deserialize_depots_vec")]
     depot: Vec<String>,
 
     /// Path to a JSON/CSV file containing specific waypoints to visit
     #[arg(long)]
+    #[serde(default)]
     waypoints: Option<String>,
 }
 
 // ── Extract ───────────────────────────────────────────────────────────
 
 #[derive(clap::Args, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 struct ExtractArgs {
     /// Bounding box: MIN_LON,MIN_LAT,MAX_LON,MAX_LAT
     #[arg(long, allow_hyphen_values = true)]
+    #[serde(deserialize_with = "deserialize_bbox")]
     bbox: String,
 
     /// Data source: overture (default)
     #[arg(long, default_value = "overture")]
+    #[serde(default = "default_source")]
     source: String,
 
     /// Road classes to include (comma-separated, default: all vehicle)
     #[arg(long, value_delimiter = ',')]
+    #[serde(default)]
     road_classes: Vec<String>,
 
     /// Output GeoJSON file path
     #[arg(short, long, default_value = "extract-output.geojson")]
+    #[serde(default = "default_extract_output")]
     output: String,
 
     /// Path to local OSM PBF file (required for source=osm)
     #[arg(long)]
+    #[serde(default)]
     pbf: Option<String>,
 }
 
 // ── Compile ───────────────────────────────────────────────────────────
 
 #[derive(clap::Args, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 struct CompileArgs {
     /// Input GeoJSON file
     #[arg(short, long)]
@@ -157,12 +252,14 @@ struct CompileArgs {
 
     /// Run cleaning before compilation (with default clean options)
     #[arg(long)]
+    #[serde(default)]
     clean: bool,
 }
 
 // ── Clean ─────────────────────────────────────────────────────────────
 
 #[derive(clap::Args, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 struct CleanArgs {
     /// Input GeoJSON file
     #[arg(short, long)]
@@ -174,32 +271,67 @@ struct CleanArgs {
 
     /// Minimum edge length in meters (default: 0.1)
     #[arg(long)]
+    #[serde(default)]
     min_length_m: Option<f64>,
 
     /// Node snapping distance in meters (default: 1.0)
     #[arg(long)]
+    #[serde(default)]
     node_snap_m: Option<f64>,
 
     /// Keep only the N largest connected components (default: 1)
     #[arg(long)]
+    #[serde(default)]
     max_components: Option<usize>,
 
     /// Geometry simplification tolerance in meters (default: 0.0)
     #[arg(long)]
+    #[serde(default)]
     simplify_tolerance_m: Option<f64>,
 
     /// Skip edge deduplication
     #[arg(long)]
+    #[serde(default)]
     no_dedupe: bool,
 
     /// Skip isolated node removal
     #[arg(long)]
+    #[serde(default)]
     no_remove_isolates: bool,
 }
 
 // ── Optimize ──────────────────────────────────────────────────────────
 
+fn default_oneway() -> String {
+    "respect".to_string()
+}
+
+fn default_mode() -> String {
+    "cpp".to_string()
+}
+
+fn default_left_penalty() -> f64 {
+    1.0
+}
+
+fn default_right_penalty() -> f64 {
+    0.0
+}
+
+fn default_uturn_penalty() -> f64 {
+    5.0
+}
+
+fn default_solver() -> String {
+    "default".to_string()
+}
+
+fn default_pipeline_output_dir() -> String {
+    ".".to_string()
+}
+
 #[derive(clap::Args, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 struct OptimizeArgs {
     /// Input .rmp cache file
     #[arg(short, long)]
@@ -207,30 +339,37 @@ struct OptimizeArgs {
 
     /// Output route GPX file
     #[arg(short, long)]
+    #[serde(default)]
     output: Option<String>,
 
     /// Depot coordinates: LAT,LON
     #[arg(long)]
+    #[serde(default, deserialize_with = "deserialize_depot_opt")]
     depot: Option<String>,
 
     /// Oneway mode: respect, ignore, reverse (default: respect)
     #[arg(long, default_value = "respect")]
+    #[serde(default = "default_oneway")]
     oneway: String,
 
     /// Solver mode: cpp (edge coverage) or vrp (stop visits) (default: cpp)
     #[arg(short, long, default_value = "cpp")]
+    #[serde(default = "default_mode")]
     mode: String,
 
     /// Left turn penalty (default: 1.0)
     #[arg(long, default_value_t = 1.0)]
+    #[serde(default = "default_left_penalty")]
     left_penalty: f64,
 
     /// Right turn penalty (default: 0.0)
     #[arg(long, default_value_t = 0.0)]
+    #[serde(default = "default_right_penalty")]
     right_penalty: f64,
 
     /// U-turn penalty (default: 5.0)
     #[arg(long, default_value_t = 5.0)]
+    #[serde(default = "default_uturn_penalty")]
     uturn_penalty: f64,
 
     /// Number of vehicles (for VRP mode only)
@@ -239,27 +378,33 @@ struct OptimizeArgs {
 
     /// Solver algorithm for VRP mode (clarke_wright, sweep, two_opt, or_opt, default)
     #[arg(long, default_value = "default")]
+    #[serde(default = "default_solver", alias = "solver_id")]
     solver: String,
 }
 
 // ── Pipeline ──────────────────────────────────────────────────────────
 
 #[derive(clap::Args, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 struct PipelineArgs {
     /// Bounding box: MIN_LON,MIN_LAT,MAX_LON,MAX_LAT
     #[arg(long, allow_hyphen_values = true)]
+    #[serde(deserialize_with = "deserialize_bbox")]
     bbox: String,
 
     /// Data source: overture (default)
     #[arg(long, default_value = "overture")]
+    #[serde(default = "default_source")]
     source: String,
 
     /// Output directory for all intermediate and final files
     #[arg(short, long, default_value = ".")]
+    #[serde(default = "default_pipeline_output_dir")]
     output_dir: String,
 
     /// Depot coordinates: LAT,LON
     #[arg(long)]
+    #[serde(default, deserialize_with = "deserialize_depot_opt")]
     depot: Option<String>,
 }
 
