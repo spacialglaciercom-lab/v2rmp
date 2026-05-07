@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::time::Instant;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct TurnPenalties {
     pub left: f64,
     pub right: f64,
