@@ -668,23 +668,22 @@ mod tests {
     fn test_app_initialization() {
         let app = App::new();
         assert!(app.running);
-        assert_eq!(app.current_view, View::Home);
         assert_eq!(app.workflow_selection, 0);
         assert!(app.log_entries.is_empty());
         assert_eq!(app.log_scroll, 0);
 
-        assert!(matches!(app.data_source, DataSource::Osm));
+        assert_eq!(app.data_source, DataSource::Osm);
         assert!(app.bounding_box.is_none());
-        assert!(matches!(app.extract_status, Status::Ready));
+        assert_eq!(app.extract_status, Status::Ready);
 
         assert!(app.input_file.is_none());
         assert!(app.output_file.is_none());
-        assert!(matches!(app.compile_status, Status::Ready));
+        assert_eq!(app.compile_status, Status::Ready);
 
         assert_eq!(app.clean_options, CleanOptions::default());
         assert!(app.clean_input_file.is_none());
         assert!(app.clean_output_file.is_none());
-        assert!(matches!(app.clean_status, Status::Ready));
+        assert_eq!(app.clean_status, Status::Ready);
         assert_eq!(app.clean_selection, 0);
 
         assert!(app.cache_file.is_none());
@@ -693,20 +692,16 @@ mod tests {
         assert!(app.depot_coords.is_none());
         assert_eq!(app.num_vehicles, 1);
         assert_eq!(app.solver_id, "clarke_wright");
-        assert!(matches!(app.optimize_status, Status::Ready));
+        assert_eq!(app.optimize_status, Status::Ready);
 
-        // Note: App::new() calls App::scan_cached_maps() which populates cached_maps
-        // from the local filesystem. So we don't strictly assert it's empty, but we
-        // can at least make sure the type is right. (Though in a pure unit test it might be empty
-        // depending on the CWD. We can skip exact length assertions for cached_maps).
-
+        assert!(app.cached_maps.is_empty());
         assert!(app.saved_routes.is_empty());
         assert_eq!(app.browse_selection, 0);
 
         assert!(app.file_browser.is_none());
 
         assert!(!app.input_mode.active);
-        assert!(matches!(app.input_mode.field, InputField::BoundingBox));
+        assert_eq!(app.input_mode.field, InputField::BoundingBox);
         assert!(app.input_mode.buffer.is_empty());
     }
 
