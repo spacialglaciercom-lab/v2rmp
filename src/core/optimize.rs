@@ -336,7 +336,7 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     }
 
     let mut sorted_odd = odd_vertices.clone();
-    sorted_odd.sort_by(|&a, &b| nodes[a].lat.partial_cmp(&nodes[b].lat).unwrap());
+    sorted_odd.sort_by(|&a, &b| nodes[a].lat.total_cmp(&nodes[b].lat));
 
     let mut pos_in_sorted = vec![0usize; n];
     for (i, &idx) in sorted_odd.iter().enumerate() {
@@ -457,8 +457,9 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
             }
             stack.push((edge.to, Some(edge)));
         } else {
-            let (v_u32, e) = stack.pop().unwrap();
-            circuit_with_edges.push((v_u32, e));
+            if let Some((v_u32, e)) = stack.pop() {
+                circuit_with_edges.push((v_u32, e));
+            }
         }
     }
 
