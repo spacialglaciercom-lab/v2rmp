@@ -1,7 +1,7 @@
 import json
 
 features = []
-grid_size = 10
+grid_size = 500
 spacing = 0.01 # Approx 1km
 
 # Generate Horizontal Streets
