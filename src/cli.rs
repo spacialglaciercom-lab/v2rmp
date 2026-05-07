@@ -254,6 +254,11 @@ struct CompileArgs {
     #[arg(long)]
     #[serde(default)]
     clean: bool,
+
+    /// Prune disconnected subgraphs
+    #[arg(long)]
+    #[serde(default)]
+    prune_disconnected: bool,
 }
 
 // ── Clean ─────────────────────────────────────────────────────────────
@@ -406,6 +411,11 @@ struct PipelineArgs {
     #[arg(long)]
     #[serde(default, deserialize_with = "deserialize_depot_opt")]
     depot: Option<String>,
+
+    /// Prune disconnected subgraphs during compilation
+    #[arg(long)]
+    #[serde(default)]
+    prune_disconnected: bool,
 }
 
 #[derive(Serialize)]
@@ -563,6 +573,7 @@ fn run_compile_cmd(args: CompileArgs, json: bool) -> Result<()> {
         compress: false,
         road_classes: vec![],
         clean_options,
+        prune_disconnected: args.prune_disconnected,
     };
 
     let result = crate::core::compile::run_compile(&req)?;
@@ -794,6 +805,7 @@ async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         compress: false,
         road_classes: vec![],
         clean_options: None,
+        prune_disconnected: args.prune_disconnected,
     };
     let compile_result = crate::core::compile::run_compile(&compile_req)
         .context("Pipeline failed at stage 'compile'")?;

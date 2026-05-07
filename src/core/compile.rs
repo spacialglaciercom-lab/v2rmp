@@ -13,6 +13,8 @@ pub struct CompileRequest {
     pub compress: bool,
     pub road_classes: Vec<String>,
     pub clean_options: Option<CleanOptions>,
+    #[serde(default)]
+    pub prune_disconnected: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,6 +126,69 @@ pub fn run_compile(req: &CompileRequest) -> anyhow::Result<CompileResult> {
                 let weight_m = haversine_distance_m(lat1, lon1, lat2, lon2);
                 edges.push((from_node, to_node, weight_m, oneway));
             }
+        }
+    }
+
+    // 4.5 Prune disconnected subgraphs
+    if req.prune_disconnected && !nodes.is_empty() {
+        let mut adj: Vec<Vec<u32>> = vec![Vec::new(); nodes.len()];
+        for &(from, to, _, _) in &edges {
+            adj[from as usize].push(to);
+            adj[to as usize].push(from);
+        }
+
+        let mut visited = vec![false; nodes.len()];
+        let mut components = Vec::new();
+
+        for i in 0..nodes.len() {
+            if !visited[i] {
+                let mut component = Vec::new();
+                let mut stack = vec![i as u32];
+                visited[i] = true;
+
+                while let Some(node) = stack.pop() {
+                    component.push(node);
+                    for &neighbor in &adj[node as usize] {
+                        if !visited[neighbor as usize] {
+                            visited[neighbor as usize] = true;
+                            stack.push(neighbor);
+                        }
+                    }
+                }
+                components.push(component);
+            }
+        }
+
+        if components.len() > 1 {
+            components.sort_by_key(|c| std::cmp::Reverse(c.len()));
+            let largest_component = &components[0];
+            let pruned_nodes_count = nodes.len() - largest_component.len();
+            tracing::info!("Pruning disconnected subgraphs: kept largest component ({} nodes), pruned {} disconnected nodes in {} smaller subgraphs", largest_component.len(), pruned_nodes_count, components.len() - 1);
+
+            let mut old_to_new = vec![None; nodes.len()];
+            let mut new_nodes = Vec::with_capacity(largest_component.len());
+            for &old_id in largest_component {
+                old_to_new[old_id as usize] = Some(new_nodes.len() as u32);
+                new_nodes.push(nodes[old_id as usize]);
+            }
+
+            let mut new_edges = Vec::new();
+            let mut pruned_edges_count = 0;
+            for &(from, to, weight, oneway) in &edges {
+                if let (Some(new_from), Some(new_to)) =
+                    (old_to_new[from as usize], old_to_new[to as usize])
+                {
+                    new_edges.push((new_from, new_to, weight, oneway));
+                } else {
+                    pruned_edges_count += 1;
+                }
+            }
+
+            tracing::info!("Pruned {} disconnected edges", pruned_edges_count);
+            nodes = new_nodes;
+            edges = new_edges;
+        } else {
+            tracing::info!("Graph is fully connected, no subgraphs to prune.");
         }
     }
 
