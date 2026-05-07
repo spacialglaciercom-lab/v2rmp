@@ -6,6 +6,7 @@ pub mod extract;
 pub mod file_browser;
 pub mod home;
 pub mod optimize;
+pub mod vrp;
 
 use ratatui::Frame;
 
@@ -48,6 +49,7 @@ fn draw_main(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         View::Extract => extract::draw(f, app, area),
         View::Compile => compile::draw(f, app, area),
         View::Optimize => optimize::draw(f, app, area),
+        View::Vrp => vrp::draw(f, app, area),
         View::BrowseMaps => browse_maps::draw(f, app, area),
         View::BrowseRoutes => browse_routes::draw(f, app, area),
         View::FileBrowser => file_browser::draw(f, app, area),
@@ -104,6 +106,9 @@ fn draw_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let text = match app.current_view {
         View::Home | View::Extract | View::Optimize => {
             "[q] Quit  [Esc] Home  [h/F1] Help  [↑↓] Navigate  [Enter] Select"
+        }
+        View::Vrp => {
+            "[Esc] Home  [I] Input  [W] Waypoints  [V] Vehicles  [A] Algo  [D] Depot  [Enter] Run VRP"
         }
         View::Compile => "[q] Quit  [Esc] Home  [I] Input file  [O] Output file  [Enter] Compile",
         View::BrowseMaps => {
@@ -187,6 +192,12 @@ pub fn draw_input_prompt(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         }
         crate::app::InputField::CleanInputFile => "Clean input GeoJSON file path",
         crate::app::InputField::CleanOutputFile => "Clean output GeoJSON file path",
+        crate::app::InputField::VrpInputFile => "VRP input .rmp file path",
+        crate::app::InputField::VrpOutputDir => "VRP output directory",
+        crate::app::InputField::VrpWaypointsFile => "VRP waypoints JSON file path",
+        crate::app::InputField::VrpAlgorithm => "VRP algorithm (greedy|savings|local_search|simulated_annealing)",
+        crate::app::InputField::VrpCapacity => "VRP vehicle capacity",
+        crate::app::InputField::VrpDepot => "VRP depot (lat,lon)",
     };
 
     let popup_area = ratatui::layout::Rect {

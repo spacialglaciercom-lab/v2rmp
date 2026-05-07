@@ -12,6 +12,7 @@ pub enum View {
     Compile,
     Clean,
     Optimize,
+    Vrp,
     BrowseMaps,
     BrowseRoutes,
     FileBrowser,
@@ -296,6 +297,12 @@ pub enum InputField {
     SolverId,
     CleanInputFile,
     CleanOutputFile,
+    VrpInputFile,
+    VrpOutputDir,
+    VrpWaypointsFile,
+    VrpAlgorithm,
+    VrpCapacity,
+    VrpDepot,
 }
 
 pub struct App {
@@ -330,6 +337,16 @@ pub struct App {
     pub num_vehicles: usize,
     pub solver_id: String,
     pub optimize_status: Status,
+
+    // VRP state
+    pub vrp_input_file: Option<String>,
+    pub vrp_output_dir: String,
+    pub vrp_vehicles: usize,
+    pub vrp_algo: String,
+    pub vrp_capacity: Option<f64>,
+    pub vrp_depots: Vec<String>,
+    pub vrp_waypoints_file: Option<String>,
+    pub vrp_status: Status,
 
     // Browse state
     pub cached_maps: Vec<String>,
@@ -383,6 +400,15 @@ impl App {
             num_vehicles: 1,
             solver_id: "clarke_wright".to_string(),
             optimize_status: Status::Ready,
+
+            vrp_input_file: None,
+            vrp_output_dir: "routes/".to_string(),
+            vrp_vehicles: 1,
+            vrp_algo: "greedy".to_string(),
+            vrp_capacity: Some(100.0),
+            vrp_depots: Vec::new(),
+            vrp_waypoints_file: None,
+            vrp_status: Status::Ready,
 
             cached_maps: Vec::new(),
             saved_routes: Vec::new(),
@@ -596,6 +622,32 @@ impl App {
                 self.clean_output_file = Some(value.clone());
                 self.log(LogLevel::Success, format!("Clean output set: {}", value));
             }
+            InputField::VrpInputFile => {
+                self.vrp_input_file = Some(value.clone());
+                self.log(LogLevel::Success, format!("VRP input set: {}", value));
+            }
+            InputField::VrpOutputDir => {
+                self.vrp_output_dir = value.clone();
+                self.log(LogLevel::Success, format!("VRP output dir: {}", value));
+            }
+            InputField::VrpWaypointsFile => {
+                self.vrp_waypoints_file = Some(value.clone());
+                self.log(LogLevel::Success, format!("VRP waypoints file: {}", value));
+            }
+            InputField::VrpAlgorithm => {
+                self.vrp_algo = value.clone();
+                self.log(LogLevel::Success, format!("VRP algorithm: {}", value));
+            }
+            InputField::VrpCapacity => {
+                if let Ok(v) = value.parse::<f64>() {
+                    self.vrp_capacity = Some(v);
+                    self.log(LogLevel::Success, format!("VRP capacity: {}", v));
+                }
+            }
+            InputField::VrpDepot => {
+                self.vrp_depots.push(value.clone());
+                self.log(LogLevel::Success, format!("VRP depot added: {}", value));
+            }
             InputField::DepotCoordinates => {
                 let parts: Vec<&str> = value.split(',').collect();
                 if parts.len() == 2 {
@@ -631,7 +683,7 @@ impl App {
     pub fn navigate_up(&mut self) {
         match self.current_view {
             View::Home => {
-                self.workflow_selection = (self.workflow_selection + 5) % 6;
+                self.workflow_selection = (self.workflow_selection + 6) % 7;
             }
             View::BrowseMaps => {
                 let max = self.cached_maps.len().max(1);
@@ -652,7 +704,7 @@ impl App {
     pub fn navigate_down(&mut self) {
         match self.current_view {
             View::Home => {
-                self.workflow_selection = (self.workflow_selection + 1) % 6;
+                self.workflow_selection = (self.workflow_selection + 1) % 7;
             }
             View::BrowseMaps => {
                 let max = self.cached_maps.len().max(1);

@@ -71,6 +71,7 @@ async fn handle_view_keys(app: &mut App, code: KeyCode, mods: KeyModifiers) {
         View::Extract => handle_extract_keys(app, code, mods).await,
         View::Compile => handle_compile_keys(app, code, mods),
         View::Optimize => handle_optimize_keys(app, code, mods).await,
+        View::Vrp => handle_vrp_keys(app, code, mods).await,
         View::BrowseMaps => handle_browse_maps_keys(app, code),
         View::BrowseRoutes => handle_browse_routes_keys(app, code),
         View::FileBrowser => {} // Handled separately in handle_normal_mode
@@ -102,11 +103,15 @@ fn handle_home_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                 );
             }
             4 => {
+                app.current_view = View::Vrp;
+                app.log(crate::app::LogLevel::Info, "Switched to VRP Solver view");
+            }
+            5 => {
                 app.current_view = View::BrowseMaps;
                 app.browse_selection = 0;
                 app.log(crate::app::LogLevel::Info, "Switched to Cached Maps view");
             }
-            5 => {
+            6 => {
                 app.current_view = View::BrowseRoutes;
                 app.browse_selection = 0;
                 app.log(crate::app::LogLevel::Info, "Switched to Saved Routes view");
@@ -397,6 +402,249 @@ async fn handle_optimize_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers)
                 app.log(
                     crate::app::LogLevel::Warn,
                     "Set a cache file first (press 'c')",
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+async fn handle_vrp_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+    match code {
+        KeyCode::Char('i') | KeyCode::Char('I') => {
+            app.start_file_browser(InputField::VrpInputFile);
+        }
+        KeyCode::Char('w') | KeyCode::Char('W') => {
+            app.start_file_browser(InputField::VrpWaypointsFile);
+        }
+        KeyCode::Char('o') | KeyCode::Char('O') => {
+            app.start_input(InputField::VrpOutputDir);
+        }
+        KeyCode::Char('v') | KeyCode::Char('V') => {
+            app.start_input(InputField::NumVehicles);
+        }
+        KeyCode::Char('a') | KeyCode::Char('A') => {
+            app.start_input(InputField::VrpAlgorithm);
+        }
+        KeyCode::Char('c') | KeyCode::Char('C') => {
+            app.start_input(InputField::VrpCapacity);
+        }
+        KeyCode::Char('d') | KeyCode::Char('D') => {
+            app.start_input(InputField::VrpDepot);
+        }
+        KeyCode::Char('x') | KeyCode::Char('X') => {
+            app.vrp_depots.clear();
+            app.log(crate::app::LogLevel::Info, "VRP depots cleared");
+        }
+        KeyCode::Enter => {
+            if let Some(_input_path) = app.vrp_input_file.clone() {
+                if app.vrp_depots.is_empty() {
+                    app.log(
+                        crate::app::LogLevel::Warn,
+                        "Add at least one depot (press 'd')",
+                    );
+                    return;
+                }
+                if app.vrp_waypoints_file.is_none() {
+                    app.log(
+                        crate::app::LogLevel::Warn,
+                        "Set a waypoints file (press 'w')",
+                    );
+                    return;
+                }
+
+                let algo = app.vrp_algo.clone();
+                let vehicles = app.vrp_vehicles;
+                let capacity = app.vrp_capacity.unwrap_or(100.0);
+                let depots: Vec<String> = app.vrp_depots.clone();
+                let waypoints_path = app.vrp_waypoints_file.clone().unwrap();
+                let output_dir = app.vrp_output_dir.clone();
+
+                app.vrp_status = crate::app::Status::Running {
+                    progress: 0,
+                    message: "Solving VRP...".to_string(),
+                };
+                app.log(
+                    crate::app::LogLevel::Info,
+                    format!("Starting VRP solve with algorithm: {}", algo),
+                );
+
+                // Parse depots
+                let parsed_depots: Result<Vec<(f64, f64)>, _> = depots
+                    .iter()
+                    .map(|s| {
+                        let parts: Vec<f64> = s
+                            .split(',')
+                            .filter_map(|v| v.parse::<f64>().ok())
+                            .collect();
+                        if parts.len() == 2 {
+                            Ok((parts[0], parts[1]))
+                        } else {
+                            Err(anyhow::anyhow!("Invalid depot: {}", s))
+                        }
+                    })
+                    .collect();
+
+                match parsed_depots {
+                    Ok(parsed) => {
+                        // Build stops from waypoints
+                        let mut stops = Vec::new();
+                        stops.push(crate::core::vrp::types::VRPSolverStop {
+                            lat: parsed[0].0,
+                            lon: parsed[0].1,
+                            label: "Depot".into(),
+                            demand: Some(0.0),
+                            arrival_time: None,
+                        });
+
+                        match std::fs::read_to_string(&waypoints_path) {
+                            Ok(wp_data) => {
+                                match serde_json::from_str::<Vec<[f64; 2]>>(&wp_data) {
+                                    Ok(points) => {
+                                        for (i, p) in points.into_iter().enumerate() {
+                                            stops.push(crate::core::vrp::types::VRPSolverStop {
+                                                lat: p[0],
+                                                lon: p[1],
+                                                label: format!("WP {}", i),
+                                                demand: Some(1.0),
+                                                arrival_time: None,
+                                            });
+                                        }
+                                    }
+                                    Err(e) => {
+                                        app.vrp_status =
+                                            crate::app::Status::Error(format!(
+                                                "Invalid waypoints JSON: {}",
+                                                e
+                                            ));
+                                        app.log(
+                                            crate::app::LogLevel::Error,
+                                            format!("VRP failed: invalid waypoints: {}", e),
+                                        );
+                                        return;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                app.vrp_status = crate::app::Status::Error(format!(
+                                    "Failed to read waypoints: {}",
+                                    e
+                                ));
+                                app.log(
+                                    crate::app::LogLevel::Error,
+                                    format!("VRP failed: cannot read waypoints: {}", e),
+                                );
+                                return;
+                            }
+                        }
+
+                        let solver_id = match algo.as_str() {
+                            "greedy" => "default",
+                            "savings" => "clarke_wright",
+                            "local_search" => "two_opt",
+                            "simulated_annealing" => "or_opt",
+                            other => other,
+                        };
+
+                        let matrix = crate::core::vrp::utils::build_haversine_matrix(&stops, 40.0);
+
+                        let vrp_input = crate::core::vrp::types::VRPSolverInput {
+                            locations: stops,
+                            num_vehicles: vehicles,
+                            vehicle_capacity: capacity,
+                            objective: crate::core::vrp::types::VrpObjective::MinDistance,
+                            matrix: Some(matrix),
+                            service_time_secs: Some(30.0),
+                            use_time_windows: false,
+                            window_open: None,
+                            window_close: None,
+                        };
+
+                        match crate::core::vrp::registry::solve_with(solver_id, &vrp_input).await {
+                            Ok(output) => {
+                                if let Some(routes) = output.routes {
+                                    let mut log_routes = Vec::new();
+                                    // Create output directory
+                                    if let Err(e) = std::fs::create_dir_all(&output_dir) {
+                                        app.vrp_status = crate::app::Status::Error(format!(
+                                            "Failed to create output dir: {}",
+                                            e
+                                        ));
+                                        app.log(
+                                            crate::app::LogLevel::Error,
+                                            format!("VRP error: {}", e),
+                                        );
+                                        return;
+                                    }
+
+                                    for (i, route) in routes.iter().enumerate() {
+                                        let path = format!(
+                                            "{}/vehicle_{}.gpx",
+                                            output_dir,
+                                            i + 1
+                                        );
+                                        match crate::core::optimize::write_gpx_multi(
+                                            &path,
+                                            &[route.clone()],
+                                        ) {
+                                            Ok(_) => log_routes.push(path),
+                                            Err(e) => {
+                                                app.log(
+                                                    crate::app::LogLevel::Error,
+                                                    format!(
+                                                        "Failed to write route {}: {}",
+                                                        i + 1,
+                                                        e
+                                                    ),
+                                                );
+                                            }
+                                        }
+                                    }
+
+                                    app.vrp_status = crate::app::Status::Done(format!(
+                                        "VRP solved: {} routes, {} total distance",
+                                        log_routes.len(),
+                                        output.total_distance_km
+                                    ));
+                                    app.log(
+                                        crate::app::LogLevel::Success,
+                                        format!(
+                                            "VRP complete: {} routes written to {}",
+                                            log_routes.len(),
+                                            output_dir
+                                        ),
+                                    );
+                                } else {
+                                    app.vrp_status =
+                                        crate::app::Status::Done("VRP solved (no routes)".into());
+                                    app.log(
+                                        crate::app::LogLevel::Success,
+                                        "VRP complete: no routes produced",
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                app.vrp_status = crate::app::Status::Error(e.clone());
+                                app.log(
+                                    crate::app::LogLevel::Error,
+                                    format!("VRP failed: {}", e),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        app.vrp_status =
+                            crate::app::Status::Error(format!("Invalid depot: {}", e));
+                        app.log(
+                            crate::app::LogLevel::Error,
+                            format!("VRP failed: {}", e),
+                        );
+                    }
+                }
+            } else {
+                app.log(
+                    crate::app::LogLevel::Warn,
+                    "Set an input .rmp file first (press 'i')",
                 );
             }
         }

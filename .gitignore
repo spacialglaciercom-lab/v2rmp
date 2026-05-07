@@ -39,3 +39,5 @@ cloud-vectordb-examples/
 # Test artifacts
 test_dem.tif
 *.core
+.deepseek/
+find_duplicates.py
