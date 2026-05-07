@@ -38,7 +38,12 @@ enum Commands {
     List(ListArgs),
     /// Execute a JSON-encoded task plan
     Agent(AgentArgs),
+    /// Start a headless, long-running JSON-RPC/STDIO server for frontend integrations
+    Serve(ServeArgs),
 }
+
+#[derive(clap::Args)]
+struct ServeArgs {}
 
 #[derive(clap::Args)]
 struct ListArgs {
@@ -254,6 +259,11 @@ struct CompileArgs {
     #[arg(long)]
     #[serde(default)]
     clean: bool,
+
+    /// Prune disconnected subgraphs
+    #[arg(long)]
+    #[serde(default)]
+    prune_disconnected: bool,
 }
 
 // ── Clean ─────────────────────────────────────────────────────────────
@@ -406,6 +416,11 @@ struct PipelineArgs {
     #[arg(long)]
     #[serde(default, deserialize_with = "deserialize_depot_opt")]
     depot: Option<String>,
+
+    /// Prune disconnected subgraphs during compilation
+    #[arg(long)]
+    #[serde(default)]
+    prune_disconnected: bool,
 }
 
 #[derive(Serialize)]
@@ -563,6 +578,7 @@ fn run_compile_cmd(args: CompileArgs, json: bool) -> Result<()> {
         compress: false,
         road_classes: vec![],
         clean_options,
+        prune_disconnected: args.prune_disconnected,
     };
 
     let result = crate::core::compile::run_compile(&req)?;
@@ -794,6 +810,7 @@ async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         compress: false,
         road_classes: vec![],
         clean_options: None,
+        prune_disconnected: args.prune_disconnected,
     };
     let compile_result = crate::core::compile::run_compile(&compile_req)
         .context("Pipeline failed at stage 'compile'")?;
@@ -875,6 +892,56 @@ async fn run_agent_cmd(args: AgentArgs, json: bool) -> Result<()> {
         AgentTask::Pipeline(a) => run_pipeline_cmd(a, json).await,
     }
 }
+async fn run_serve_cmd(_args: ServeArgs) -> Result<()> {
+    use std::io::BufRead;
+
+    #[derive(Serialize)]
+    struct ErrorResponse {
+        error: String,
+    }
+
+    tracing::info!("Headless engine started. Listening on stdin for JSON-RPC/STDIO tasks...");
+
+    let stdin = std::io::stdin();
+    for line_result in stdin.lock().lines() {
+        let line = match line_result {
+            Ok(l) => l,
+            Err(e) => {
+                tracing::error!("Failed to read stdin: {}", e);
+                break;
+            }
+        };
+
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        match serde_json::from_str::<AgentTask>(&line) {
+            Ok(task) => {
+                let res = match task {
+                    AgentTask::Extract(a) => run_extract_cmd(a, true).await,
+                    AgentTask::Compile(a) => run_compile_cmd(a, true),
+                    AgentTask::Clean(a) => run_clean_cmd(a, true),
+                    AgentTask::Optimize(a) => run_optimize_cmd(a, true).await,
+                    AgentTask::Vrp(a) => run_vrp_cmd(a, true),
+                    AgentTask::Pipeline(a) => run_pipeline_cmd(a, true).await,
+                };
+                if let Err(e) = res {
+                    let _ = output_json(&ErrorResponse {
+                        error: format!("Task failed: {}", e),
+                    });
+                }
+            }
+            Err(e) => {
+                let _ = output_json(&ErrorResponse {
+                    error: format!("Failed to parse agent task JSON: {}", e),
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
 
 fn run_list_cmd(args: ListArgs, json: bool) -> Result<()> {
     let mut files = Vec::new();
@@ -902,9 +969,9 @@ fn run_list_cmd(args: ListArgs, json: bool) -> Result<()> {
     if json {
         output_json(&files)?;
     } else {
-        println!("Available {:?}:", args.resource);
+        eprintln!("Available {:?}:", args.resource);
         for f in files {
-            println!("  - {f}");
+            eprintln!("  - {f}");
         }
     }
     Ok(())
@@ -925,6 +992,7 @@ pub async fn run() -> Result<()> {
         Commands::Pipeline(args) => run_pipeline_cmd(args, cli.json).await,
         Commands::List(args) => run_list_cmd(args, cli.json),
         Commands::Agent(args) => run_agent_cmd(args, cli.json).await,
+        Commands::Serve(args) => run_serve_cmd(args).await,
     };
 
     if let Err(e) = result {
