@@ -934,3 +934,6 @@ pub async fn run() -> Result<()> {
 
     Ok(())
 }
+fn default_mode() -> String {
+    "cpp".to_string()
+}

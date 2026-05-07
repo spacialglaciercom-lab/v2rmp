@@ -30,12 +30,12 @@ const RMP_MAGIC: &[u8; 4] = b"RMP1";
 /// Compile a GeoJSON road network into the .rmp binary format.
 ///
 /// Binary layout:
-///   [4]  magic "RMP1"
-///   [4]  node count (u32 LE)
-///   [4]  edge count (u32 LE)
-///   [N]  node entries: lat(f64) lon(f64) = 16 bytes each
-///   [E]  edge entries: from(u32 LE) to(u32 LE) weight_m(f64 LE) oneway(u8) = 17 bytes each
-///   [4]  CRC32 checksum (LE)
+///   \[4\]  magic "RMP1"
+///   \[4\]  node count (u32 LE)
+///   \[4\]  edge count (u32 LE)
+///   \[N\]  node entries: lat(f64) lon(f64) = 16 bytes each
+///   \[E\]  edge entries: from(u32 LE) to(u32 LE) weight_m(f64 LE) oneway(u8) = 17 bytes each
+///   \[4\]  CRC32 checksum (LE)
 pub fn run_compile(req: &CompileRequest) -> anyhow::Result<CompileResult> {
     let start = Instant::now();
 
