@@ -1,6 +1,6 @@
 [package]
 name = "v2rmp"
-version = "0.4.0"
+version = "0.4.2"
 edition = "2021"
 description = "rmpca — Route Optimization TUI & Agent Engine"
 license = "MIT OR Apache-2.0"

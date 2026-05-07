@@ -9,7 +9,7 @@ use crate::core::optimize::{OnewayMode, OptimizeRequest, SolverMode, TurnPenalti
 
 /// rmpca - Route optimization and data extraction
 #[derive(Parser)]
-#[command(name = "rmpca", version = "0.3.9")]
+#[command(name = "rmpca", version = "0.4.2")]
 #[command(about = "Route optimization and data extraction")]
 struct Cli {
     /// Output results as JSON (for machine / agent consumption)
