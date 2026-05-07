@@ -83,10 +83,10 @@ impl FileBrowser {
         self.entries.clear();
 
         // Add parent directory entry if not at root
-        if self.current_path.parent().is_some() {
+        if let Some(parent) = self.current_path.parent() {
             self.entries.push(FileEntry {
                 name: "..".to_string(),
-                path: self.current_path.parent().unwrap().to_path_buf(),
+                path: parent.to_path_buf(),
                 is_dir: true,
                 size: None,
                 modified: None,
