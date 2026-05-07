@@ -27,10 +27,12 @@ use super::solvers::sweep::SweepSolver;
 use super::solvers::two_opt::TwoOptSolver;
 use super::types::{VRPSolver, VRPSolverInput, VRPSolverOutput};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
-lazy_static::lazy_static! {
-    static ref REGISTRY: RwLock<SolverRegistryInner> = RwLock::new(SolverRegistryInner::new());
+static REGISTRY: OnceLock<RwLock<SolverRegistryInner>> = OnceLock::new();
+
+fn registry() -> &'static RwLock<SolverRegistryInner> {
+    REGISTRY.get_or_init(|| RwLock::new(SolverRegistryInner::new()))
 }
 
 struct SolverRegistryInner {
@@ -65,7 +67,7 @@ impl SolverRegistryInner {
 /// Register a custom solver. If the id already exists, it is replaced.
 pub fn register_solver(solver: Arc<dyn VRPSolver>) {
     let id = solver.id().to_string();
-    let mut reg = REGISTRY.write().unwrap();
+    let mut reg = registry().write().unwrap();
     let had = reg.solvers.contains_key(&id);
     reg.solvers.insert(id.clone(), solver);
     if !had && !reg.builtin_ids.contains(&id) {
@@ -76,7 +78,7 @@ pub fn register_solver(solver: Arc<dyn VRPSolver>) {
 /// Unregister a solver by id. Built-in solver ids are ignored.
 /// Returns true if a dynamic solver was removed.
 pub fn unregister_solver(id: &str) -> bool {
-    let mut reg = REGISTRY.write().unwrap();
+    let mut reg = registry().write().unwrap();
     if reg.builtin_ids.contains(&id.to_string()) {
         return false;
     }
@@ -89,7 +91,7 @@ pub fn unregister_solver(id: &str) -> bool {
 
 /// Return the ordered list of solvers: built-ins first, then dynamically registered.
 pub fn get_solver_list() -> Vec<String> {
-    let reg = REGISTRY.read().unwrap();
+    let reg = registry().read().unwrap();
     let mut ids: Vec<String> = reg.builtin_ids.clone();
     for id in &reg.dynamic_order {
         if reg.solvers.contains_key(id) {
@@ -103,7 +105,7 @@ pub fn get_solver_list() -> Vec<String> {
 pub async fn solve_with(id: &str, input: &VRPSolverInput) -> Result<VRPSolverOutput, String> {
     // Clone the Arc out before .await so we don't hold RwLockReadGuard across await.
     let solver: Arc<dyn VRPSolver> = {
-        let reg = REGISTRY.read().unwrap();
+        let reg = registry().read().unwrap();
         match reg.solvers.get(id).or_else(|| reg.solvers.get("default")) {
             Some(s) => Arc::clone(s),
             None => return Err(format!("Solver '{id}' not found and no default available")),
@@ -115,7 +117,7 @@ pub async fn solve_with(id: &str, input: &VRPSolverInput) -> Result<VRPSolverOut
 /// Algorithm options for UI dropdowns.
 pub fn get_algorithm_options() -> Vec<(String, String)> {
     let ids = get_solver_list();
-    let reg = REGISTRY.read().unwrap();
+    let reg = registry().read().unwrap();
     ids.iter()
         .filter_map(|id| {
             reg.solvers
