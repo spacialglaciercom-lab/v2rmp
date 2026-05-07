@@ -123,7 +123,7 @@ pub fn run_compile(req: &CompileRequest) -> anyhow::Result<CompileResult> {
                 let to_node = get_or_create_node(&mut node_map, &mut nodes, lat2, lon2);
                 last_node_id = Some(to_node);
 
-                let weight_m = haversine_distance_m(lat1, lon1, lat2, lon2);
+                let weight_m = super::haversine_m(lat1, lon1, lat2, lon2);
                 edges.push((from_node, to_node, weight_m, oneway));
             }
         }
@@ -266,22 +266,6 @@ fn get_or_create_node(
     })
 }
 
-/// Calculate haversine distance in meters between two (lat, lon) points.
-fn haversine_distance_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
-    const EARTH_RADIUS_M: f64 = 6_371_000.0;
-
-    let lat1_rad = lat1.to_radians();
-    let lat2_rad = lat2.to_radians();
-    let delta_lat = (lat2 - lat1).to_radians();
-    let delta_lon = (lon2 - lon1).to_radians();
-
-    let a = (delta_lat / 2.0).sin().powi(2)
-        + lat1_rad.cos() * lat2_rad.cos() * (delta_lon / 2.0).sin().powi(2);
-    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-
-    EARTH_RADIUS_M * c
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,6 +278,7 @@ mod tests {
             compress: false,
             road_classes: vec![],
             clean_options: None,
+            prune_disconnected: false,
         };
 
         let result = run_compile(&req);

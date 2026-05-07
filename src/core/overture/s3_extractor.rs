@@ -46,23 +46,7 @@ pub fn segment_path() -> String {
     )
 }
 
-/// Supported road classes for extraction
-#[allow(dead_code)]
-pub const ROAD_CLASSES: &[&str] = &[
-    "residential",
-    "tertiary",
-    "secondary",
-    "primary",
-    "trunk",
-    "motorway",
-    "unclassified",
-    "living_street",
-    "service",
-    "secondary_link",
-    "primary_link",
-    "trunk_link",
-    "motorway_link",
-];
+
 
 /// Bounding box for spatial filtering
 #[derive(Debug, Clone, Copy)]

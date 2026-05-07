@@ -98,18 +98,9 @@ pub struct RmpEdge {
     pub oneway: u8,
 }
 
-// ── Haversine & turn classification ──────────────────────────────────
+// ── Turn classification ──────────────────────────────────
 
-/// Haversine distance in meters between two WGS-84 points.
-pub fn haversine_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
-    let r = 6_371_000.0;
-    let dlat = (lat2 - lat1).to_radians();
-    let dlon = (lon2 - lon1).to_radians();
-    let a = (dlat / 2.0).sin().powi(2)
-        + lat1.to_radians().cos() * lat2.to_radians().cos() * (dlon / 2.0).sin().powi(2);
-    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-    r * c
-}
+pub(crate) use super::haversine_m;
 
 /// Classify a turn by bearing delta (degrees).
 /// Returns "straight", "right", "left", or "u_turn".
@@ -668,7 +659,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
     })
 }
 
-fn write_gpx_multi(path: &str, routes: &[Vec<VRPSolverStop>]) -> anyhow::Result<()> {
+pub(crate) fn write_gpx_multi(path: &str, routes: &[Vec<VRPSolverStop>]) -> anyhow::Result<()> {
     use std::io::Write;
     let mut file = std::fs::File::create(path)?;
 

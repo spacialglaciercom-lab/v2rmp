@@ -344,7 +344,7 @@ fn build_graph_stats(features: &[Feature]) -> Result<(usize, usize, f64)> {
                     let (lon2, lat2) = window[1];
 
                     // Haversine distance in km
-                    let d = haversine_distance_km(lat1, lon1, lat2, lon2);
+                    let d = super::haversine_m(lat1, lon1, lat2, lon2) / 1000.0;
                     total_km += d;
 
                     // Get/create node IDs
@@ -377,22 +377,6 @@ fn get_or_create_node(
     })
 }
 
-/// Calculate Haversine distance between two points in km
-fn haversine_distance_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
-    const EARTH_RADIUS_KM: f64 = 6371.0;
-
-    let lat1_rad = lat1.to_radians();
-    let lat2_rad = lat2.to_radians();
-    let delta_lat = (lat2 - lat1).to_radians();
-    let delta_lon = (lon2 - lon1).to_radians();
-
-    let a = (delta_lat / 2.0).sin().powi(2)
-        + lat1_rad.cos() * lat2_rad.cos() * (delta_lon / 2.0).sin().powi(2);
-    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-
-    EARTH_RADIUS_KM * c
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -405,7 +389,7 @@ mod tests {
         let la_lat = 34.0522;
         let la_lon = -118.2437;
 
-        let dist = haversine_distance_km(ny_lat, ny_lon, la_lat, la_lon);
+        let dist = super::super::haversine_m(ny_lat, ny_lon, la_lat, la_lon) / 1000.0;
         assert!((dist - 3935.0).abs() < 10.0);
     }
 

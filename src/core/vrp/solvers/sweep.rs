@@ -4,12 +4,6 @@
 use super::super::types::*;
 use super::super::utils::{matrix_get_dist, matrix_get_time};
 
-struct SolveResult {
-    routes: Vec<Vec<usize>>,
-    total_distance: f64,
-    total_time: f64,
-}
-
 fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize) -> SolveResult {
     let n = matrix.len();
     if n <= 1 {
@@ -20,53 +14,7 @@ fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize) 
         };
     }
 
-    let depot = &locations[0];
-
-    let mut indices: Vec<usize> = (1..n).collect();
-    indices.sort_by(|&a, &b| {
-        let la = &locations[a];
-        let lb = &locations[b];
-        let angle_a = (la.lat - depot.lat).atan2(la.lon - depot.lon);
-        let angle_b = (lb.lat - depot.lat).atan2(lb.lon - depot.lon);
-        angle_a
-            .partial_cmp(&angle_b)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    let per_route = (indices.len() as f64 / num_vehicles as f64).ceil() as usize;
-    let mut route_indices: Vec<Vec<usize>> = Vec::new();
-
-    for v in 0..num_vehicles {
-        let start = v * per_route;
-        let end = std::cmp::min(start + per_route, indices.len());
-        if start >= indices.len() {
-            break;
-        }
-        let segment = &indices[start..end];
-        if segment.is_empty() {
-            continue;
-        }
-
-        let mut route = vec![0];
-        let mut remaining: std::collections::HashSet<usize> = segment.iter().copied().collect();
-        let mut current = 0;
-        while !remaining.is_empty() {
-            let mut best = 0;
-            let mut best_dist = f64::INFINITY;
-            for &node in &remaining {
-                let dist = matrix_get_dist(matrix, current, node);
-                if dist < best_dist {
-                    best_dist = dist;
-                    best = node;
-                }
-            }
-            remaining.remove(&best);
-            route.push(best);
-            current = best;
-        }
-        route.push(0);
-        route_indices.push(route);
-    }
+    let route_indices = crate::core::vrp::utils::build_sweep_routes(matrix, locations, num_vehicles);
 
     let mut total_distance = 0.0;
     let mut total_time = 0.0;
@@ -126,33 +74,8 @@ impl VRPSolver for SweepSolver {
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::utils::build_haversine_matrix;
+    use crate::core::vrp::test_utils::{make_input, make_stop};
     use super::*;
-
-    fn make_stop(lat: f64, lon: f64, label: &str) -> VRPSolverStop {
-        VRPSolverStop {
-            lat,
-            lon,
-            label: label.into(),
-            demand: None,
-            arrival_time: None,
-        }
-    }
-
-    fn make_input(locations: Vec<VRPSolverStop>, num_vehicles: usize) -> VRPSolverInput {
-        let matrix = build_haversine_matrix(&locations, 40.0);
-        VRPSolverInput {
-            locations,
-            num_vehicles,
-            vehicle_capacity: 100.0,
-            objective: VrpObjective::MinDistance,
-            matrix: Some(matrix),
-            service_time_secs: None,
-            use_time_windows: false,
-            window_open: None,
-            window_close: None,
-        }
-    }
 
     #[tokio::test]
     async fn test_sweep_single_depot() {

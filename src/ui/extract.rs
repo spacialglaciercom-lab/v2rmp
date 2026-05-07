@@ -14,8 +14,6 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let cyan = ratatui::style::Color::Cyan;
     let yellow = ratatui::style::Color::Yellow;
     let green = ratatui::style::Color::Green;
-    let gray = ratatui::style::Color::DarkGray;
-    let magenta = ratatui::style::Color::Magenta;
 
     let bbox_text = match &app.bounding_box {
         Some(bb) => format!("Set: {}", bb),
@@ -23,12 +21,7 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     };
 
     let status_text = format!("Status: {}", app.extract_status);
-    let status_color = match &app.extract_status {
-        crate::app::Status::Ready => gray,
-        crate::app::Status::Running { .. } => magenta,
-        crate::app::Status::Done(_) => green,
-        crate::app::Status::Error(_) => ratatui::style::Color::Red,
-    };
+    let status_color = app.extract_status.color();
 
     let lines = vec![
         ratatui::text::Line::from(ratatui::text::Span::styled(

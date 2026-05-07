@@ -210,3 +210,78 @@ pub fn draw_input_prompt(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
 
     f.render_widget(paragraph, popup_area);
 }
+
+/// Draw a selectable list of items inside a bordered block.
+/// Used by browse_maps and browse_routes (and any future browse views).
+pub fn draw_selectable_list(
+    f: &mut Frame,
+    area: ratatui::layout::Rect,
+    title: &str,
+    items: &[String],
+    selection: usize,
+) {
+    let block = ratatui::widgets::Block::default()
+        .title(format!(" {} ({}) ", title, items.len()))
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if items.is_empty() {
+        return;
+    }
+
+    let list_items: Vec<ratatui::widgets::ListItem> = items
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let style = if i == selection {
+                ratatui::style::Style::default()
+                    .fg(ratatui::style::Color::Yellow)
+                    .add_modifier(ratatui::style::Modifier::BOLD)
+            } else {
+                ratatui::style::Style::default().fg(ratatui::style::Color::White)
+            };
+            let prefix = if i == selection { " > " } else { "   " };
+            ratatui::widgets::ListItem::new(ratatui::text::Span::styled(
+                format!("{}{}", prefix, name),
+                style,
+            ))
+        })
+        .collect();
+
+    let list = ratatui::widgets::List::new(list_items);
+    f.render_widget(list, inner);
+}
+
+pub fn draw_empty_placeholder(
+    f: &mut ratatui::Frame,
+    area: ratatui::layout::Rect,
+    title: &str,
+    empty_msg: &str,
+    action_msg: &str,
+) {
+    let block = ratatui::widgets::Block::default()
+        .title(format!(" {} ", title))
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let lines = vec![
+        ratatui::text::Line::from(""),
+        ratatui::text::Line::from(empty_msg.to_string()),
+        ratatui::text::Line::from(""),
+        ratatui::text::Line::from(ratatui::text::Span::styled(
+            action_msg.to_string(),
+            ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
+        )),
+        ratatui::text::Line::from(""),
+        ratatui::text::Line::from(ratatui::text::Span::styled(
+            "(press Esc to return home)",
+            ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
+        )),
+    ];
+    let paragraph = ratatui::widgets::Paragraph::new(lines);
+    f.render_widget(paragraph, inner);
+}

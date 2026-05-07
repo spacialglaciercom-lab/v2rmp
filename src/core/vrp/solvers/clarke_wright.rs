@@ -7,13 +7,6 @@
 use super::super::types::*;
 use super::super::utils::{matrix_get_dist, matrix_get_time};
 
-/// Internal solve result.
-struct SolveResult {
-    routes: Vec<Vec<usize>>,
-    total_distance: f64,
-    total_time: f64,
-}
-
 fn solve(matrix: &DistMatrix, num_vehicles: usize) -> SolveResult {
     let n = matrix.len();
     if n <= 1 {
@@ -237,33 +230,8 @@ impl VRPSolver for ClarkeWrightSolver {
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::utils::build_haversine_matrix;
+    use crate::core::vrp::test_utils::{make_input, make_stop};
     use super::*;
-
-    fn make_stop(lat: f64, lon: f64, label: &str) -> VRPSolverStop {
-        VRPSolverStop {
-            lat,
-            lon,
-            label: label.into(),
-            demand: None,
-            arrival_time: None,
-        }
-    }
-
-    fn make_input(locations: Vec<VRPSolverStop>, num_vehicles: usize) -> VRPSolverInput {
-        let matrix = build_haversine_matrix(&locations, 40.0);
-        VRPSolverInput {
-            locations,
-            num_vehicles,
-            vehicle_capacity: 100.0,
-            objective: VrpObjective::MinDistance,
-            matrix: Some(matrix),
-            service_time_secs: None,
-            use_time_windows: false,
-            window_open: None,
-            window_close: None,
-        }
-    }
 
     #[tokio::test]
     async fn test_clarke_wright_single_depot() {

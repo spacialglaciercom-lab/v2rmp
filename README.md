@@ -58,7 +58,7 @@ rmpca list routes --json
 rmpca agent --task task.json --json
 
 # Multi-vehicle VRP
-rmpca vrp -i map.rmp --vehicles 5 --solver clarke-wright --json
+rmpca vrp -i map.rmp --vehicles 5 --algo savings --waypoints stops.json --depot "40.71,-74.01" --output-dir routes/
 
 # Single-vehicle CPP Optimization (Outputs GPX)
 rmpca optimize -i map.rmp -o route.gpx --depot "40.71,-74.01"
@@ -160,6 +160,7 @@ let output = solver.solve(&vrp_input).await?;
 - [x] **v0.3.0**: VRP Engine Integration (Clarke-Wright, Sweep, 2-Opt)
 - [x] **v0.3.5**: Agent & List commands for machine-to-machine workflows
 - [x] **v0.4.0**: Fully Async pipeline and OSM PBF support
+- [x] **v0.4.1**: Multi-vehicle VRP CLI command operational with waypoints integration
 - [ ] **v0.5.0**: Time Window support (VRPTW) and 3D terrain-aware routing
 
 ## License

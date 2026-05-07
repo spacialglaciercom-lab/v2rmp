@@ -149,21 +149,8 @@ pub fn clean_geojson(
     Ok((cleaned, stats, warnings))
 }
 
-/// Haversine distance in meters
-pub fn haversine_distance_m(lon1: f64, lat1: f64, lon2: f64, lat2: f64) -> f64 {
-    const EARTH_RADIUS_M: f64 = 6_371_000.0;
-
-    let lat1_rad = lat1.to_radians();
-    let lat2_rad = lat2.to_radians();
-    let delta_lat = (lat2 - lat1).to_radians();
-    let delta_lon = (lon2 - lon1).to_radians();
-
-    let a = (delta_lat / 2.0).sin().powi(2)
-        + lat1_rad.cos() * lat2_rad.cos() * (delta_lon / 2.0).sin().powi(2);
-    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-
-    EARTH_RADIUS_M * c
-}
+/// Re-export shared haversine from core (lat, lon order).
+pub(crate) use super::haversine_m;
 
 /// Generate node ID from coordinates
 pub fn node_id(lon: f64, lat: f64, decimals: u32) -> String {
@@ -179,14 +166,14 @@ mod tests {
 
     #[test]
     fn test_haversine_zero_distance() {
-        let d = haversine_distance_m(0.0, 0.0, 0.0, 0.0);
+        let d = haversine_m(0.0, 0.0, 0.0, 0.0);
         assert!(d < 0.01, "Same point should have zero distance, got {}", d);
     }
 
     #[test]
     fn test_haversine_known_distance() {
         // NYC to London: approx 5,570 km
-        let d = haversine_distance_m(-74.006, 40.7128, -0.1278, 51.5074);
+        let d = haversine_m(40.7128, -74.006, 51.5074, -0.1278);
         assert!(
             (d - 5_570_000.0).abs() < 100_000.0,
             "NYC to London should be ~5570 km, got {} m",
@@ -196,8 +183,8 @@ mod tests {
 
     #[test]
     fn test_haversine_symmetry() {
-        let d1 = haversine_distance_m(10.0, 20.0, 30.0, 40.0);
-        let d2 = haversine_distance_m(30.0, 40.0, 10.0, 20.0);
+        let d1 = haversine_m(20.0, 10.0, 40.0, 30.0);
+        let d2 = haversine_m(40.0, 30.0, 20.0, 10.0);
         assert!(
             (d1 - d2).abs() < 0.01,
             "Haversine should be symmetric: {} vs {}",
