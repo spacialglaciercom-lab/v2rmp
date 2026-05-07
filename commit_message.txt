@@ -1,0 +1,6 @@
+🧹 [Remove unwrap in src/app.rs]
+
+🎯 **What:** Removed the `unwrap()` in `src/app.rs` when getting the parent directory path in `refresh_entries`.
+💡 **Why:** Using `unwrap()` can cause panics if the parent directory does not exist or if the value is `None`. Using `if let Some(parent) = self.current_path.parent()` is safer and cleaner.
+✅ **Verification:** Verified by checking that there are no remaining instances of `unwrap()` in the file, and that both `cargo clippy` and `cargo test` run without errors or warnings.
+✨ **Result:** Improved codebase safety and readability.
