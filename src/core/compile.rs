@@ -281,3 +281,24 @@ fn haversine_distance_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 
     EARTH_RADIUS_M * c
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_run_compile_error_on_missing_input() {
+        let req = CompileRequest {
+            input_geojson: "non_existent_file.geojson".to_string(),
+            output_rmp: "output.rmp".to_string(),
+            compress: false,
+            road_classes: vec![],
+            clean_options: None,
+        };
+
+        let result = run_compile(&req);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Failed to open input GeoJSON"));
+    }
+}
