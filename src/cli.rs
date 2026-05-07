@@ -74,6 +74,67 @@ enum AgentTask {
 
 // ── VRP ───────────────────────────────────────────────────────────────
 
+// ── Custom Serde Deserializers for Agent Payloads ──────────────────────
+
+fn deserialize_depot_opt<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum DepotInput {
+        String(String),
+        Array([f64; 2]),
+    }
+
+    let opt = Option::<DepotInput>::deserialize(deserializer)?;
+    Ok(opt.map(|input| match input {
+        DepotInput::String(s) => s,
+        DepotInput::Array([lat, lon]) => format!("{},{}", lat, lon),
+    }))
+}
+
+fn deserialize_depots_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum DepotInput {
+        String(String),
+        Array([f64; 2]),
+    }
+
+    let inputs = Vec::<DepotInput>::deserialize(deserializer).unwrap_or_default();
+    Ok(inputs
+        .into_iter()
+        .map(|input| match input {
+            DepotInput::String(s) => s,
+            DepotInput::Array([lat, lon]) => format!("{},{}", lat, lon),
+        })
+        .collect())
+}
+
+fn deserialize_bbox<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum BboxInput {
+        String(String),
+        Array([f64; 4]),
+    }
+
+    let input = BboxInput::deserialize(deserializer)?;
+    Ok(match input {
+        BboxInput::String(s) => s,
+        BboxInput::Array([min_lon, min_lat, max_lon, max_lat]) => {
+            format!("{},{},{},{}", min_lon, min_lat, max_lon, max_lat)
+        }
+    })
+}
+
 fn default_output_dir() -> String {
     "routes/".to_string()
 }
@@ -136,7 +197,7 @@ struct VrpArgs {
 
     /// Depot coordinates: LAT,LON (can be specified multiple times)
     #[arg(long, action = clap::ArgAction::Append)]
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_depots_vec")]
     depot: Vec<String>,
 
     /// Path to a JSON/CSV file containing specific waypoints to visit
@@ -152,6 +213,7 @@ struct VrpArgs {
 struct ExtractArgs {
     /// Bounding box: MIN_LON,MIN_LAT,MAX_LON,MAX_LAT
     #[arg(long, allow_hyphen_values = true)]
+    #[serde(deserialize_with = "deserialize_bbox")]
     bbox: String,
 
     /// Data source: overture (default)
@@ -282,7 +344,7 @@ struct OptimizeArgs {
 
     /// Depot coordinates: LAT,LON
     #[arg(long)]
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_depot_opt")]
     depot: Option<String>,
 
     /// Oneway mode: respect, ignore, reverse (default: respect)
@@ -327,6 +389,7 @@ struct OptimizeArgs {
 struct PipelineArgs {
     /// Bounding box: MIN_LON,MIN_LAT,MAX_LON,MAX_LAT
     #[arg(long, allow_hyphen_values = true)]
+    #[serde(deserialize_with = "deserialize_bbox")]
     bbox: String,
 
     /// Data source: overture (default)
@@ -341,7 +404,7 @@ struct PipelineArgs {
 
     /// Depot coordinates: LAT,LON
     #[arg(long)]
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_depot_opt")]
     depot: Option<String>,
 }
 
