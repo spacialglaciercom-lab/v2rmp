@@ -8,7 +8,7 @@ mod stats;
 
 pub use stats::CleanStats;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CleanOptions {
     pub make_valid: bool,
     pub drop_invalid: bool,
