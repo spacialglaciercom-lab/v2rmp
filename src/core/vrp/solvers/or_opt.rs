@@ -4,12 +4,6 @@
 use super::super::types::*;
 use super::super::utils::{matrix_get_dist, matrix_get_time};
 
-struct SolveResult {
-    routes: Vec<Vec<usize>>,
-    total_distance: f64,
-    total_time: f64,
-}
-
 fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize, balance_load: bool) -> SolveResult {
     let n = matrix.len();
     if n <= 1 {
@@ -213,20 +207,7 @@ impl VRPSolver for OrOptSolver {
             .ok_or("Or-Opt solver requires a distance matrix")?;
         let balance_load = input.objective == VrpObjective::BalanceLoad;
         let result = solve(matrix, &input.locations, input.num_vehicles, balance_load);
-        let routes: Vec<Vec<VRPSolverStop>> = result
-            .routes
-            .iter()
-            .map(|r| r.iter().map(|&i| input.locations[i].clone()).collect())
-            .collect();
-        Ok(VRPSolverOutput {
-            stops: routes.iter().flatten().cloned().collect(),
-            routes: if routes.len() > 1 { Some(routes) } else { None },
-            total_distance_km: format!("{:.2}", result.total_distance),
-            total_time_min: (result.total_time / 60.0).round() as u32,
-            route_stats: None,
-            route_metrics: None,
-            unassigned: None,
-        })
+        Ok(result.into_output(input))
     }
     fn clone_box(&self) -> Box<dyn VRPSolver> {
         Box::new(OrOptSolver)

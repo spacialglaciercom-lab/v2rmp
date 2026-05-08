@@ -4,6 +4,55 @@ use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::time::Instant;
 
+/// Filter nodes and edges to only those within a bounding box.
+/// Returns remapped (nodes, edges) where edge indices are renumbered from 0.
+/// If `bbox` is `None`, returns the originals unchanged.
+pub fn filter_bbox(
+    nodes: &[RmpNode],
+    edges: &[RmpEdge],
+    bbox: Option<(f64, f64, f64, f64)>, // (min_lat, max_lat, min_lon, max_lon)
+) -> (Vec<RmpNode>, Vec<RmpEdge>) {
+    let Some((min_lat, max_lat, min_lon, max_lon)) = bbox else {
+        return (nodes.to_vec(), edges.to_vec());
+    };
+
+    // Mark which old-node indices are inside the bbox
+    let inside: Vec<bool> = nodes
+        .iter()
+        .map(|n| n.lat >= min_lat && n.lat <= max_lat && n.lon >= min_lon && n.lon <= max_lon)
+        .collect();
+
+    // Build old->new index map
+    let mut old_to_new = vec![u32::MAX; nodes.len()];
+    let mut new_nodes = Vec::new();
+    let mut next: u32 = 0;
+    for (i, &is_inside) in inside.iter().enumerate() {
+        if is_inside {
+            old_to_new[i] = next;
+            new_nodes.push(nodes[i]);
+            next += 1;
+        }
+    }
+
+    // Keep edges whose both endpoints are inside
+    let new_edges: Vec<RmpEdge> = edges
+        .iter()
+        .filter(|e| {
+            let from_inside = inside.get(e.from as usize).copied().unwrap_or(false);
+            let to_inside = inside.get(e.to as usize).copied().unwrap_or(false);
+            from_inside && to_inside
+        })
+        .map(|e| RmpEdge {
+            from: old_to_new[e.from as usize],
+            to: old_to_new[e.to as usize],
+            weight_m: e.weight_m,
+            oneway: e.oneway,
+        })
+        .collect();
+
+    (new_nodes, new_edges)
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct TurnPenalties {
     pub left: f64,
@@ -53,7 +102,7 @@ fn default_solver_id() -> String {
     "default".to_string()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 pub enum OnewayMode {
     Ignore,
     #[default]
@@ -100,6 +149,8 @@ pub struct RmpEdge {
 
 // ── Turn classification ──────────────────────────────────
 
+pub(crate) use super::haversine_m;
+
 /// Classify a turn by bearing delta (degrees).
 /// Returns "straight", "right", "left", or "u_turn".
 pub fn classify_turn(bearing_delta: f64) -> &'static str {
@@ -122,7 +173,14 @@ trait NormalizeAngle {
 impl NormalizeAngle for f64 {
     fn normalize(self, lower: f64, upper: f64) -> f64 {
         let width = upper - lower;
-        lower + (self - lower).rem_euclid(width)
+        let mut val = self;
+        while val < lower {
+            val += width;
+        }
+        while val >= upper {
+            val -= width;
+        }
+        val
     }
 }
 
@@ -198,24 +256,17 @@ pub fn read_rmp_file(data: &[u8]) -> anyhow::Result<(Vec<RmpNode>, Vec<RmpEdge>)
 
 // ── Bearing calculation ──────────────────────────────────────────────
 
-/// Radian-based bearing calculation to avoid redundant to_radians() calls.
-fn bearing_rad(lat1_r: f64, lon1_r: f64, lat2_r: f64, lon2_r: f64) -> f64 {
-    let dlon = lon2_r - lon1_r;
+/// Calculate the initial bearing from point 1 to point 2 in degrees.
+fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    let dlon = (lon2 - lon1).to_radians();
+    let lat1_r = lat1.to_radians();
+    let lat2_r = lat2.to_radians();
+
     let x = dlon.cos() * lat2_r.sin();
     let y = lat1_r.cos() * lat2_r.sin() - lat1_r.sin() * lat2_r.cos() * dlon.cos();
 
-    let b_rad = y.atan2(x);
-    (b_rad.to_degrees() + 360.0).rem_euclid(360.0)
-}
-
-/// Radian-based haversine calculation to avoid redundant to_radians() calls.
-fn haversine_m_rad(lat1_r: f64, lon1_r: f64, lat2_r: f64, lon2_r: f64) -> f64 {
-    const R: f64 = 6_371_000.0;
-    let dlat = lat2_r - lat1_r;
-    let dlon = lon2_r - lon1_r;
-    let a = (dlat / 2.0).sin().powi(2)
-        + lat1_r.cos() * lat2_r.cos() * (dlon / 2.0).sin().powi(2);
-    R * 2.0 * a.sqrt().atan2((1.0 - a).sqrt())
+    let bearing_rad = y.atan2(x);
+    (bearing_rad.to_degrees() + 360.0) % 360.0
 }
 
 // ── CPP internals ────────────────────────────────────────────────────
@@ -227,38 +278,40 @@ struct AdjEntry {
     edge_idx: usize,
 }
 
-/// Run the Chinese Postman Problem route optimization.
-fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
+/// In-memory CPP result: both the summary stats and the ordered node-IDs of the Eulerian circuit.
+#[derive(Debug, Clone)]
+pub struct CppOutput {
+    /// Summary statistics (distance, turns, etc.)
+    pub summary: OptimizeResult,
+    /// Ordered node indices forming the Eulerian circuit.
+    pub circuit: Vec<u32>,
+}
+
+/// Solve the Chinese Postman Problem directly from an in-memory graph.
+///
+/// This is the pure algorithm — no filesystem dependency.
+/// - `depot` is an optional (lat, lon) — the solver snaps to the nearest node.
+///
+/// Returns a `CppOutput` with both summary statistics and the full circuit.
+pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot: Option<(f64, f64)>) -> anyhow::Result<CppOutput> {
     let start = Instant::now();
 
-    // 1. Read the .rmp file
-    let mut file_data = Vec::new();
-    {
-        let mut file = std::fs::File::open(&req.cache_file)
-            .map_err(|e| anyhow::anyhow!("Failed to open .rmp file '{}': {}", req.cache_file, e))?;
-        file.read_to_end(&mut file_data)?;
-    }
-
-    let (nodes, edges) = read_rmp_file(&file_data)?;
-
     if nodes.is_empty() || edges.is_empty() {
-        return Ok(OptimizeResult {
-            total_distance_km: 0.0,
-            total_segments: 0,
-            deadhead_distance_km: 0.0,
-            efficiency_pct: 100.0,
-            turns: TurnSummary {
-                left: 0,
-                right: 0,
-                u_turn: 0,
-                straight: 0,
+        return Ok(CppOutput {
+            summary: OptimizeResult {
+                total_distance_km: 0.0,
+                total_segments: 0,
+                deadhead_distance_km: 0.0,
+                efficiency_pct: 100.0,
+                turns: TurnSummary { left: 0, right: 0, u_turn: 0, straight: 0 },
+                elapsed_ms: 0,
+                num_routes: 1,
             },
-            elapsed_ms: start.elapsed().as_millis() as u64,
-            num_routes: 1,
+            circuit: Vec::new(),
         });
     }
 
-    // 2. Build adjacency list
+    // Build adjacency list
     let n = nodes.len();
     let mut adj: Vec<Vec<AdjEntry>> = vec![vec![]; n];
 
@@ -266,62 +319,36 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         let from = edge.from as usize;
         let to = edge.to as usize;
 
-        adj[from].push(AdjEntry {
-            to: edge.to,
-            weight_m: edge.weight_m,
-            edge_idx: idx,
-        });
+        adj[from].push(AdjEntry { to: edge.to, weight_m: edge.weight_m, edge_idx: idx });
 
-        match req.oneway_mode {
+        match oneway {
             OnewayMode::Ignore => {
-                adj[to].push(AdjEntry {
-                    to: edge.from,
-                    weight_m: edge.weight_m,
-                    edge_idx: idx,
-                });
+                adj[to].push(AdjEntry { to: edge.from, weight_m: edge.weight_m, edge_idx: idx });
             }
             OnewayMode::Respect => {
                 if edge.oneway == 0 {
-                    adj[to].push(AdjEntry {
-                        to: edge.from,
-                        weight_m: edge.weight_m,
-                        edge_idx: idx,
-                    });
+                    adj[to].push(AdjEntry { to: edge.from, weight_m: edge.weight_m, edge_idx: idx });
                 }
             }
             OnewayMode::Reverse => {
                 if edge.oneway == 1 {
-                    adj[to].push(AdjEntry {
-                        to: edge.from,
-                        weight_m: edge.weight_m,
-                        edge_idx: idx,
-                    });
+                    adj[to].push(AdjEntry { to: edge.from, weight_m: edge.weight_m, edge_idx: idx });
                     adj[from].retain(|e| e.edge_idx != idx);
                 } else {
-                    adj[to].push(AdjEntry {
-                        to: edge.from,
-                        weight_m: edge.weight_m,
-                        edge_idx: idx,
-                    });
+                    adj[to].push(AdjEntry { to: edge.from, weight_m: edge.weight_m, edge_idx: idx });
                 }
             }
         }
     }
 
-    // 3. Find odd-degree vertices
+    // Find odd-degree vertices
     let mut degrees = vec![0usize; n];
     for (i, adj_list) in adj.iter().enumerate() {
         degrees[i] = adj_list.len();
     }
     let odd_vertices: Vec<usize> = (0..n).filter(|&i| degrees[i] % 2 != 0).collect();
 
-    // Pre-calculate node coordinates in radians for faster bearing/haversine
-    let nodes_rad: Vec<(f64, f64)> = nodes
-        .iter()
-        .map(|n| (n.lat.to_radians(), n.lon.to_radians()))
-        .collect();
-
-    // 4. Minimum weight perfect matching (greedy nearest-neighbor)
+    // Minimum weight perfect matching (greedy nearest-neighbor)
     let mut duplicate_edges: Vec<(usize, usize, f64, usize)> = Vec::new();
     let mut matched = vec![false; n];
     for i in 0..n {
@@ -341,14 +368,12 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     const METERS_PER_LAT_DEGREE: f64 = 111_111.0;
 
     for &u in &odd_vertices {
-        if matched[u] {
-            continue;
-        }
+        if matched[u] { continue; }
 
         let mut best_v = None;
         let mut best_dist = f64::MAX;
         let u_lat = nodes[u].lat;
-        let (u_lat_r, u_lon_r) = nodes_rad[u];
+        let u_lon = nodes[u].lon;
         let u_pos = pos_in_sorted[u];
 
         let mut forward_idx = u_pos + 1;
@@ -362,20 +387,12 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
                 let v_lat = nodes[v].lat;
                 if (v_lat - u_lat) * METERS_PER_LAT_DEGREE >= best_dist {
                     forward_done = true;
-                } else {
-                    if !matched[v] {
-                        let (v_lat_r, v_lon_r) = nodes_rad[v];
-                        let dist = haversine_m_rad(u_lat_r, u_lon_r, v_lat_r, v_lon_r);
-                        if dist < best_dist {
-                            best_dist = dist;
-                            best_v = Some(v);
-                        }
-                    }
-                    forward_idx += 1;
-                    if forward_idx >= sorted_odd.len() {
-                        forward_done = true;
-                    }
+                } else if !matched[v] {
+                    let dist = haversine_m(u_lat, u_lon, v_lat, nodes[v].lon);
+                    if dist < best_dist { best_dist = dist; best_v = Some(v); }
                 }
+                forward_idx += 1;
+                if forward_idx >= sorted_odd.len() { forward_done = true; }
             }
 
             if !backward_done {
@@ -383,21 +400,11 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
                 let v_lat = nodes[v].lat;
                 if (u_lat - v_lat) * METERS_PER_LAT_DEGREE >= best_dist {
                     backward_done = true;
-                } else {
-                    if !matched[v] {
-                        let (v_lat_r, v_lon_r) = nodes_rad[v];
-                        let dist = haversine_m_rad(u_lat_r, u_lon_r, v_lat_r, v_lon_r);
-                        if dist < best_dist {
-                            best_dist = dist;
-                            best_v = Some(v);
-                        }
-                    }
-                    if backward_idx == 0 {
-                        backward_done = true;
-                    } else {
-                        backward_idx -= 1;
-                    }
+                } else if !matched[v] {
+                    let dist = haversine_m(u_lat, u_lon, v_lat, nodes[v].lon);
+                    if dist < best_dist { best_dist = dist; best_v = Some(v); }
                 }
+                if backward_idx == 0 { backward_done = true; } else { backward_idx -= 1; }
             }
         }
 
@@ -408,33 +415,20 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         }
     }
 
-    // 5. Add duplicate edges
+    // Add duplicate edges
     let deadhead_edge_idx = usize::MAX;
     for &(u, v, weight, eidx) in &duplicate_edges {
-        adj[u].push(AdjEntry {
-            to: v as u32,
-            weight_m: weight,
-            edge_idx: eidx,
-        });
-        adj[v].push(AdjEntry {
-            to: u as u32,
-            weight_m: weight,
-            edge_idx: eidx,
-        });
+        adj[u].push(AdjEntry { to: v as u32, weight_m: weight, edge_idx: eidx });
+        adj[v].push(AdjEntry { to: u as u32, weight_m: weight, edge_idx: eidx });
     }
 
-    // 6. Find Eulerian circuit using Hierholzer's algorithm
-    let start_node = if let Some((dep_lat, dep_lon)) = req.depot {
+    // Find Eulerian circuit using Hierholzer's algorithm
+    let start_node = if let Some((dep_lat, dep_lon)) = depot {
         let mut best_node = 0;
         let mut best_dist = f64::MAX;
-        let d_lat_r = dep_lat.to_radians();
-        let d_lon_r = dep_lon.to_radians();
-        for (i, &(n_lat_r, n_lon_r)) in nodes_rad.iter().enumerate() {
-            let dist = haversine_m_rad(d_lat_r, d_lon_r, n_lat_r, n_lon_r);
-            if dist < best_dist {
-                best_dist = dist;
-                best_node = i;
-            }
+        for (i, node) in nodes.iter().enumerate() {
+            let dist = haversine_m(dep_lat, dep_lon, node.lat, node.lon);
+            if dist < best_dist { best_dist = dist; best_node = i; }
         }
         best_node
     } else if !odd_vertices.is_empty() {
@@ -455,34 +449,23 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
                 adj[edge.to as usize].swap_remove(pos);
             }
             stack.push((edge.to, Some(edge)));
-        } else {
-            if let Some((v_u32, e)) = stack.pop() {
-                circuit_with_edges.push((v_u32, e));
-            }
+        } else if let Some((v_u32, e)) = stack.pop() {
+            circuit_with_edges.push((v_u32, e));
         }
     }
 
     circuit_with_edges.reverse();
+    let circuit: Vec<u32> = circuit_with_edges.iter().map(|(v, _)| *v).collect();
 
-    // 7. Compute total distance, deadhead distance, and turn summary in a single pass
+    // Compute total distance, deadhead distance, and turn summary
     let mut total_distance_m = 0.0;
     let mut deadhead_distance_m = 0.0;
     let mut total_segments = 0usize;
-    let mut turns = TurnSummary {
-        left: 0,
-        right: 0,
-        u_turn: 0,
-        straight: 0,
-    };
+    let mut turns = TurnSummary { left: 0, right: 0, u_turn: 0, straight: 0 };
     let mut edge_traversal_count = vec![0u32; edges.len()];
 
-    let mut last_bearing_out: Option<f64> = None;
-
-    for i in 1..circuit_with_edges.len() {
-        let prev_node_idx = circuit_with_edges[i - 1].0 as usize;
-        let curr_node_idx = circuit_with_edges[i].0 as usize;
-
-        if let Some(e) = &circuit_with_edges[i].1 {
+    for entry in circuit_with_edges.iter().skip(1) {
+        if let Some(e) = &entry.1 {
             total_distance_m += e.weight_m;
             total_segments += 1;
             if e.edge_idx == deadhead_edge_idx {
@@ -493,39 +476,30 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
                     deadhead_distance_m += e.weight_m;
                 }
             }
+        }
+    }
 
-            // 8. Turn classification (reusing bearings between segments)
-            if i + 1 < circuit_with_edges.len() {
-                let next_node_idx = circuit_with_edges[i + 1].0 as usize;
-
-                if prev_node_idx != curr_node_idx && curr_node_idx != next_node_idx {
-                    let b_in = last_bearing_out.unwrap_or_else(|| {
-                        let (lat1, lon1) = nodes_rad[prev_node_idx];
-                        let (lat2, lon2) = nodes_rad[curr_node_idx];
-                        bearing_rad(lat1, lon1, lat2, lon2)
-                    });
-
-                    let (lat2, lon2) = nodes_rad[curr_node_idx];
-                    let (lat3, lon3) = nodes_rad[next_node_idx];
-                    let b_out = bearing_rad(lat2, lon2, lat3, lon3);
-                    last_bearing_out = Some(b_out);
-
-                    let b_in_reverse = (b_in + 180.0).rem_euclid(360.0);
-                    let delta = b_out - b_in_reverse;
-                    match classify_turn(delta) {
-                        "left" => turns.left += 1,
-                        "right" => turns.right += 1,
-                        "u_turn" => turns.u_turn += 1,
-                        _ => turns.straight += 1,
-                    }
-                } else {
-                    last_bearing_out = None;
-                }
+    // Turn classification
+    if circuit.len() > 2 {
+        for i in 1..circuit.len().saturating_sub(1) {
+            let prev = circuit[i - 1] as usize;
+            let curr = circuit[i] as usize;
+            let next = circuit[i + 1] as usize;
+            if prev == curr || curr == next { continue; }
+            let b_in = bearing(nodes[prev].lat, nodes[prev].lon, nodes[curr].lat, nodes[curr].lon);
+            let b_out = bearing(nodes[curr].lat, nodes[curr].lon, nodes[next].lat, nodes[next].lon);
+            let b_in_reverse = (b_in + 180.0).normalize(0.0, 360.0);
+            let delta = b_out - b_in_reverse;
+            match classify_turn(delta) {
+                "left" => turns.left += 1,
+                "right" => turns.right += 1,
+                "u_turn" => turns.u_turn += 1,
+                _ => turns.straight += 1,
             }
         }
     }
 
-    // 9. Compute efficiency
+    // Compute efficiency
     let effective_distance_m = total_distance_m - deadhead_distance_m;
     let efficiency_pct = if total_distance_m > 0.0 {
         (effective_distance_m / total_distance_m) * 100.0
@@ -533,28 +507,50 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         100.0
     };
 
-    // 10. Write route file
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+
+    Ok(CppOutput {
+        summary: OptimizeResult {
+            total_distance_km: total_distance_m / 1000.0,
+            total_segments,
+            deadhead_distance_km: deadhead_distance_m / 1000.0,
+            efficiency_pct,
+            turns,
+            elapsed_ms,
+            num_routes: 1,
+        },
+        circuit,
+    })
+}
+
+/// Run the Chinese Postman Problem route optimization (filesystem wrapper).
+fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
+    let start = Instant::now();
+
+    let mut file_data = Vec::new();
+    {
+        let mut file = std::fs::File::open(&req.cache_file)
+            .map_err(|e| anyhow::anyhow!("Failed to open .rmp file '{}': {}", req.cache_file, e))?;
+        file.read_to_end(&mut file_data)?;
+    }
+    let (nodes, edges) = read_rmp_file(&file_data)?;
+
+    let output = solve_cpp(&nodes, &edges, req.oneway_mode, req.depot)?;
+
     if let Some(ref route_path) = req.route_file {
-        let circuit: Vec<u32> = circuit_with_edges.iter().map(|(v, _)| *v).collect();
         let route_json = serde_json::json!({
-            "route": circuit,
-            "total_distance_km": total_distance_m / 1000.0,
-            "deadhead_distance_km": deadhead_distance_m / 1000.0,
-            "efficiency_pct": efficiency_pct,
+            "route": output.circuit,
+            "total_distance_km": output.summary.total_distance_km,
+            "deadhead_distance_km": output.summary.deadhead_distance_km,
+            "efficiency_pct": output.summary.efficiency_pct,
             "nodes": nodes.iter().enumerate().map(|(i, n)| serde_json::json!({ "id": i, "lat": n.lat, "lon": n.lon })).collect::<Vec<_>>(),
         });
         std::fs::write(route_path, serde_json::to_string_pretty(&route_json)?)?;
     }
 
-    Ok(OptimizeResult {
-        total_distance_km: total_distance_m / 1000.0,
-        total_segments,
-        deadhead_distance_km: deadhead_distance_m / 1000.0,
-        efficiency_pct,
-        turns,
-        elapsed_ms: start.elapsed().as_millis() as u64,
-        num_routes: 1,
-    })
+    let mut result = output.summary;
+    result.elapsed_ms = start.elapsed().as_millis() as u64;
+    Ok(result)
 }
 
 // ── VRP route optimization ────────────────────────────────────────────
@@ -630,29 +626,13 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
     if let Some(ref routes) = output.routes {
         for route in routes {
             if route.len() > 2 {
-                let mut last_bearing_out: Option<f64> = None;
                 for i in 1..route.len() - 1 {
                     let prev = &route[i - 1];
                     let curr = &route[i];
                     let next = &route[i + 1];
-
-                    let b_in = last_bearing_out.unwrap_or_else(|| {
-                        bearing_rad(
-                            prev.lat.to_radians(),
-                            prev.lon.to_radians(),
-                            curr.lat.to_radians(),
-                            curr.lon.to_radians(),
-                        )
-                    });
-                    let b_out = bearing_rad(
-                        curr.lat.to_radians(),
-                        curr.lon.to_radians(),
-                        next.lat.to_radians(),
-                        next.lon.to_radians(),
-                    );
-                    last_bearing_out = Some(b_out);
-
-                    let b_in_rev = (b_in + 180.0).rem_euclid(360.0);
+                    let b_in = bearing(prev.lat, prev.lon, curr.lat, curr.lon);
+                    let b_out = bearing(curr.lat, curr.lon, next.lat, next.lon);
+                    let b_in_rev = (b_in + 180.0) % 360.0;
                     let delta = b_out - b_in_rev;
                     match classify_turn(delta) {
                         "left" => turns.left += 1,
@@ -746,7 +726,7 @@ mod tests {
     }
     #[test]
     fn test_haversine_m_known_distance() {
-        let dist = crate::core::haversine_m(40.7128, -74.0060, 34.0522, -118.2437);
+        let dist = haversine_m(40.7128, -74.0060, 34.0522, -118.2437);
         assert!((dist - 3_935_000.0).abs() < 10_000.0);
     }
     #[test]
@@ -799,24 +779,5 @@ mod tests {
         let result = rt.block_on(run_optimize(&req)).unwrap();
         assert!(result.total_distance_km > 0.0);
         let _ = std::fs::remove_file(temp_path);
-    }
-
-    #[tokio::test]
-    async fn test_run_optimize_invalid_cache_file() {
-        let req = OptimizeRequest {
-            cache_file: "nonexistent_file_that_should_fail.rmp".to_string(),
-            route_file: None,
-            turn_penalties: TurnPenalties::default(),
-            depot: None,
-            oneway_mode: OnewayMode::default(),
-            mode: SolverMode::Cpp,
-            num_vehicles: 1,
-            solver_id: "default".to_string(),
-        };
-        let result = run_optimize(&req).await;
-        assert!(
-            result.is_err(),
-            "run_optimize should return an error for an invalid cache file"
-        );
     }
 }

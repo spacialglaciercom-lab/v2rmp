@@ -51,15 +51,7 @@ pub struct GeofenceStats {
     pub pixel_count: i64,
 }
 
-/// Bounding box for spatial queries.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct BBox {
-    pub min_lon: f64,
-    pub min_lat: f64,
-    pub max_lon: f64,
-    pub max_lat: f64,
-}
-
+pub use crate::core::geo_types::BBox;
 /// Fuel consumption analysis result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FuelConsumption {

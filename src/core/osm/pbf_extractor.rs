@@ -1,35 +1,10 @@
 use anyhow::{Context, Result};
-use geojson::{Feature, Geometry as GeoJsonGeometry, Value as GeoJsonValue};
 use osmpbf::{Element, ElementReader};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::path::Path;
 
-#[derive(Debug, Clone)]
-pub struct BBox {
-    pub min_lon: f64,
-    pub min_lat: f64,
-    pub max_lon: f64,
-    pub max_lat: f64,
-}
-
-impl BBox {
-    #[allow(dead_code)]
-    pub fn contains(&self, lon: f64, lat: f64) -> bool {
-        lon >= self.min_lon && lon <= self.max_lon && lat >= self.min_lat && lat <= self.max_lat
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OsmSegment {
-    pub id: i64,
-    pub name: Option<String>,
-    pub highway: String,
-    pub oneway: Option<String>,
-    pub surface: Option<String>,
-    pub geometry: Vec<(f64, f64)>, // lon, lat pairs
-}
+use super::{BBox, OsmSegment};
 
 pub struct OsmExtractor {
     pbf_path: String,
@@ -132,90 +107,18 @@ impl OsmExtractor {
     }
 }
 
-/// Convert OSM segment to GeoJSON Feature
-pub fn segment_to_feature(seg: OsmSegment) -> Feature {
-    let coordinates: Vec<Vec<f64>> = seg
-        .geometry
-        .into_iter()
-        .map(|(lon, lat)| vec![lon, lat])
-        .collect();
-
-    let geometry = GeoJsonGeometry {
-        bbox: None,
-        value: GeoJsonValue::LineString(coordinates),
-        foreign_members: None,
-    };
-
-    let mut props = serde_json::Map::new();
-    props.insert("id".to_string(), serde_json::Value::Number(seg.id.into()));
-    props.insert("class".to_string(), serde_json::Value::String(seg.highway));
-
-    if let Some(name) = seg.name {
-        props.insert("name".to_string(), serde_json::Value::String(name));
-    }
-    if let Some(oneway) = seg.oneway {
-        props.insert("oneway".to_string(), serde_json::Value::String(oneway));
-    }
-    if let Some(surface) = seg.surface {
-        props.insert("surface".to_string(), serde_json::Value::String(surface));
-    }
-
-    Feature {
-        id: None,
-        bbox: None,
-        geometry: Some(geometry),
-        properties: Some(props),
-        foreign_members: None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_bbox_contains() {
-        let bbox = BBox {
-            min_lon: -74.0,
-            min_lat: 40.7,
-            max_lon: -73.9,
-            max_lat: 40.8,
-        };
-        assert!(bbox.contains(-73.95, 40.75));
-        assert!(!bbox.contains(-74.1, 40.75));
-        assert!(!bbox.contains(-73.95, 40.9));
-    }
+    fn test_osm_extractor_new_not_found() {
+        let path = "non_existent_file.pbf".to_string();
+        let result = OsmExtractor::new(path.clone());
 
-    #[test]
-    fn test_segment_to_feature() {
-        let seg = OsmSegment {
-            id: 12345,
-            name: Some("Main Street".to_string()),
-            highway: "residential".to_string(),
-            oneway: Some("yes".to_string()),
-            surface: Some("asphalt".to_string()),
-            geometry: vec![(-74.0, 40.7), (-73.9, 40.8)],
-        };
-
-        let feature = segment_to_feature(seg);
-        assert!(feature.geometry.is_some());
-
-        let props = feature.properties.unwrap();
-        assert_eq!(props.get("class").unwrap().as_str().unwrap(), "residential");
-        assert_eq!(props.get("name").unwrap().as_str().unwrap(), "Main Street");
-        assert_eq!(props.get("oneway").unwrap().as_str().unwrap(), "yes");
-    }
-
-    #[test]
-    fn test_osm_extractor_new_error() {
-        let dummy_path = "nonexistent_file.pbf".to_string();
-        let result = OsmExtractor::new(dummy_path.clone());
-
-        match result {
-            Err(e) => {
-                assert_eq!(e.to_string(), format!("PBF file not found: {}", dummy_path));
-            }
-            Ok(_) => panic!("Expected error, but got Ok"),
+        assert!(result.is_err());
+        if let Err(err) = result {
+            assert_eq!(err.to_string(), format!("PBF file not found: {}", path));
         }
     }
 }

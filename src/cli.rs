@@ -10,7 +10,7 @@ use crate::core::optimize::{OnewayMode, OptimizeRequest, SolverMode, TurnPenalti
 
 /// rmpca - Route optimization and data extraction
 #[derive(Parser)]
-#[command(name = "rmpca", version = "0.4.2")]
+#[command(name = "rmpca", version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "Route optimization and data extraction")]
 struct Cli {
     /// Output results as JSON (for machine / agent consumption)
@@ -300,10 +300,10 @@ struct VrpArgs {
     #[serde(default, deserialize_with = "deserialize_depots_vec")]
     depot: Vec<String>,
 
-    /// Path to a JSON/CSV file containing specific waypoints to visit
+    /// Path to a CSV file containing coordinates to visit (columns: lat,lon [, label, demand, type])
     #[arg(long)]
     #[serde(default)]
-    waypoints: Option<String>,
+    coordinates: Option<String>,
 }
 
 // ── Extract ───────────────────────────────────────────────────────────
@@ -515,7 +515,12 @@ struct PipelineArgs {
     /// Prune disconnected subgraphs during compilation
     #[arg(long)]
     #[serde(default)]
-    prune_disconnected: bool,
+    pub prune_disconnected: bool,
+
+    /// Path to local OSM PBF file (optional)
+    #[arg(long)]
+    #[serde(default)]
+    pub pbf: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -633,13 +638,8 @@ async fn run_extract_cmd(args: ExtractArgs, json: bool) -> Result<()> {
         },
         road_classes,
         output_path: args.output.clone(),
+        pbf_path: args.pbf.clone(),
     };
-
-    if let Some(pbf) = args.pbf {
-        // If PBF path is provided, we can pass it via env or update ExtractRequest
-        // For now, let's set the env var that run_osm_extract uses
-        std::env::set_var("OSM_PBF_PATH", pbf);
-    }
 
     let result = crate::core::extract::run_extract(&req).await?;
 
@@ -838,10 +838,10 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
     tracing::info!("VRP solving requested for {}", args.input);
     tracing::info!("Algorithm: {:?}", args.algo);
     tracing::info!(
-        "Vehicles: {}, Depots: {}, Waypoints: {:?}",
+        "Vehicles: {}, Depots: {}, Coordinates CSV: {:?}",
         args.vehicles,
         args.depot.len(),
-        args.waypoints
+        args.coordinates
     );
 
     // Parse all depots
@@ -866,22 +866,13 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
         arrival_time: None,
     });
 
-    // 2. Add waypoints
-    if let Some(wp_path) = args.waypoints {
-        let wp_data = std::fs::read_to_string(&wp_path).context("Failed to read waypoints file")?;
-        // We will try to parse an array of [lat, lon]
-        let points: Vec<[f64; 2]> = serde_json::from_str(&wp_data).context("Waypoints must be a JSON array of [lat, lon]")?;
-        for (i, p) in points.into_iter().enumerate() {
-            stops.push(crate::core::vrp::types::VRPSolverStop {
-                lat: p[0],
-                lon: p[1],
-                label: format!("WP {}", i),
-                demand: Some(1.0),
-                arrival_time: None,
-            });
-        }
+    // 2. Load stops from coordinates CSV
+    if let Some(csv_path) = args.coordinates {
+        let (csv_stops, _depot_indices) = crate::core::vrp::utils::parse_csv_stops(&csv_path)
+            .map_err(|e| anyhow::anyhow!("CSV parse error: {}", e))?;
+        stops.extend(csv_stops);
     } else {
-        anyhow::bail!("--waypoints JSON file is required for VRP to define the delivery stops");
+        anyhow::bail!("--coordinates CSV file is required for VRP to define the delivery stops");
     }
 
     let solver_id = args.algo.to_solver_id();
@@ -946,6 +937,7 @@ async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         },
         road_classes: RoadClass::all_vehicle(),
         output_path: extract_path.clone(),
+        pbf_path: args.pbf.clone(),
     };
     let extract_result = crate::core::extract::run_extract(&extract_req)
         .await

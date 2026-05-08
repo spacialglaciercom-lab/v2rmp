@@ -1,11 +1,17 @@
 pub mod clean;
 pub mod compile;
+#[cfg(feature = "extract")]
 pub mod elevation;
+#[cfg(feature = "extract")]
 pub mod extract;
+pub mod geo_types;
 pub mod optimize;
+#[cfg(feature = "extract")]
 pub mod osm;
+#[cfg(feature = "extract")]
 pub mod overture;
 pub mod vrp;
+#[cfg(feature = "ml")]
 pub mod embed;
 
 /// Haversine distance in meters between two WGS-84 points (lat, lon order).

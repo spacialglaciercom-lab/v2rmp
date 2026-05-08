@@ -1,3 +1,4 @@
+#![cfg(feature = "cli")]
 mod app;
 mod cli;
 mod core;
@@ -36,7 +37,7 @@ async fn run_tui() -> anyhow::Result<()> {
 
     // App init
     let mut app = app::App::new();
-    app.log(app::LogLevel::Info, "rmpca v0.3.9 started");
+    app.log(app::LogLevel::Info, format!("rmpca v{} started", env!("CARGO_PKG_VERSION")));
     app.log(
         app::LogLevel::Info,
         "Ready — select a workflow step to begin",

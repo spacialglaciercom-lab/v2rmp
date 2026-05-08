@@ -1,3 +1,4 @@
+#![cfg(feature = "extract")]
 use anyhow::Result;
 use clap::Parser;
 use v2rmp::core::extract::{ExtractRequest, ExtractSource, RoadClass};
@@ -14,6 +15,10 @@ struct Args {
     /// Bounding box: MIN_LON,MIN_LAT,MAX_LON,MAX_LAT
     #[arg(long)]
     bbox: String,
+
+    /// Path to local OSM PBF file (optional, falls back to Overpass API)
+    #[arg(long)]
+    pbf: Option<String>,
 
     /// Road classes to include (comma-separated)
     #[arg(long, value_delimiter = ',')]
@@ -114,6 +119,7 @@ async fn main() -> Result<()> {
         },
         road_classes,
         output_path: args.output,
+        pbf_path: args.pbf,
     };
 
     let result = v2rmp::core::extract::run_extract(&request).await?;

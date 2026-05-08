@@ -50,18 +50,13 @@ impl VRPSolver for DefaultSolver {
             total_time += matrix_get_time(matrix, improved[i], improved[i + 1]);
         }
 
-        Ok(VRPSolverOutput {
-            stops: improved
-                .iter()
-                .map(|&i| input.locations[i].clone())
-                .collect(),
-            routes: None,
-            total_distance_km: format!("{:.2}", total_dist),
-            total_time_min: (total_time / 60.0).round() as u32,
-            route_stats: None,
-            route_metrics: None,
-            unassigned: None,
-        })
+        let result = crate::core::vrp::types::SolveResult {
+            routes: vec![improved],
+            total_distance: total_dist,
+            total_time,
+        };
+        
+        Ok(result.into_output(input))
     }
     fn clone_box(&self) -> Box<dyn VRPSolver> {
         Box::new(DefaultSolver)

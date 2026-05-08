@@ -3,13 +3,8 @@ use ratatui::Frame;
 use crate::app::{App, Status};
 
 pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let block = ratatui::widgets::Block::default()
-        .title(" Clean GeoJSON ")
-        .borders(ratatui::widgets::Borders::ALL)
-        .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan));
+    let inner = super::draw_panel(f, "Clean Map", area);
 
-    let inner = block.inner(area);
-    f.render_widget(block, area);
 
     let cyan = ratatui::style::Color::Cyan;
     let yellow = ratatui::style::Color::Yellow;

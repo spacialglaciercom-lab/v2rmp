@@ -29,6 +29,25 @@ pub(crate) struct SolveResult {
     pub total_time: f64,
 }
 
+impl SolveResult {
+    pub fn into_output(self, input: &VRPSolverInput) -> VRPSolverOutput {
+        let routes: Vec<Vec<VRPSolverStop>> = self
+            .routes
+            .iter()
+            .map(|r| r.iter().map(|&i| input.locations[i].clone()).collect())
+            .collect();
+        VRPSolverOutput {
+            stops: routes.iter().flatten().cloned().collect(),
+            routes: if routes.len() > 1 { Some(routes) } else { None },
+            total_distance_km: format!("{:.2}", self.total_distance),
+            total_time_min: (self.total_time / 60.0).round() as u32,
+            route_stats: None,
+            route_metrics: None,
+            unassigned: None,
+        }
+    }
+}
+
 /// A single stop in a VRP problem.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VRPSolverStop {

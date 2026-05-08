@@ -9,6 +9,8 @@ A powerful Terminal User Interface (TUI) and Command-Line Interface (CLI) for ro
 ## Features
 
 - 🖥️ **Interactive TUI**: Beautiful terminal interface built with `ratatui`
+- 🖼️ **Graphical UI (egui)**: Full-featured desktop GUI with map visualization, file dialogs, and drag-and-drop controls
+- 📐 **BBox Filtering**: Optimize only a subset of a large map by specifying a bounding box — no need to compile a separate .rmp for each area
 - 🤖 **Agent-First CLI**: Purpose-built `agent` command for JSON-task automation
 - 🗺️ **Data Extraction**: Extract road networks from Overture Maps S3 (Parquet) or OpenStreetMap PBF files
 - 🧹 **GeoJSON Cleaning**: Repair geometries, deduplicate edges, and optimize graph topology
@@ -17,9 +19,13 @@ A powerful Terminal User Interface (TUI) and Command-Line Interface (CLI) for ro
 - 🚛 **VRP Engine**: Multi-vehicle routing with multiple solvers:
   - **Clarke-Wright Savings**: Classic heuristic for capacity and distance
   - **Sweep Algorithm**: Geometric partitioning
-  - **Local Search**: 2-Opt and Or-Opt path improvements
+  - **Local Search**: 2-Opt path improvements
+  - **Simulated Annealing**: Or-Opt metaheuristic
+- ⛰️ **Elevation & Terrain**: DEM GeoTIFF queries (point, profile, stats, fuel calculation)
+- 🧠 **Embedding Engine**: Generate text embeddings via fastembed for semantic search
+- 🌐 **Headless Server**: JSON-RPC/STDIO `serve` mode for frontend integrations
 - 📁 **Resource Discovery**: `list` command to discover maps and routes programmatically
-- ⚡ **Asynchronous Runtime**: Fully non-blocking I/O using `tokio` for high-performance extraction and processing
+- ⚡ **Asynchronous Runtime**: Fully non-blocking I/O with `tokio` for high-performance extraction and processing
 
 ## Installation
 
@@ -46,7 +52,16 @@ Launch the full interface by running `rmpca` without arguments.
 rmpca
 ```
 
-### 2. Command-Line Interface (CLI)
+### 2. Graphical UI (egui)
+Launch the desktop GUI with map visualization, file pickers, and all workflow views.
+
+```bash
+cargo run --release --bin web-ui
+```
+
+The GUI includes all the same views as the TUI — Extract, Clean, Compile, Optimize, VRP — plus an interactive map canvas with zoom/pan, native file dialogs, and a **Bounding Box Filter** on the Optimize page to limit optimization to a sub-region of a large .rmp file.
+
+### 3. Command-Line Interface (CLI)
 Use `rmpca <COMMAND>` for scripts, agents, and batch processing. All commands support a `--json` flag for structured output.
 
 ```bash
@@ -58,7 +73,7 @@ rmpca list routes --json
 rmpca agent --task task.json --json
 
 # Multi-vehicle VRP
-rmpca vrp -i map.rmp --vehicles 5 --algo savings --waypoints stops.json --depot "40.71,-74.01" --output-dir routes/
+rmpca vrp -i map.rmp --vehicles 5 --algo savings --coordinates stops.csv --depot "40.71,-74.01" --output-dir routes/
 
 # Single-vehicle CPP Optimization (Outputs GPX)
 rmpca optimize -i map.rmp -o route.gpx --depot "40.71,-74.01"
@@ -76,6 +91,9 @@ rmpca optimize -i map.rmp -o route.gpx --depot "40.71,-74.01"
 | `agent` | Execute complex tasks from JSON payloads |
 | `list` | Enumerate maps, routes, and solvers |
 | `pipeline` | Run extract → clean → compile → optimize |
+| `elevation` | DEM GeoTIFF queries (point, profile, stats, fuel) |
+| `embed` | Generate text embeddings via fastembed |
+| `serve` | Headless JSON-RPC/STDIO server |
 
 ### AI Agent Task Format
 The `agent` command consumes a JSON payload, allowing agents to trigger complex workflows without manual flag management.
@@ -110,6 +128,58 @@ The `agent` command consumes a JSON payload, allowing agents to trigger complex 
 - Use **Browse Cached Maps** to select a compiled map
 - Configure turn penalties and depot in the **Optimize Route** view
 - Run optimization to generate a GPX/GeoJSON route
+
+#### Bounding Box Filter
+When working with large maps (e.g., a full city), you can restrict optimization to a smaller area instead of running CPP on the entire network. In the **Optimize Route** view (TUI or GUI), set a bounding box in `min_lat,min_lon,max_lat,max_lon` format. Only nodes and edges within that box are included in the optimization. This dramatically reduces solve time for large datasets.
+
+The core function is also available programmatically:
+
+```rust
+use v2rmp::core::optimize::filter_bbox;
+
+let (sub_nodes, sub_edges) = filter_bbox(
+    &nodes, &edges,
+    Some((45.48, 45.52, -73.62, -73.55)), // min_lat, max_lat, min_lon, max_lon
+);
+// Pass None to use the full map
+```
+
+## VRP Coordinate Input
+
+The VRP solver accepts a **CSV file** of coordinates as its primary input. This replaces the previous JSON waypoints format.
+
+### CSV Format
+
+The file must have a header row. Required columns are `lat` and `lon`; `label`, `demand`, and `type` are optional.
+
+| Column   | Required | Description |
+|----------|----------|-------------|
+| `lat`    | ✅        | Latitude (WGS-84) |
+| `lon`    | ✅        | Longitude (WGS-84) |
+| `label`  |          | Human-readable name (auto-generated if omitted) |
+| `demand` |          | Per-stop demand (default: 0 for depots, 1 for stops) |
+| `type`   |          | `depot` or `stop` (default: `stop`; first row becomes depot if no `type` column) |
+
+### Example
+
+```csv
+lat,lon,label,demand,type
+45.5017,-73.5673,Montreal Depot,0,depot
+45.5032,-73.5701,Customer A,5,stop
+45.5100,-73.5800,Customer B,3,stop
+45.4980,-73.5750,Customer C,2,stop
+45.5050,-73.5900,Customer D,4,stop
+```
+
+Minimal (just coordinates — first row is automatically treated as the depot):
+
+```csv
+lat,lon
+45.5017,-73.5673
+45.5032,-73.5701
+45.5100,-73.5800
+45.4980,-73.5750
+```
 
 ## Binary Format (.rmp)
 
@@ -160,7 +230,9 @@ let output = solver.solve(&vrp_input).await?;
 - [x] **v0.3.0**: VRP Engine Integration (Clarke-Wright, Sweep, 2-Opt)
 - [x] **v0.3.5**: Agent & List commands for machine-to-machine workflows
 - [x] **v0.4.0**: Fully Async pipeline and OSM PBF support
-- [x] **v0.4.1**: Multi-vehicle VRP CLI command operational with waypoints integration
+- [x] **v0.4.1**: Multi-vehicle VRP CLI command operational with CSV coordinates input
+- [x] **v0.4.2**: Elevation engine (DEM GeoTIFF), Embedding engine (fastembed), Headless serve mode
+- [x] **v0.4.3**: BBox deduplication, TUI version auto-sync, FileBrowser ESC fix, CLI guard
 - [ ] **v0.5.0**: Time Window support (VRPTW) and 3D terrain-aware routing
 
 ## License

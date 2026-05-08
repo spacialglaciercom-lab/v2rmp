@@ -38,6 +38,7 @@ pub struct ExtractRequest {
     pub bbox: BBoxRequest,
     pub road_classes: Vec<RoadClass>,
     pub output_path: String,
+    pub pbf_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -113,37 +114,43 @@ pub async fn run_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> 
 
 /// Run OSM PBF extraction
 async fn run_osm_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> {
-    // Find the PBF file in the current directory or a default location if not specified
-    // In TUI mode, the user would have provided a path.
-    // For CLI, we might need an extra argument, but currently ExtractArgs doesn't have it.
-    // Let's assume the bbox string might contain a path for now if it's OSM,
-    // or just look for any .pbf file.
+    use crate::core::osm::{segment_to_feature, BBox as OsmBBox, OsmExtractor, OverpassExtractor};
 
-    let pbf_path = std::env::var("OSM_PBF_PATH").unwrap_or_else(|_| "monaco.osm.pbf".to_string());
-
-    if !std::path::Path::new(&pbf_path).exists() {
-        anyhow::bail!(
-            "OSM PBF file not found: {}. Set OSM_PBF_PATH env var.",
-            pbf_path
-        );
-    }
-
-    use crate::core::osm::pbf_extractor::{segment_to_feature, BBox as OsmBBox, OsmExtractor};
-
-    let extractor = OsmExtractor::new(pbf_path)?;
     let bbox = OsmBBox {
         min_lon: req.bbox.min_lon,
         min_lat: req.bbox.min_lat,
         max_lon: req.bbox.max_lon,
         max_lat: req.bbox.max_lat,
     };
-
     let classes: Vec<String> = req
         .road_classes
         .iter()
         .map(|rc| rc.as_str().to_string())
         .collect();
-    let segments = extractor.extract_bbox(&bbox, &classes)?;
+
+    // Priority: 1. CLI/Request path, 2. Env var, 3. Default file, 4. Overpass API
+    let pbf_path_candidate = req.pbf_path.clone()
+        .or_else(|| std::env::var("OSM_PBF_PATH").ok());
+
+    let segments = if let Some(pbf_path) = pbf_path_candidate {
+        if std::path::Path::new(&pbf_path).exists() {
+            tracing::info!("Using local PBF file: {}", pbf_path);
+            let extractor = OsmExtractor::new(pbf_path)?;
+            extractor.extract_bbox(&bbox, &classes)?
+        } else {
+            tracing::info!("PBF file not found at {}, falling back to Overpass", pbf_path);
+            let extractor = OverpassExtractor::new();
+            extractor.extract_bbox(&bbox, &classes).await?
+        }
+    } else if std::path::Path::new("monaco.osm.pbf").exists() {
+        tracing::info!("Using default PBF file: monaco.osm.pbf");
+        let extractor = OsmExtractor::new("monaco.osm.pbf".to_string())?;
+        extractor.extract_bbox(&bbox, &classes)?
+    } else {
+        tracing::info!("No PBF file found, using Overpass API");
+        let extractor = OverpassExtractor::new();
+        extractor.extract_bbox(&bbox, &classes).await?
+    };
 
     let features: Vec<Feature> = segments.into_iter().map(segment_to_feature).collect();
 

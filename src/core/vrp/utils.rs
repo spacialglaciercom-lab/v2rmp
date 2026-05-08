@@ -339,6 +339,100 @@ pub fn build_sweep_routes(
     route_indices
 }
 
+
+
+/// Parse a CSV file of coordinates into VRP solver stops.
+///
+/// Supported column sets:
+///   Minimal:  lat,lon
+///   Extended: lat,lon,label,demand,type
+///
+/// The `type` column accepts "depot" or "stop" (default: "stop").
+/// If no depot is present, the first row becomes the depot.
+/// The `demand` column is optional; defaults to 1.0 for stops, 0.0 for depots.
+pub fn parse_csv_stops(csv_path: &str) -> Result<(Vec<crate::core::vrp::types::VRPSolverStop>, Vec<usize>), String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(csv_path)
+        .map_err(|e| format!("Cannot open CSV '{}': {}", csv_path, e))?;
+    let mut content = String::new();
+    file.read_to_string(&mut content)
+        .map_err(|e| format!("Cannot read CSV '{}': {}", csv_path, e))?;
+
+    let mut reader = csv::ReaderBuilder::new()
+        .has_headers(true)
+        .trim(csv::Trim::All)
+        .from_reader(content.as_bytes());
+
+    let headers = reader.headers()
+        .map_err(|e| format!("Failed to read CSV headers: {}", e))?
+        .clone();
+
+    let lat_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("lat") || h.eq_ignore_ascii_case("latitude"))
+        .ok_or("CSV must have a 'lat' column")?;
+    let lon_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("lon") || h.eq_ignore_ascii_case("lng") || h.eq_ignore_ascii_case("longitude"))
+        .ok_or("CSV must have a 'lon' column")?;
+    let label_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("label") || h.eq_ignore_ascii_case("name") || h.eq_ignore_ascii_case("id"));
+    let demand_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("demand"));
+    let type_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("type") || h.eq_ignore_ascii_case("role"));
+
+    let mut stops = Vec::new();
+    let mut depot_indices = Vec::new();
+
+    for (row_num, result) in reader.records().enumerate() {
+        let record = result.map_err(|e| format!("CSV parse error at row {}: {}", row_num + 2, e))?;
+
+        let lat: f64 = record.get(lat_idx)
+            .ok_or_else(|| format!("Missing lat at row {}", row_num + 2))?
+            .parse()
+            .map_err(|e| format!("Invalid lat at row {}: {}", row_num + 2, e))?;
+        let lon: f64 = record.get(lon_idx)
+            .ok_or_else(|| format!("Missing lon at row {}", row_num + 2))?
+            .parse()
+            .map_err(|e| format!("Invalid lon at row {}: {}", row_num + 2, e))?;
+
+        let label = label_idx
+            .and_then(|i| record.get(i))
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("stop_{}", row_num));
+
+        let is_depot = type_idx
+            .and_then(|i| record.get(i))
+            .map(|s| s.eq_ignore_ascii_case("depot"))
+            .unwrap_or(false);
+
+        let demand = demand_idx
+            .and_then(|i| record.get(i))
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap_or(if is_depot { 0.0 } else { 1.0 });
+
+        if is_depot {
+            depot_indices.push(stops.len());
+        }
+
+        stops.push(crate::core::vrp::types::VRPSolverStop {
+            lat,
+            lon,
+            label,
+            demand: Some(demand),
+            arrival_time: None,
+        });
+    }
+
+    if stops.is_empty() {
+        return Err("CSV file contains no data rows".to_string());
+    }
+
+    // If no depot was found, designate the first stop as depot
+    if depot_indices.is_empty() {
+        depot_indices.push(0);
+        if let Some(d) = stops[0].demand.as_mut() {
+            *d = 0.0;
+        }
+    }
+
+    Ok((stops, depot_indices))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

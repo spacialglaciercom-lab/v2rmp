@@ -61,10 +61,11 @@ pub struct FileBrowser {
     pub filter: FileFilter,
     pub target_field: InputField,
     pub show_hidden: bool,
+    pub previous_view: View,
 }
 
 impl FileBrowser {
-    pub fn new(target_field: InputField) -> Self {
+    pub fn new(target_field: InputField, previous_view: View) -> Self {
         let current_path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         Self {
             current_path,
@@ -77,6 +78,7 @@ impl FileBrowser {
             },
             target_field,
             show_hidden: false,
+            previous_view,
         }
     }
 
@@ -299,7 +301,7 @@ pub enum InputField {
     CleanOutputFile,
     VrpInputFile,
     VrpOutputDir,
-    VrpWaypointsFile,
+    VrpCsvFile,
     VrpAlgorithm,
     VrpCapacity,
     VrpDepot,
@@ -345,7 +347,7 @@ pub struct App {
     pub vrp_algo: String,
     pub vrp_capacity: Option<f64>,
     pub vrp_depots: Vec<String>,
-    pub vrp_waypoints_file: Option<String>,
+    pub vrp_csv_file: Option<String>,
     pub vrp_status: Status,
 
     // Browse state
@@ -407,7 +409,7 @@ impl App {
             vrp_algo: "greedy".to_string(),
             vrp_capacity: Some(100.0),
             vrp_depots: Vec::new(),
-            vrp_waypoints_file: None,
+            vrp_csv_file: None,
             vrp_status: Status::Ready,
 
             cached_maps: Vec::new(),
@@ -427,7 +429,8 @@ impl App {
     }
 
     pub fn start_file_browser(&mut self, field: InputField) {
-        let mut browser = FileBrowser::new(field);
+        let previous = self.current_view.clone();
+        let mut browser = FileBrowser::new(field, previous);
         if let Err(e) = browser.refresh_entries() {
             self.log(
                 LogLevel::Error,
@@ -441,6 +444,12 @@ impl App {
     }
 
     pub fn close_file_browser(&mut self, selected_path: Option<PathBuf>) {
+        let previous_view = self
+            .file_browser
+            .as_ref()
+            .map(|b| b.previous_view.clone())
+            .unwrap_or(View::Home);
+
         if let Some(path) = selected_path {
             let path_str = path.to_string_lossy().to_string();
 
@@ -511,6 +520,9 @@ impl App {
                     }
                 }
             }
+        } else {
+            // User cancelled — restore the view they came from
+            self.current_view = previous_view;
         }
 
         self.file_browser = None;
@@ -630,9 +642,9 @@ impl App {
                 self.vrp_output_dir = value.clone();
                 self.log(LogLevel::Success, format!("VRP output dir: {}", value));
             }
-            InputField::VrpWaypointsFile => {
-                self.vrp_waypoints_file = Some(value.clone());
-                self.log(LogLevel::Success, format!("VRP waypoints file: {}", value));
+            InputField::VrpCsvFile => {
+                self.vrp_csv_file = Some(value.clone());
+                self.log(LogLevel::Success, format!("VRP coordinates CSV: {}", value));
             }
             InputField::VrpAlgorithm => {
                 self.vrp_algo = value.clone();

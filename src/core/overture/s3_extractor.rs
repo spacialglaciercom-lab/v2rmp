@@ -48,37 +48,7 @@ pub fn segment_path() -> String {
 
 
 
-/// Bounding box for spatial filtering
-#[derive(Debug, Clone, Copy)]
-pub struct BBox {
-    pub min_lon: f64,
-    pub min_lat: f64,
-    pub max_lon: f64,
-    pub max_lat: f64,
-}
-
-impl BBox {
-    /// Check if a point is within the bounding box
-    #[allow(dead_code)]
-    pub fn contains(&self, lon: f64, lat: f64) -> bool {
-        lon >= self.min_lon && lon <= self.max_lon && lat >= self.min_lat && lat <= self.max_lat
-    }
-
-    /// Check if a bbox intersects this bbox
-    pub fn intersects(&self, other: &BBox) -> bool {
-        !(self.max_lon < other.min_lon
-            || self.min_lon > other.max_lon
-            || self.max_lat < other.min_lat
-            || self.min_lat > other.max_lat)
-    }
-
-    /// Calculate area in degrees squared (approximate)
-    #[allow(dead_code)]
-    pub fn area(&self) -> f64 {
-        (self.max_lon - self.min_lon) * (self.max_lat - self.min_lat)
-    }
-}
-
+pub use crate::core::geo_types::BBox;
 /// Overture segment extracted from S3
 #[derive(Debug, Clone)]
 pub struct OvertureSegment {

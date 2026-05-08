@@ -12,6 +12,16 @@ use ratatui::Frame;
 
 use crate::app::{App, View};
 
+pub fn draw_panel(f: &mut Frame, title: &str, area: ratatui::layout::Rect) -> ratatui::layout::Rect {
+    let block = ratatui::widgets::Block::default()
+        .title(format!(" {} ", title))
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    inner
+}
+
 pub fn draw(f: &mut Frame, app: &App) {
     let chunks = ratatui::layout::Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
@@ -30,7 +40,7 @@ pub fn draw(f: &mut Frame, app: &App) {
 }
 
 fn draw_header(f: &mut Frame, area: ratatui::layout::Rect) {
-    let title = " rmpca - Route Optimization TUI [v0.3.9] ";
+    let title = format!(" rmpca - Route Optimization TUI [v{}] ", env!("CARGO_PKG_VERSION"));
     let block = ratatui::widgets::Block::default()
         .borders(ratatui::widgets::Borders::ALL)
         .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan));
@@ -194,9 +204,10 @@ pub fn draw_input_prompt(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         crate::app::InputField::CleanOutputFile => "Clean output GeoJSON file path",
         crate::app::InputField::VrpInputFile => "VRP input .rmp file path",
         crate::app::InputField::VrpOutputDir => "VRP output directory",
-        crate::app::InputField::VrpWaypointsFile => "VRP waypoints JSON file path",
+        crate::app::InputField::VrpCsvFile => "VRP coordinates CSV file path",
         crate::app::InputField::VrpAlgorithm => "VRP algorithm (greedy|savings|local_search|simulated_annealing)",
         crate::app::InputField::VrpCapacity => "VRP vehicle capacity",
+        crate::app::InputField::VrpCsvFile => "VRP coordinates CSV file path",
         crate::app::InputField::VrpDepot => "VRP depot (lat,lon)",
     };
 

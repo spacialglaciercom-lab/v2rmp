@@ -52,20 +52,7 @@ impl VRPSolver for SweepSolver {
             .as_ref()
             .ok_or("Sweep solver requires a distance matrix")?;
         let result = solve(matrix, &input.locations, input.num_vehicles);
-        let routes: Vec<Vec<VRPSolverStop>> = result
-            .routes
-            .iter()
-            .map(|r| r.iter().map(|&i| input.locations[i].clone()).collect())
-            .collect();
-        Ok(VRPSolverOutput {
-            stops: routes.iter().flatten().cloned().collect(),
-            routes: if routes.len() > 1 { Some(routes) } else { None },
-            total_distance_km: format!("{:.2}", result.total_distance),
-            total_time_min: (result.total_time / 60.0).round() as u32,
-            route_stats: None,
-            route_metrics: None,
-            unassigned: None,
-        })
+        Ok(result.into_output(input))
     }
     fn clone_box(&self) -> Box<dyn VRPSolver> {
         Box::new(SweepSolver)
