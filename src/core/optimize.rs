@@ -800,4 +800,23 @@ mod tests {
         assert!(result.total_distance_km > 0.0);
         let _ = std::fs::remove_file(temp_path);
     }
+
+    #[tokio::test]
+    async fn test_run_optimize_invalid_cache_file() {
+        let req = OptimizeRequest {
+            cache_file: "nonexistent_file_that_should_fail.rmp".to_string(),
+            route_file: None,
+            turn_penalties: TurnPenalties::default(),
+            depot: None,
+            oneway_mode: OnewayMode::default(),
+            mode: SolverMode::Cpp,
+            num_vehicles: 1,
+            solver_id: "default".to_string(),
+        };
+        let result = run_optimize(&req).await;
+        assert!(
+            result.is_err(),
+            "run_optimize should return an error for an invalid cache file"
+        );
+    }
 }
