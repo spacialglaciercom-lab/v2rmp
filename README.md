@@ -130,7 +130,7 @@ The `agent` command consumes a JSON payload, allowing agents to trigger complex 
 - Run optimization to generate a GPX/GeoJSON route
 
 #### Bounding Box Filter
-When working with large maps (e.g., a full city), you can restrict optimization to a smaller area instead of running CPP on the entire network. In the **Optimize Route** view (TUI or GUI), set a bounding box in `min_lat,min_lon,max_lat,max_lon` format. Only nodes and edges within that box are included in the optimization. This dramatically reduces solve time for large datasets.
+When working with large maps (e.g., a full city), you can restrict optimization to a smaller area instead of running CPP on the entire network. In the **Optimize Route** view (TUI or GUI), set a bounding box in `min_lon,min_lat,max_lon,max_lat` format. Only nodes and edges within that box are included in the optimization. This dramatically reduces solve time for large datasets.
 
 The core function is also available programmatically:
 

@@ -111,7 +111,7 @@ impl std::fmt::Display for BoundingBox {
         write!(
             f,
             "{:.4},{:.4} to {:.4},{:.4}",
-            self.min_lat, self.min_lon, self.max_lat, self.max_lon
+            self.min_lon, self.min_lat, self.max_lon, self.max_lat
         )
     }
 }

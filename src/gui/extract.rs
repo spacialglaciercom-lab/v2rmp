@@ -39,7 +39,7 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
                         app.bounding_box = Some(bbox.clone());
                         app.log(LogLevel::Success, format!("Bounding box set: {}", bbox));
                     } else {
-                        app.log(LogLevel::Error, "Invalid bounding box format. Use: min_lat,min_lon,max_lat,max_lon");
+                        app.log(LogLevel::Error, "Invalid bounding box format. Use: min_lon,min_lat,max_lon,max_lat");
                     }
                 }
             });
@@ -83,10 +83,10 @@ fn parse_bbox(input: &str) -> Option<BoundingBox> {
     if parts.len() != 4 {
         return None;
     }
-    let min_lat = parts[0].trim().parse::<f64>().ok()?;
-    let min_lon = parts[1].trim().parse::<f64>().ok()?;
-    let max_lat = parts[2].trim().parse::<f64>().ok()?;
-    let max_lon = parts[3].trim().parse::<f64>().ok()?;
+    let min_lon = parts[0].trim().parse::<f64>().ok()?;
+    let min_lat = parts[1].trim().parse::<f64>().ok()?;
+    let max_lon = parts[2].trim().parse::<f64>().ok()?;
+    let max_lat = parts[3].trim().parse::<f64>().ok()?;
     if min_lat >= max_lat || min_lon >= max_lon {
         return None;
     }

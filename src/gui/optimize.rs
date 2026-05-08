@@ -49,24 +49,24 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
                 ui.colored_label(egui::Color32::from_rgb(140, 140, 140), "(full map — no filter)");
             }
             ui.horizontal(|ui| {
-                ui.label("min_lat,min_lon,max_lat,max_lon:");
+                ui.label("min_lon,min_lat,max_lon,max_lat:");
                 let _resp = ui.text_edit_singleline(&mut app.optimize_bbox_input);
                 if ui.button("Set BBox").clicked() {
                     let parts: Vec<&str> = app.optimize_bbox_input.split(',').collect();
                     if parts.len() == 4 {
-                        if let (Ok(mla), Ok(mlo), Ok(xla), Ok(xlo)) = (
+                        if let (Ok(mlo), Ok(mla), Ok(xlo), Ok(xla)) = (
                             parts[0].trim().parse::<f64>(),
                             parts[1].trim().parse::<f64>(),
                             parts[2].trim().parse::<f64>(),
                             parts[3].trim().parse::<f64>(),
                         ) {
                             app.optimize_bbox = Some((mla, xla, mlo, xlo));
-                            app.log(LogLevel::Success, format!("BBox filter set: {:.4},{:.4} to {:.4},{:.4}", mla, mlo, xla, xlo));
+                            app.log(LogLevel::Success, format!("BBox filter set: {:.4},{:.4} to {:.4},{:.4}", mlo, mla, xlo, xla));
                         } else {
                             app.log(LogLevel::Error, "Invalid coordinates");
                         }
                     } else {
-                        app.log(LogLevel::Error, "Use format: min_lat,min_lon,max_lat,max_lon");
+                        app.log(LogLevel::Error, "Use format: min_lon,min_lat,max_lon,max_lat");
                     }
                 }
                 if ui.button("✕ Clear").clicked() {

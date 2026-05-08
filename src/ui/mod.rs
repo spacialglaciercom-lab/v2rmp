@@ -187,7 +187,7 @@ pub fn draw_input_prompt(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     }
 
     let label = match app.input_mode.field {
-        crate::app::InputField::BoundingBox => "Bounding Box (min_lat,min_lon,max_lat,max_lon)",
+        crate::app::InputField::BoundingBox => "Bounding Box (min_lon,min_lat,max_lon,max_lat)",
         crate::app::InputField::InputFile => "Input GeoJSON file path",
         crate::app::InputField::OutputFile => "Output .rmp file path",
         crate::app::InputField::CacheFile => "Cache map file path",
