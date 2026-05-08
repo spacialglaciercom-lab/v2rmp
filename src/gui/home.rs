@@ -6,7 +6,7 @@ const MENU_ITEMS: &[(&str, &str)] = &[
     ("📥", "Extract Data (OSM/Overture)"),
     ("🧹", "Clean GeoJSON (Repair & Optimize)"),
     ("🔨", "Compile Map (GeoJSON → .rmp)"),
-    ("🚗", "Optimize Route"),
+    ("🚗", "CPP Solver (Street Coverage)"),
     ("🚚", "VRP Solver (Multi-Vehicle)"),
     ("🗺️", "Browse Cached Maps"),
     ("📋", "Browse Saved Routes"),

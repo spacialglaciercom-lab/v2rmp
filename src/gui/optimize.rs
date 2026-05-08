@@ -4,8 +4,12 @@ use crate::gui::{GuiApp, LogLevel, Status};
 
 pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
     ui.vertical(|ui| {
-        ui.heading("🚗 Optimize Route");
-        ui.label("Optimize route with turn penalties on a cached map");
+        ui.heading("🔄 Chinese Postman Problem (CPP)");
+        ui.label("Find a route that traverses every street edge at least once.");
+        ui.colored_label(
+            egui::Color32::from_rgb(140, 140, 200),
+            "CPP covers all edges — use VRP Solver to visit specific stops instead.",
+        );
         ui.separator();
 
         // Cache file
@@ -73,28 +77,18 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
             });
         });
 
-        // Route file (optional)
+        // GPX output (auto-generated)
         ui.group(|ui| {
-            ui.heading("Route File (optional)");
-            if let Some(ref path) = app.route_file {
-                ui.colored_label(egui::Color32::from_rgb(80, 220, 80), path);
+            ui.heading("Output");
+            if let Some(ref path) = app.cache_file {
+                let gpx_path = path.replace(".rmp", "_cpp.gpx");
+                ui.colored_label(egui::Color32::from_rgb(80, 220, 80), format!("GPX → {}", gpx_path));
             } else {
-                ui.colored_label(egui::Color32::from_rgb(140, 140, 140), "(not set)");
+                ui.colored_label(egui::Color32::from_rgb(140, 140, 140), "(load .rmp to see output path)");
             }
-            ui.horizontal(|ui| {
-                if ui.button("Browse…").clicked() {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("Route", &["json", "geojson"])
-                        .pick_file()
-                    {
-                        app.route_file = Some(path.display().to_string());
-                        app.log(LogLevel::Success, format!("Route file set: {}", path.display()));
-                    }
-                }
-                if ui.button("✕ Clear").clicked() {
-                    app.route_file = None;
-                }
-            });
+            if let Some(ref path) = app.route_file {
+                ui.colored_label(egui::Color32::from_rgb(80, 220, 80), format!("JSON → {}", path));
+            }
         });
 
         // Turn penalties
@@ -114,13 +108,14 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
             });
         });
 
-        // Depot & Vehicles
+        // Depot
         ui.group(|ui| {
-            ui.heading("Depot & Vehicles");
+            ui.heading("Depot (optional)");
+            ui.label("Starting point for the CPP tour.");
             if let Some((lat, lon)) = app.depot_coords {
                 ui.colored_label(egui::Color32::from_rgb(80, 220, 80), format!("Depot: {:.4},{:.4}", lat, lon));
             } else {
-                ui.colored_label(egui::Color32::from_rgb(140, 140, 140), "(not set)");
+                ui.colored_label(egui::Color32::from_rgb(140, 140, 140), "(not set — arbitrary start node)");
             }
             ui.horizontal(|ui| {
                 ui.label("Depot (lat,lon):");
@@ -135,26 +130,13 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
                     }
                 }
             });
-            ui.horizontal(|ui| {
-                ui.add(egui::DragValue::new(&mut app.num_vehicles).speed(1).range(1..=100));
-                ui.label("Vehicles");
-            });
         });
 
-        // Solver & Oneway
+        // One-way mode
         ui.group(|ui| {
-            ui.heading("Solver");
-            let solver_options = crate::core::vrp::registry::get_algorithm_options();
-            egui::ComboBox::from_id_salt("solver_select")
-                .selected_text(app.solver_id.clone())
-                .show_ui(ui, |ui| {
-                    for (id, label) in &solver_options {
-                        ui.selectable_value(&mut app.solver_id, id.clone(), label);
-                    }
-                });
-
+            ui.heading("One-way Streets");
             ui.horizontal(|ui| {
-                ui.label("One-way mode:");
+                ui.label("Mode:");
                 egui::ComboBox::from_id_salt("oneway_select")
                     .selected_text(format!("{:?}", app.oneway_mode))
                     .show_ui(ui, |ui| {
@@ -165,11 +147,11 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
             });
         });
 
-        // Run
+        // Run CPP
         ui.group(|ui| {
             super::status_label(ui, &app.optimize_status);
             let can_run = app.cache_file.is_some();
-            if ui.add_enabled(can_run, egui::Button::new("🚀 Optimize Route")).clicked() {
+            if ui.add_enabled(can_run, egui::Button::new("🔄 Run CPP")).clicked() {
                 run_optimize(app);
             }
         });
@@ -197,57 +179,93 @@ fn run_optimize(app: &mut GuiApp) {
         }
     };
 
-    app.optimize_status = Status::Running { progress: 0, message: "Optimizing…".to_string() };
-    app.log(LogLevel::Info, "Starting route optimization");
+    app.optimize_status = Status::Running { progress: 0, message: "Running CPP\u{2026}".to_string() };
+    app.log(LogLevel::Info, "Starting Chinese Postman optimization");
+
+    // Read the RMP file
+    let file_data = match std::fs::read(&cache_path) {
+        Ok(d) => d,
+        Err(e) => {
+            app.optimize_status = Status::Error(e.to_string());
+            app.log(LogLevel::Error, format!("Failed to read cache file: {}", e));
+            return;
+        }
+    };
+    let (mut nodes, mut edges) = match crate::core::optimize::read_rmp_file(&file_data) {
+        Ok(n) => n,
+        Err(e) => {
+            app.optimize_status = Status::Error(e.to_string());
+            app.log(LogLevel::Error, format!("Invalid .rmp file: {}", e));
+            return;
+        }
+    };
 
     let depot = app.depot_coords;
 
-    let req = crate::core::optimize::OptimizeRequest {
-        cache_file: cache_path,
-        route_file: app.route_file.clone(),
-        turn_penalties: app.turn_penalties.clone(),
-        depot,
-        oneway_mode: app.oneway_mode,
-        mode: crate::core::optimize::SolverMode::Cpp,
-        num_vehicles: app.num_vehicles,
-        solver_id: app.solver_id.clone(),
-    };
+    // Filter by bounding box if set
+    if app.optimize_bbox.is_some() {
+        let (filtered_nodes, filtered_edges) = crate::core::optimize::filter_bbox(
+            &nodes, &edges, app.optimize_bbox
+        );
+        if filtered_nodes.is_empty() {
+            app.optimize_status = Status::Error("No nodes in bounding box".to_string());
+            app.log(LogLevel::Error, "Bounding box contains no nodes");
+            return;
+        }
+        app.log(LogLevel::Info, format!(
+            "BBox filter: {} of {} nodes, {} of {} edges",
+            filtered_nodes.len(), nodes.len(), filtered_edges.len(), edges.len()
+        ));
+        nodes = filtered_nodes;
+        edges = filtered_edges;
+    }
 
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-    match rt.block_on(crate::core::optimize::run_optimize(&req)) {
-        Ok(result) => {
+    // Solve CPP on the (possibly filtered) graph
+    match crate::core::optimize::solve_cpp(&nodes, &edges, app.oneway_mode, depot) {
+        Ok(cpp) => {
             app.optimize_status = Status::Done(format!(
                 "{:.2} km, {} segments, {:.1}% efficiency",
-                result.total_distance_km, result.total_segments, result.efficiency_pct
+                cpp.summary.total_distance_km, cpp.summary.total_segments, cpp.summary.efficiency_pct
             ));
             app.log(LogLevel::Success, format!(
-                "Optimization complete: {:.2} km, {} segments",
-                result.total_distance_km, result.total_segments
+                "CPP complete: {:.2} km, {} segments, {:.2} km deadhead",
+                cpp.summary.total_distance_km, cpp.summary.total_segments, cpp.summary.deadhead_distance_km
             ));
 
-            // Also solve CPP for map visualization (use filtered subset if bbox is set)
-            if !app.map_nodes.is_empty() {
-                let (solve_nodes, solve_edges) = crate::core::optimize::filter_bbox(
-                    &app.map_nodes, &app.map_edges, app.optimize_bbox
-                );
-                if solve_nodes.is_empty() {
-                    app.log(LogLevel::Warn, "No nodes in selected bounding box");
-                } else {
-                    app.log(LogLevel::Info, format!("BBox filter: {} nodes, {} edges", solve_nodes.len(), solve_edges.len()));
+            // Write GPX output
+            let gpx_path = cache_path.replace(".rmp", "_cpp.gpx");
+            match crate::core::optimize::write_gpx_cpp(&gpx_path, &nodes, &cpp.circuit) {
+                Ok(_) => {
+                    app.log(LogLevel::Success, format!("GPX written: {}", gpx_path));
                 }
-                match crate::core::optimize::solve_cpp(&solve_nodes, &solve_edges, app.oneway_mode, depot) {
-                    Ok(cpp) => {
-                        app.cpp_output = Some(cpp);
-                    }
-                    Err(e) => {
-                        app.map_solve_error = Some(e.to_string());
-                    }
+                Err(e) => {
+                    app.log(LogLevel::Warn, format!("Failed to write GPX: {}", e));
                 }
             }
+
+            // Also write JSON if a route file was set
+            if let Some(ref route_path) = app.route_file {
+                let route_json = serde_json::json!({
+                    "route": cpp.circuit,
+                    "total_distance_km": cpp.summary.total_distance_km,
+                    "deadhead_distance_km": cpp.summary.deadhead_distance_km,
+                    "efficiency_pct": cpp.summary.efficiency_pct,
+                    "nodes": nodes.iter().enumerate().map(|(i, n)| serde_json::json!({"id": i, "lat": n.lat, "lon": n.lon})).collect::<Vec<_>>(),
+                });
+                match std::fs::write(route_path, serde_json::to_string_pretty(&route_json).unwrap_or_default()) {
+                    Ok(_) => app.log(LogLevel::Success, format!("Route JSON written: {}", route_path)),
+                    Err(e) => app.log(LogLevel::Warn, format!("Failed to write route JSON: {}", e)),
+                }
+            }
+
+            // Update map visualization with filtered data
+            app.cpp_output = Some(cpp);
+            app.map_solve_error = None;
+            app.set_network(nodes, edges, cache_path);
         }
         Err(e) => {
             app.optimize_status = Status::Error(e.to_string());
-            app.log(LogLevel::Error, format!("Optimization failed: {}", e));
+            app.log(LogLevel::Error, format!("CPP failed: {}", e));
         }
     }
 }

@@ -427,7 +427,7 @@ impl eframe::App for GuiApp {
                     ("Extract Data", View::Extract),
                     ("Clean GeoJSON", View::Clean),
                     ("Compile Map", View::Compile),
-                    ("Optimize Route", View::Optimize),
+                    ("CPP Solver", View::Optimize),
                     ("VRP Solver", View::Vrp),
                     ("Cached Maps", View::BrowseMaps),
                     ("Saved Routes", View::BrowseRoutes),

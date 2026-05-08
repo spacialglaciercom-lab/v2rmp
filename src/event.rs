@@ -171,6 +171,7 @@ async fn handle_extract_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) 
                     },
                     road_classes: RoadClass::all_vehicle(),
                     output_path: output_path.clone(),
+                    pbf_path: None,
                 };
 
                 // Execute extraction

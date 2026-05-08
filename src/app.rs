@@ -73,7 +73,7 @@ impl FileBrowser {
             selection: 0,
             filter: match target_field {
                 InputField::InputFile | InputField::CleanInputFile => FileFilter::GeoJson,
-                InputField::CacheFile => FileFilter::Rmp,
+                InputField::CacheFile | InputField::VrpWaypointsFile => FileFilter::Rmp,
                 _ => FileFilter::All,
             },
             target_field,
@@ -305,6 +305,7 @@ pub enum InputField {
     VrpAlgorithm,
     VrpCapacity,
     VrpDepot,
+    VrpWaypointsFile,
 }
 
 pub struct App {
@@ -348,6 +349,7 @@ pub struct App {
     pub vrp_capacity: Option<f64>,
     pub vrp_depots: Vec<String>,
     pub vrp_csv_file: Option<String>,
+    pub vrp_waypoints_file: Option<String>,
     pub vrp_status: Status,
 
     // Browse state
@@ -410,6 +412,7 @@ impl App {
             vrp_capacity: Some(100.0),
             vrp_depots: Vec::new(),
             vrp_csv_file: None,
+            vrp_waypoints_file: None,
             vrp_status: Status::Ready,
 
             cached_maps: Vec::new(),
@@ -514,6 +517,14 @@ impl App {
                             format!("Clean output file selected: {}", path_str),
                         );
                         self.current_view = View::Clean;
+                    }
+                    InputField::VrpWaypointsFile => {
+                        self.vrp_waypoints_file = Some(path_str.clone());
+                        self.log(
+                            LogLevel::Success,
+                            format!("VRP waypoints file selected: {}", path_str),
+                        );
+                        self.current_view = View::Vrp;
                     }
                     _ => {
                         self.current_view = View::Home;
@@ -659,6 +670,10 @@ impl App {
             InputField::VrpDepot => {
                 self.vrp_depots.push(value.clone());
                 self.log(LogLevel::Success, format!("VRP depot added: {}", value));
+            }
+            InputField::VrpWaypointsFile => {
+                self.vrp_waypoints_file = Some(value.clone());
+                self.log(LogLevel::Success, format!("VRP waypoints file set: {}", value));
             }
             InputField::DepotCoordinates => {
                 let parts: Vec<&str> = value.split(',').collect();

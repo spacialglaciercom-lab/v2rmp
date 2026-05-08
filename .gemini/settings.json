@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "zilliz-codebase": {
+      "command": "/root/v2rmp/target/release/zilliz-mcp-server",
+      "args": []
+    }
+  }
+}
