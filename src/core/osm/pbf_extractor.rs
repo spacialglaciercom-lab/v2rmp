@@ -207,13 +207,15 @@ mod tests {
     }
 
     #[test]
-    fn test_osm_extractor_new_not_found() {
-        let path = "non_existent_file.pbf".to_string();
-        let result = OsmExtractor::new(path.clone());
+    fn test_osm_extractor_new_error() {
+        let dummy_path = "nonexistent_file.pbf".to_string();
+        let result = OsmExtractor::new(dummy_path.clone());
 
-        assert!(result.is_err());
-        if let Err(err) = result {
-            assert_eq!(err.to_string(), format!("PBF file not found: {}", path));
+        match result {
+            Err(e) => {
+                assert_eq!(e.to_string(), format!("PBF file not found: {}", dummy_path));
+            }
+            Ok(_) => panic!("Expected error, but got Ok"),
         }
     }
 }
