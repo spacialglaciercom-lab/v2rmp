@@ -48,6 +48,7 @@ struct Request {
     #[serde(default)]
     params: Value,
     #[serde(default)]
+    #[allow(dead_code)]
     id: Value,
 }
 
@@ -91,6 +92,7 @@ struct ZillizSearchResp {
 #[derive(Debug, Deserialize)]
 struct ZillizHit {
     #[serde(default)]
+    #[allow(dead_code)]
     id: Value,
     #[serde(default)]
     distance: Option<f64>,

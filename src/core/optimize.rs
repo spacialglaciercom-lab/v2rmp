@@ -7,6 +7,7 @@ use std::time::Instant;
 /// Filter nodes and edges to only those within a bounding box.
 /// Returns remapped (nodes, edges) where edge indices are renumbered from 0.
 /// If `bbox` is `None`, returns the originals unchanged.
+#[allow(dead_code)]
 pub fn filter_bbox(
     nodes: &[RmpNode],
     edges: &[RmpEdge],
@@ -346,13 +347,13 @@ pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot
     for (i, adj_list) in adj.iter().enumerate() {
         degrees[i] = adj_list.len();
     }
-    let odd_vertices: Vec<usize> = (0..n).filter(|&i| degrees[i] % 2 != 0).collect();
+    let odd_vertices: Vec<usize> = (0..n).filter(|&i| !degrees[i].is_multiple_of(2)).collect();
 
     // Minimum weight perfect matching (greedy nearest-neighbor)
     let mut duplicate_edges: Vec<(usize, usize, f64, usize)> = Vec::new();
     let mut matched = vec![false; n];
     for i in 0..n {
-        if degrees[i] % 2 == 0 {
+        if degrees[i].is_multiple_of(2) {
             matched[i] = true;
         }
     }
@@ -695,6 +696,7 @@ pub(crate) fn write_gpx_multi(path: &str, routes: &[Vec<VRPSolverStop>]) -> anyh
 
 
 /// Write a GPX track file from a CPP circuit.
+#[allow(dead_code)]
 pub fn write_gpx_cpp(path: &str, nodes: &[RmpNode], circuit: &[u32]) -> anyhow::Result<()> {
     use std::io::Write;
     let mut file = std::fs::File::create(path)?;

@@ -571,7 +571,7 @@ pub fn draw_map_canvas(ui: &mut egui::Ui, app: &mut GuiApp) {
         // Zoom & pan with scroll and drag
         if response.hovered() {
             let scroll = ui.input(|i| i.smooth_scroll_delta);
-            app.map_zoom = (app.map_zoom + scroll.y * 0.005).max(0.1).min(50.0);
+            app.map_zoom = (app.map_zoom + scroll.y * 0.005).clamp(0.1, 50.0);
         }
         if response.dragged() {
             app.map_pan += response.drag_delta();
@@ -630,7 +630,7 @@ pub fn draw_map_canvas(ui: &mut egui::Ui, app: &mut GuiApp) {
             painter.line_segment([a, b], egui::Stroke::new(app.map_edge_width, color));
         }
 
-        let node_radius = (2.0 * app.map_zoom).max(0.8).min(6.0);
+        let node_radius = (2.0 * app.map_zoom).clamp(0.8, 6.0);
         let node_color = egui::Color32::from_rgb(100, 180, 255);
         let circuit_node_color = egui::Color32::from_rgb(255, 220, 80);
 
@@ -638,7 +638,7 @@ pub fn draw_map_canvas(ui: &mut egui::Ui, app: &mut GuiApp) {
             let on_circuit = app
                 .cpp_output
                 .as_ref()
-                .map_or(false, |o| o.circuit.contains(&(i as u32)));
+                .is_some_and(|o| o.circuit.contains(&(i as u32)));
             painter.circle_filled(*pt, node_radius, if on_circuit { circuit_node_color } else { node_color });
         }
 
