@@ -36,6 +36,7 @@ path = "src/bin/zilliz-mcp-server.rs"
 [[bin]]
 name = "web-ui"
 path = "src/bin/web_ui.rs"
+required-features = ["gui"]
 
 [dependencies]
 # TUI (feature-gated)
@@ -83,11 +84,11 @@ rstar = "0.12"
 ordered-float = "4.2"
 gdal = { version = "0.18", features = ["bindgen"], optional = true }
 
-# Web UI (eframe/egui)
-eframe = { version = "0.34.2", features = ["glow", "persistence"] }
-egui = { version = "0.34.2" }
-wasm-bindgen-futures = "0.4"
-rfd = "0.15"
+# Web UI (eframe/egui) — feature-gated
+eframe = { version = "0.34.2", features = ["glow", "persistence"], optional = true }
+egui = { version = "0.34.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+rfd = { version = "0.15", optional = true }
 
 # WASM32 target dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -105,5 +106,6 @@ strip = true
 [features]
 default = ["cli", "ml", "extract"]
 cli = ["ratatui", "crossterm", "extract", "ml"]
+gui = ["eframe", "egui", "rfd", "wasm-bindgen-futures"]
 extract = ["object_store", "parquet", "arrow", "osmpbf", "gdal", "dirs", "shellexpand", "sqlx"]
 ml = ["tokenizers", "candle-core", "candle-nn", "candle-transformers", "hf-hub"]

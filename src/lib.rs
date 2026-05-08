@@ -5,6 +5,7 @@ pub mod app;
 pub mod core;
 #[cfg(feature = "cli")]
 pub mod event;
+#[cfg(feature = "gui")]
 pub mod gui;
 #[cfg(feature = "cli")]
 pub mod ui;

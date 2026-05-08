@@ -32,7 +32,14 @@ A powerful Terminal User Interface (TUI) and Command-Line Interface (CLI) for ro
 ### From crates.io
 
 ```bash
+# TUI + CLI (default — no GUI dependencies)
 cargo install v2rmp
+
+# Include the egui desktop GUI
+cargo install v2rmp --features gui
+
+# Everything (GUI + ML + extraction)
+cargo install v2rmp --all-features
 ```
 
 ### From source
@@ -40,8 +47,22 @@ cargo install v2rmp
 ```bash
 git clone https://github.com/spacialglaciercom-lab/v2rmp.git
 cd v2rmp
+
+# TUI only
 cargo build --release
+
+# With GUI
+cargo build --release --features gui
 ```
+
+### Feature Flags
+
+| Feature    | Default | Description |
+|------------|---------|-------------|
+| `cli`      | ✅      | TUI + CLI (ratatui, crossterm) |
+| `gui`      |         | Desktop GUI with map visualization (eframe, egui, rfd) |
+| `extract`  | ✅      | Road network extraction from Overture/OSM |
+| `ml`       | ✅      | Text embeddings via candle/hf-hub |
 
 ## Modes of Operation
 
@@ -53,10 +74,10 @@ rmpca
 ```
 
 ### 2. Graphical UI (egui)
-Launch the desktop GUI with map visualization, file pickers, and all workflow views.
+Launch the desktop GUI with map visualization, file pickers, and all workflow views. Requires the `gui` feature.
 
 ```bash
-cargo run --release --bin web-ui
+cargo run --release --features gui --bin web-ui
 ```
 
 The GUI includes all the same views as the TUI — Extract, Clean, Compile, Optimize, VRP — plus an interactive map canvas with zoom/pan, native file dialogs, and a **Bounding Box Filter** on the Optimize page to limit optimization to a sub-region of a large .rmp file.
