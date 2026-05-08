@@ -12,3 +12,11 @@
 ## 2026-05-07 - [Subgraph Pruning]
 **Learning:** Extracted road networks often contain disconnected "island" subgraphs. Adding an optional graph pruning step (finding the largest connected component via BFS/DFS) directly in the `compile.rs` step ensures that the `.rmp` binary file is robust for downstream Eulerian circuit and VRP solvers. Node and Edge index mapping (`old_to_new`) must be properly handled to keep the binary graph structure valid after pruning nodes.
 **Action:** When serializing graphs to binary format, ensure isolated subgraphs can be optionally removed to guarantee solver robustness.
+
+## 2026-05-08 - [Geometric Computation Optimization]
+**Learning:** Redundant `to_radians()` conversions and trigonometric calls in large graph circuits can be a major bottleneck. Reusing bearings between adjacent segments in a circuit reduces `atan2` and trig calls by 50% during turn classification.
+**Action:** Always pre-calculate radian coordinates and reuse intermediate geometric results (like bearings) when iterating over contiguous paths or circuits.
+
+## 2026-05-08 - [Avoid Redundant Allocations]
+**Learning:** Using `std::slice::from_ref(item)` is a zero-cost way to pass a single item to a function expecting a slice, avoiding unnecessary vector allocations or clones that occur with `&[item.clone()]`.
+**Action:** Prefer `std::slice::from_ref` for performance-critical paths where single items are passed as slices.

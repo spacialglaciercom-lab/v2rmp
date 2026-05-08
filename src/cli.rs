@@ -909,7 +909,7 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
     if let Some(routes) = output.routes {
         for (i, route) in routes.iter().enumerate() {
             let path = format!("{}/vehicle_{}.gpx", args.output_dir, i + 1);
-            crate::core::optimize::write_gpx_multi(&path, &[route.clone()])?;
+            crate::core::optimize::write_gpx_multi(&path, std::slice::from_ref(route))?;
             tracing::info!("Wrote route to {}", path);
         }
     } else {
