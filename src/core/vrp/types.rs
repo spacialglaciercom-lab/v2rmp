@@ -22,6 +22,13 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Internal solve result shared across all VRP solvers.
+pub(crate) struct SolveResult {
+    pub routes: Vec<Vec<usize>>,
+    pub total_distance: f64,
+    pub total_time: f64,
+}
+
 /// A single stop in a VRP problem.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VRPSolverStop {

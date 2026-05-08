@@ -108,12 +108,7 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     lines.push(ratatui::text::Line::from(""));
 
     let status_text = format!("Status: {}", app.clean_status);
-    let status_color = match &app.clean_status {
-        Status::Ready => gray,
-        Status::Running { .. } => ratatui::style::Color::Magenta,
-        Status::Done(_) => green,
-        Status::Error(_) => ratatui::style::Color::Red,
-    };
+    let status_color = app.clean_status.color();
     lines.push(ratui_line(vec![ratatui::text::Span::styled(
         status_text,
         ratatui::style::Style::default().fg(status_color),

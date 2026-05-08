@@ -13,6 +13,8 @@ pub struct CompileRequest {
     pub compress: bool,
     pub road_classes: Vec<String>,
     pub clean_options: Option<CleanOptions>,
+    #[serde(default)]
+    pub prune_disconnected: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,9 +123,72 @@ pub fn run_compile(req: &CompileRequest) -> anyhow::Result<CompileResult> {
                 let to_node = get_or_create_node(&mut node_map, &mut nodes, lat2, lon2);
                 last_node_id = Some(to_node);
 
-                let weight_m = haversine_distance_m(lat1, lon1, lat2, lon2);
+                let weight_m = super::haversine_m(lat1, lon1, lat2, lon2);
                 edges.push((from_node, to_node, weight_m, oneway));
             }
+        }
+    }
+
+    // 4.5 Prune disconnected subgraphs
+    if req.prune_disconnected && !nodes.is_empty() {
+        let mut adj: Vec<Vec<u32>> = vec![Vec::new(); nodes.len()];
+        for &(from, to, _, _) in &edges {
+            adj[from as usize].push(to);
+            adj[to as usize].push(from);
+        }
+
+        let mut visited = vec![false; nodes.len()];
+        let mut components = Vec::new();
+
+        for i in 0..nodes.len() {
+            if !visited[i] {
+                let mut component = Vec::new();
+                let mut stack = vec![i as u32];
+                visited[i] = true;
+
+                while let Some(node) = stack.pop() {
+                    component.push(node);
+                    for &neighbor in &adj[node as usize] {
+                        if !visited[neighbor as usize] {
+                            visited[neighbor as usize] = true;
+                            stack.push(neighbor);
+                        }
+                    }
+                }
+                components.push(component);
+            }
+        }
+
+        if components.len() > 1 {
+            components.sort_by_key(|c| std::cmp::Reverse(c.len()));
+            let largest_component = &components[0];
+            let pruned_nodes_count = nodes.len() - largest_component.len();
+            tracing::info!("Pruning disconnected subgraphs: kept largest component ({} nodes), pruned {} disconnected nodes in {} smaller subgraphs", largest_component.len(), pruned_nodes_count, components.len() - 1);
+
+            let mut old_to_new = vec![None; nodes.len()];
+            let mut new_nodes = Vec::with_capacity(largest_component.len());
+            for &old_id in largest_component {
+                old_to_new[old_id as usize] = Some(new_nodes.len() as u32);
+                new_nodes.push(nodes[old_id as usize]);
+            }
+
+            let mut new_edges = Vec::new();
+            let mut pruned_edges_count = 0;
+            for &(from, to, weight, oneway) in &edges {
+                if let (Some(new_from), Some(new_to)) =
+                    (old_to_new[from as usize], old_to_new[to as usize])
+                {
+                    new_edges.push((new_from, new_to, weight, oneway));
+                } else {
+                    pruned_edges_count += 1;
+                }
+            }
+
+            tracing::info!("Pruned {} disconnected edges", pruned_edges_count);
+            nodes = new_nodes;
+            edges = new_edges;
+        } else {
+            tracing::info!("Graph is fully connected, no subgraphs to prune.");
         }
     }
 
@@ -201,18 +266,24 @@ fn get_or_create_node(
     })
 }
 
-/// Calculate haversine distance in meters between two (lat, lon) points.
-fn haversine_distance_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
-    const EARTH_RADIUS_M: f64 = 6_371_000.0;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let lat1_rad = lat1.to_radians();
-    let lat2_rad = lat2.to_radians();
-    let delta_lat = (lat2 - lat1).to_radians();
-    let delta_lon = (lon2 - lon1).to_radians();
+    #[test]
+    fn test_run_compile_error_on_missing_input() {
+        let req = CompileRequest {
+            input_geojson: "non_existent_file.geojson".to_string(),
+            output_rmp: "output.rmp".to_string(),
+            compress: false,
+            road_classes: vec![],
+            clean_options: None,
+            prune_disconnected: false,
+        };
 
-    let a = (delta_lat / 2.0).sin().powi(2)
-        + lat1_rad.cos() * lat2_rad.cos() * (delta_lon / 2.0).sin().powi(2);
-    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-
-    EARTH_RADIUS_M * c
+        let result = run_compile(&req);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Failed to open input GeoJSON"));
+    }
 }

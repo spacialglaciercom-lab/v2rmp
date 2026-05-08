@@ -27,3 +27,17 @@ extract_*.geojson
 # Backup files
 *.bak
 *.backup
+
+# Secrets / credentials
+VECTOR_DB_CONFIG.md
+zilliz_embed_pipeline.py
+cloud-vectordb-examples/
+
+# Cache
+.fastembed_cache/
+
+# Test artifacts
+test_dem.tif
+*.core
+.deepseek/
+find_duplicates.py

@@ -6,6 +6,7 @@ pub mod extract;
 pub mod file_browser;
 pub mod home;
 pub mod optimize;
+pub mod vrp;
 
 use ratatui::Frame;
 
@@ -48,6 +49,7 @@ fn draw_main(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         View::Extract => extract::draw(f, app, area),
         View::Compile => compile::draw(f, app, area),
         View::Optimize => optimize::draw(f, app, area),
+        View::Vrp => vrp::draw(f, app, area),
         View::BrowseMaps => browse_maps::draw(f, app, area),
         View::BrowseRoutes => browse_routes::draw(f, app, area),
         View::FileBrowser => file_browser::draw(f, app, area),
@@ -104,6 +106,9 @@ fn draw_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let text = match app.current_view {
         View::Home | View::Extract | View::Optimize => {
             "[q] Quit  [Esc] Home  [h/F1] Help  [↑↓] Navigate  [Enter] Select"
+        }
+        View::Vrp => {
+            "[Esc] Home  [I] Input  [W] Waypoints  [V] Vehicles  [A] Algo  [D] Depot  [Enter] Run VRP"
         }
         View::Compile => "[q] Quit  [Esc] Home  [I] Input file  [O] Output file  [Enter] Compile",
         View::BrowseMaps => {
@@ -187,6 +192,12 @@ pub fn draw_input_prompt(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         }
         crate::app::InputField::CleanInputFile => "Clean input GeoJSON file path",
         crate::app::InputField::CleanOutputFile => "Clean output GeoJSON file path",
+        crate::app::InputField::VrpInputFile => "VRP input .rmp file path",
+        crate::app::InputField::VrpOutputDir => "VRP output directory",
+        crate::app::InputField::VrpWaypointsFile => "VRP waypoints JSON file path",
+        crate::app::InputField::VrpAlgorithm => "VRP algorithm (greedy|savings|local_search|simulated_annealing)",
+        crate::app::InputField::VrpCapacity => "VRP vehicle capacity",
+        crate::app::InputField::VrpDepot => "VRP depot (lat,lon)",
     };
 
     let popup_area = ratatui::layout::Rect {
@@ -209,4 +220,79 @@ pub fn draw_input_prompt(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     .block(input_block);
 
     f.render_widget(paragraph, popup_area);
+}
+
+/// Draw a selectable list of items inside a bordered block.
+/// Used by browse_maps and browse_routes (and any future browse views).
+pub fn draw_selectable_list(
+    f: &mut Frame,
+    area: ratatui::layout::Rect,
+    title: &str,
+    items: &[String],
+    selection: usize,
+) {
+    let block = ratatui::widgets::Block::default()
+        .title(format!(" {} ({}) ", title, items.len()))
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if items.is_empty() {
+        return;
+    }
+
+    let list_items: Vec<ratatui::widgets::ListItem> = items
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let style = if i == selection {
+                ratatui::style::Style::default()
+                    .fg(ratatui::style::Color::Yellow)
+                    .add_modifier(ratatui::style::Modifier::BOLD)
+            } else {
+                ratatui::style::Style::default().fg(ratatui::style::Color::White)
+            };
+            let prefix = if i == selection { " > " } else { "   " };
+            ratatui::widgets::ListItem::new(ratatui::text::Span::styled(
+                format!("{}{}", prefix, name),
+                style,
+            ))
+        })
+        .collect();
+
+    let list = ratatui::widgets::List::new(list_items);
+    f.render_widget(list, inner);
+}
+
+pub fn draw_empty_placeholder(
+    f: &mut ratatui::Frame,
+    area: ratatui::layout::Rect,
+    title: &str,
+    empty_msg: &str,
+    action_msg: &str,
+) {
+    let block = ratatui::widgets::Block::default()
+        .title(format!(" {} ", title))
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::Cyan));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let lines = vec![
+        ratatui::text::Line::from(""),
+        ratatui::text::Line::from(empty_msg.to_string()),
+        ratatui::text::Line::from(""),
+        ratatui::text::Line::from(ratatui::text::Span::styled(
+            action_msg.to_string(),
+            ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
+        )),
+        ratatui::text::Line::from(""),
+        ratatui::text::Line::from(ratatui::text::Span::styled(
+            "(press Esc to return home)",
+            ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
+        )),
+    ];
+    let paragraph = ratatui::widgets::Paragraph::new(lines);
+    f.render_widget(paragraph, inner);
 }

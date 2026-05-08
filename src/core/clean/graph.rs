@@ -5,7 +5,7 @@ use petgraph::visit::EdgeRef;
 use serde_json::{Map, Value as JsonValue};
 use std::collections::{HashMap, HashSet};
 
-use super::super::clean::{haversine_distance_m, node_id};
+use super::super::clean::{haversine_m, node_id};
 
 #[derive(Debug, Clone)]
 pub struct Node {
@@ -46,11 +46,11 @@ pub fn build_graph(features: &[Feature], decimals: u32) -> Result<RoadGraph> {
         let mut length_m = 0.0;
         for i in 0..coords.len() - 1 {
             if coords[i].len() >= 2 && coords[i + 1].len() >= 2 {
-                length_m += haversine_distance_m(
-                    coords[i][0],
+                length_m += haversine_m(
                     coords[i][1],
-                    coords[i + 1][0],
+                    coords[i][0],
                     coords[i + 1][1],
+                    coords[i + 1][0],
                 );
             }
         }

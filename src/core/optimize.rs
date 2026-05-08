@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::time::Instant;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct TurnPenalties {
     pub left: f64,
     pub right: f64,
@@ -98,18 +98,7 @@ pub struct RmpEdge {
     pub oneway: u8,
 }
 
-// ── Haversine & turn classification ──────────────────────────────────
-
-/// Haversine distance in meters between two WGS-84 points.
-pub fn haversine_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
-    let r = 6_371_000.0;
-    let dlat = (lat2 - lat1).to_radians();
-    let dlon = (lon2 - lon1).to_radians();
-    let a = (dlat / 2.0).sin().powi(2)
-        + lat1.to_radians().cos() * lat2.to_radians().cos() * (dlon / 2.0).sin().powi(2);
-    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-    r * c
-}
+// ── Turn classification ──────────────────────────────────
 
 /// Classify a turn by bearing delta (degrees).
 /// Returns "straight", "right", "left", or "u_turn".
@@ -133,14 +122,7 @@ trait NormalizeAngle {
 impl NormalizeAngle for f64 {
     fn normalize(self, lower: f64, upper: f64) -> f64 {
         let width = upper - lower;
-        let mut val = self;
-        while val < lower {
-            val += width;
-        }
-        while val >= upper {
-            val -= width;
-        }
-        val
+        lower + (self - lower).rem_euclid(width)
     }
 }
 
@@ -216,17 +198,24 @@ pub fn read_rmp_file(data: &[u8]) -> anyhow::Result<(Vec<RmpNode>, Vec<RmpEdge>)
 
 // ── Bearing calculation ──────────────────────────────────────────────
 
-/// Calculate the initial bearing from point 1 to point 2 in degrees.
-fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
-    let dlon = (lon2 - lon1).to_radians();
-    let lat1_r = lat1.to_radians();
-    let lat2_r = lat2.to_radians();
-
+/// Radian-based bearing calculation to avoid redundant to_radians() calls.
+fn bearing_rad(lat1_r: f64, lon1_r: f64, lat2_r: f64, lon2_r: f64) -> f64 {
+    let dlon = lon2_r - lon1_r;
     let x = dlon.cos() * lat2_r.sin();
     let y = lat1_r.cos() * lat2_r.sin() - lat1_r.sin() * lat2_r.cos() * dlon.cos();
 
-    let bearing_rad = y.atan2(x);
-    (bearing_rad.to_degrees() + 360.0) % 360.0
+    let b_rad = y.atan2(x);
+    (b_rad.to_degrees() + 360.0).rem_euclid(360.0)
+}
+
+/// Radian-based haversine calculation to avoid redundant to_radians() calls.
+fn haversine_m_rad(lat1_r: f64, lon1_r: f64, lat2_r: f64, lon2_r: f64) -> f64 {
+    const R: f64 = 6_371_000.0;
+    let dlat = lat2_r - lat1_r;
+    let dlon = lon2_r - lon1_r;
+    let a = (dlat / 2.0).sin().powi(2)
+        + lat1_r.cos() * lat2_r.cos() * (dlon / 2.0).sin().powi(2);
+    R * 2.0 * a.sqrt().atan2((1.0 - a).sqrt())
 }
 
 // ── CPP internals ────────────────────────────────────────────────────
@@ -326,6 +315,12 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     }
     let odd_vertices: Vec<usize> = (0..n).filter(|&i| degrees[i] % 2 != 0).collect();
 
+    // Pre-calculate node coordinates in radians for faster bearing/haversine
+    let nodes_rad: Vec<(f64, f64)> = nodes
+        .iter()
+        .map(|n| (n.lat.to_radians(), n.lon.to_radians()))
+        .collect();
+
     // 4. Minimum weight perfect matching (greedy nearest-neighbor)
     let mut duplicate_edges: Vec<(usize, usize, f64, usize)> = Vec::new();
     let mut matched = vec![false; n];
@@ -336,7 +331,7 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     }
 
     let mut sorted_odd = odd_vertices.clone();
-    sorted_odd.sort_by(|&a, &b| nodes[a].lat.partial_cmp(&nodes[b].lat).unwrap());
+    sorted_odd.sort_by(|&a, &b| nodes[a].lat.total_cmp(&nodes[b].lat));
 
     let mut pos_in_sorted = vec![0usize; n];
     for (i, &idx) in sorted_odd.iter().enumerate() {
@@ -353,7 +348,7 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         let mut best_v = None;
         let mut best_dist = f64::MAX;
         let u_lat = nodes[u].lat;
-        let u_lon = nodes[u].lon;
+        let (u_lat_r, u_lon_r) = nodes_rad[u];
         let u_pos = pos_in_sorted[u];
 
         let mut forward_idx = u_pos + 1;
@@ -369,7 +364,8 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
                     forward_done = true;
                 } else {
                     if !matched[v] {
-                        let dist = haversine_m(u_lat, u_lon, v_lat, nodes[v].lon);
+                        let (v_lat_r, v_lon_r) = nodes_rad[v];
+                        let dist = haversine_m_rad(u_lat_r, u_lon_r, v_lat_r, v_lon_r);
                         if dist < best_dist {
                             best_dist = dist;
                             best_v = Some(v);
@@ -389,7 +385,8 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
                     backward_done = true;
                 } else {
                     if !matched[v] {
-                        let dist = haversine_m(u_lat, u_lon, v_lat, nodes[v].lon);
+                        let (v_lat_r, v_lon_r) = nodes_rad[v];
+                        let dist = haversine_m_rad(u_lat_r, u_lon_r, v_lat_r, v_lon_r);
                         if dist < best_dist {
                             best_dist = dist;
                             best_v = Some(v);
@@ -430,8 +427,10 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     let start_node = if let Some((dep_lat, dep_lon)) = req.depot {
         let mut best_node = 0;
         let mut best_dist = f64::MAX;
-        for (i, node) in nodes.iter().enumerate() {
-            let dist = haversine_m(dep_lat, dep_lon, node.lat, node.lon);
+        let d_lat_r = dep_lat.to_radians();
+        let d_lon_r = dep_lon.to_radians();
+        for (i, &(n_lat_r, n_lon_r)) in nodes_rad.iter().enumerate() {
+            let dist = haversine_m_rad(d_lat_r, d_lon_r, n_lat_r, n_lon_r);
             if dist < best_dist {
                 best_dist = dist;
                 best_node = i;
@@ -457,15 +456,15 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
             }
             stack.push((edge.to, Some(edge)));
         } else {
-            let (v_u32, e) = stack.pop().unwrap();
-            circuit_with_edges.push((v_u32, e));
+            if let Some((v_u32, e)) = stack.pop() {
+                circuit_with_edges.push((v_u32, e));
+            }
         }
     }
 
     circuit_with_edges.reverse();
-    let circuit: Vec<u32> = circuit_with_edges.iter().map(|(v, _)| *v).collect();
 
-    // 7. Compute total distance, deadhead distance, and turn summary
+    // 7. Compute total distance, deadhead distance, and turn summary in a single pass
     let mut total_distance_m = 0.0;
     let mut deadhead_distance_m = 0.0;
     let mut total_segments = 0usize;
@@ -477,8 +476,13 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     };
     let mut edge_traversal_count = vec![0u32; edges.len()];
 
-    for entry in circuit_with_edges.iter().skip(1) {
-        if let Some(e) = &entry.1 {
+    let mut last_bearing_out: Option<f64> = None;
+
+    for i in 1..circuit_with_edges.len() {
+        let prev_node_idx = circuit_with_edges[i - 1].0 as usize;
+        let curr_node_idx = circuit_with_edges[i].0 as usize;
+
+        if let Some(e) = &circuit_with_edges[i].1 {
             total_distance_m += e.weight_m;
             total_segments += 1;
             if e.edge_idx == deadhead_edge_idx {
@@ -489,37 +493,34 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
                     deadhead_distance_m += e.weight_m;
                 }
             }
-        }
-    }
 
-    // 8. Turn classification
-    if circuit.len() > 2 {
-        for i in 1..circuit.len().saturating_sub(1) {
-            let prev = circuit[i - 1] as usize;
-            let curr = circuit[i] as usize;
-            let next = circuit[i + 1] as usize;
-            if prev == curr || curr == next {
-                continue;
-            }
-            let b_in = bearing(
-                nodes[prev].lat,
-                nodes[prev].lon,
-                nodes[curr].lat,
-                nodes[curr].lon,
-            );
-            let b_out = bearing(
-                nodes[curr].lat,
-                nodes[curr].lon,
-                nodes[next].lat,
-                nodes[next].lon,
-            );
-            let b_in_reverse = (b_in + 180.0).normalize(0.0, 360.0);
-            let delta = b_out - b_in_reverse;
-            match classify_turn(delta) {
-                "left" => turns.left += 1,
-                "right" => turns.right += 1,
-                "u_turn" => turns.u_turn += 1,
-                _ => turns.straight += 1,
+            // 8. Turn classification (reusing bearings between segments)
+            if i + 1 < circuit_with_edges.len() {
+                let next_node_idx = circuit_with_edges[i + 1].0 as usize;
+
+                if prev_node_idx != curr_node_idx && curr_node_idx != next_node_idx {
+                    let b_in = last_bearing_out.unwrap_or_else(|| {
+                        let (lat1, lon1) = nodes_rad[prev_node_idx];
+                        let (lat2, lon2) = nodes_rad[curr_node_idx];
+                        bearing_rad(lat1, lon1, lat2, lon2)
+                    });
+
+                    let (lat2, lon2) = nodes_rad[curr_node_idx];
+                    let (lat3, lon3) = nodes_rad[next_node_idx];
+                    let b_out = bearing_rad(lat2, lon2, lat3, lon3);
+                    last_bearing_out = Some(b_out);
+
+                    let b_in_reverse = (b_in + 180.0).rem_euclid(360.0);
+                    let delta = b_out - b_in_reverse;
+                    match classify_turn(delta) {
+                        "left" => turns.left += 1,
+                        "right" => turns.right += 1,
+                        "u_turn" => turns.u_turn += 1,
+                        _ => turns.straight += 1,
+                    }
+                } else {
+                    last_bearing_out = None;
+                }
             }
         }
     }
@@ -534,6 +535,7 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
 
     // 10. Write route file
     if let Some(ref route_path) = req.route_file {
+        let circuit: Vec<u32> = circuit_with_edges.iter().map(|(v, _)| *v).collect();
         let route_json = serde_json::json!({
             "route": circuit,
             "total_distance_km": total_distance_m / 1000.0,
@@ -628,13 +630,29 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
     if let Some(ref routes) = output.routes {
         for route in routes {
             if route.len() > 2 {
+                let mut last_bearing_out: Option<f64> = None;
                 for i in 1..route.len() - 1 {
                     let prev = &route[i - 1];
                     let curr = &route[i];
                     let next = &route[i + 1];
-                    let b_in = bearing(prev.lat, prev.lon, curr.lat, curr.lon);
-                    let b_out = bearing(curr.lat, curr.lon, next.lat, next.lon);
-                    let b_in_rev = (b_in + 180.0) % 360.0;
+
+                    let b_in = last_bearing_out.unwrap_or_else(|| {
+                        bearing_rad(
+                            prev.lat.to_radians(),
+                            prev.lon.to_radians(),
+                            curr.lat.to_radians(),
+                            curr.lon.to_radians(),
+                        )
+                    });
+                    let b_out = bearing_rad(
+                        curr.lat.to_radians(),
+                        curr.lon.to_radians(),
+                        next.lat.to_radians(),
+                        next.lon.to_radians(),
+                    );
+                    last_bearing_out = Some(b_out);
+
+                    let b_in_rev = (b_in + 180.0).rem_euclid(360.0);
                     let delta = b_out - b_in_rev;
                     match classify_turn(delta) {
                         "left" => turns.left += 1,
@@ -667,7 +685,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
     })
 }
 
-fn write_gpx_multi(path: &str, routes: &[Vec<VRPSolverStop>]) -> anyhow::Result<()> {
+pub(crate) fn write_gpx_multi(path: &str, routes: &[Vec<VRPSolverStop>]) -> anyhow::Result<()> {
     use std::io::Write;
     let mut file = std::fs::File::create(path)?;
 
@@ -728,7 +746,7 @@ mod tests {
     }
     #[test]
     fn test_haversine_m_known_distance() {
-        let dist = haversine_m(40.7128, -74.0060, 34.0522, -118.2437);
+        let dist = crate::core::haversine_m(40.7128, -74.0060, 34.0522, -118.2437);
         assert!((dist - 3_935_000.0).abs() < 10_000.0);
     }
     #[test]
@@ -781,5 +799,24 @@ mod tests {
         let result = rt.block_on(run_optimize(&req)).unwrap();
         assert!(result.total_distance_km > 0.0);
         let _ = std::fs::remove_file(temp_path);
+    }
+
+    #[tokio::test]
+    async fn test_run_optimize_invalid_cache_file() {
+        let req = OptimizeRequest {
+            cache_file: "nonexistent_file_that_should_fail.rmp".to_string(),
+            route_file: None,
+            turn_penalties: TurnPenalties::default(),
+            depot: None,
+            oneway_mode: OnewayMode::default(),
+            mode: SolverMode::Cpp,
+            num_vehicles: 1,
+            solver_id: "default".to_string(),
+        };
+        let result = run_optimize(&req).await;
+        assert!(
+            result.is_err(),
+            "run_optimize should return an error for an invalid cache file"
+        );
     }
 }

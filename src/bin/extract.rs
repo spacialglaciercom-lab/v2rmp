@@ -41,6 +41,7 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt()
         .with_max_level(log_level)
+        .with_writer(std::io::stderr)
         .with_target(false)
         .init();
 

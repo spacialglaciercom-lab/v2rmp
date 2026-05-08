@@ -7,6 +7,7 @@ const MENU_ITEMS: &[&str] = &[
     "Clean GeoJSON (Repair & Optimize)",
     "Compile Map (GeoJSON -> .rmp)",
     "Optimize Route",
+    "VRP Solver (Multi-Vehicle)",
     "Browse Cached Maps",
     "Browse Saved Routes",
 ];

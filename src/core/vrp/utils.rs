@@ -20,23 +20,15 @@
 )]
 //! Geometric and routing utilities for VRP solvers.
 //!
-//! Provides haversine distance, distance-matrix construction, zone clustering,
+//! Provides distance-matrix construction, zone clustering,
 //! nearest-neighbor routing, 2-opt improvement, and Valhalla matrix fetching.
 
+use super::super::haversine_m;
 use super::types::{DistCell, DistMatrix, VRPSolverStop};
 
 /// Haversine distance between two WGS-84 coordinates, in km.
 pub fn haversine_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
-    let r = 6371.0;
-    let d_lat = (lat2 - lat1).to_radians();
-    let d_lon = (lon2 - lon1).to_radians();
-    let a = (d_lat / 2.0).sin() * (d_lat / 2.0).sin()
-        + lat1.to_radians().cos()
-            * lat2.to_radians().cos()
-            * (d_lon / 2.0).sin()
-            * (d_lon / 2.0).sin();
-    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-    r * c
+    haversine_m(lat1, lon1, lat2, lon2) / 1000.0
 }
 
 /// Build a full O(n²) distance/time matrix using haversine.
@@ -293,6 +285,58 @@ pub fn matrix_get_time(matrix: &DistMatrix, i: usize, j: usize) -> f64 {
         .and_then(|row| row.get(j))
         .map(|c| c.time)
         .unwrap_or(0.0)
+}
+
+pub fn build_sweep_routes(
+    matrix: &crate::core::vrp::types::DistMatrix,
+    locations: &[crate::core::vrp::types::VRPSolverStop],
+    num_vehicles: usize,
+) -> Vec<Vec<usize>> {
+    let n = locations.len();
+    if n <= 1 {
+        return vec![];
+    }
+    let depot = &locations[0];
+    let mut indices: Vec<usize> = (1..n).collect();
+    indices.sort_by(|&a, &b| {
+        let la = &locations[a];
+        let lb = &locations[b];
+        let angle_a = (la.lat - depot.lat).atan2(la.lon - depot.lon);
+        let angle_b = (lb.lat - depot.lat).atan2(lb.lon - depot.lon);
+        angle_a.partial_cmp(&angle_b).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let per_route = (indices.len() as f64 / num_vehicles as f64).ceil() as usize;
+    let mut route_indices: Vec<Vec<usize>> = Vec::new();
+
+    for v in 0..num_vehicles {
+        let start = v * per_route;
+        let end = std::cmp::min(start + per_route, indices.len());
+        if start >= indices.len() { break; }
+        let segment = &indices[start..end];
+        if segment.is_empty() { continue; }
+
+        let mut route = vec![0];
+        let mut remaining: std::collections::HashSet<usize> = segment.iter().copied().collect();
+        let mut current = 0;
+        while !remaining.is_empty() {
+            let mut best = 0;
+            let mut best_dist = f64::INFINITY;
+            for &node in &remaining {
+                let dist = crate::core::vrp::utils::matrix_get_dist(matrix, current, node);
+                if dist < best_dist {
+                    best_dist = dist;
+                    best = node;
+                }
+            }
+            remaining.remove(&best);
+            route.push(best);
+            current = best;
+        }
+        route.push(0);
+        route_indices.push(route);
+    }
+    route_indices
 }
 
 #[cfg(test)]

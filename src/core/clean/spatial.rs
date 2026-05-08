@@ -4,7 +4,7 @@ use petgraph::graph::NodeIndex;
 use rstar::{RTree, AABB};
 use std::collections::HashMap;
 
-use super::super::clean::haversine_distance_m;
+use super::super::clean::haversine_m;
 use super::graph::RoadGraph;
 
 #[derive(Debug, Clone)]
@@ -120,11 +120,11 @@ pub fn merge_nearby_nodes(
                 if nearby.idx != node_idx {
                     // Check actual distance
                     if let Some(other_node) = graph.node_weight(nearby.idx) {
-                        let dist_m = haversine_distance_m(
-                            node.lon,
+                        let dist_m = haversine_m(
                             node.lat,
-                            other_node.lon,
+                            node.lon,
                             other_node.lat,
+                            other_node.lon,
                         );
 
                         if dist_m <= node_snap_m {
@@ -228,11 +228,11 @@ pub fn merge_nearby_nodes(
                             // Recalculate length
                             let mut length_m = 0.0;
                             for i in 0..new_edge.coords.len() - 1 {
-                                length_m += haversine_distance_m(
-                                    new_edge.coords[i][0],
+                                length_m += haversine_m(
                                     new_edge.coords[i][1],
-                                    new_edge.coords[i + 1][0],
+                                    new_edge.coords[i][0],
                                     new_edge.coords[i + 1][1],
+                                    new_edge.coords[i + 1][0],
                                 );
                             }
                             new_edge.length_m = length_m;

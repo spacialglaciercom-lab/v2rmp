@@ -15,7 +15,6 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let yellow = ratatui::style::Color::Yellow;
     let gray = ratatui::style::Color::DarkGray;
     let green = ratatui::style::Color::Green;
-    let magenta = ratatui::style::Color::Magenta;
 
     let cache_display = match &app.cache_file {
         Some(p) => {
@@ -49,12 +48,7 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     };
 
     let status_text = format!("Status: {}", app.optimize_status);
-    let status_color = match &app.optimize_status {
-        crate::app::Status::Ready => gray,
-        crate::app::Status::Running { .. } => magenta,
-        crate::app::Status::Done(_) => green,
-        crate::app::Status::Error(_) => ratatui::style::Color::Red,
-    };
+    let status_color = app.optimize_status.color();
 
     let lines = vec![
         ratatui::text::Line::from(ratatui::text::Span::styled(

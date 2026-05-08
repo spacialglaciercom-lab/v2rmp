@@ -12,6 +12,7 @@ pub enum View {
     Compile,
     Clean,
     Optimize,
+    Vrp,
     BrowseMaps,
     BrowseRoutes,
     FileBrowser,
@@ -83,10 +84,10 @@ impl FileBrowser {
         self.entries.clear();
 
         // Add parent directory entry if not at root
-        if self.current_path.parent().is_some() {
+        if let Some(parent) = self.current_path.parent() {
             self.entries.push(FileEntry {
                 name: "..".to_string(),
-                path: self.current_path.parent().unwrap().to_path_buf(),
+                path: parent.to_path_buf(),
                 is_dir: true,
                 size: None,
                 modified: None,
@@ -223,6 +224,17 @@ pub enum Status {
     Error(String),
 }
 
+impl Status {
+    pub fn color(&self) -> ratatui::style::Color {
+        match self {
+            Status::Ready => ratatui::style::Color::DarkGray,
+            Status::Running { .. } => ratatui::style::Color::Magenta,
+            Status::Done(_) => ratatui::style::Color::Green,
+            Status::Error(_) => ratatui::style::Color::Red,
+        }
+    }
+}
+
 impl std::fmt::Display for Status {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -285,6 +297,12 @@ pub enum InputField {
     SolverId,
     CleanInputFile,
     CleanOutputFile,
+    VrpInputFile,
+    VrpOutputDir,
+    VrpWaypointsFile,
+    VrpAlgorithm,
+    VrpCapacity,
+    VrpDepot,
 }
 
 pub struct App {
@@ -319,6 +337,16 @@ pub struct App {
     pub num_vehicles: usize,
     pub solver_id: String,
     pub optimize_status: Status,
+
+    // VRP state
+    pub vrp_input_file: Option<String>,
+    pub vrp_output_dir: String,
+    pub vrp_vehicles: usize,
+    pub vrp_algo: String,
+    pub vrp_capacity: Option<f64>,
+    pub vrp_depots: Vec<String>,
+    pub vrp_waypoints_file: Option<String>,
+    pub vrp_status: Status,
 
     // Browse state
     pub cached_maps: Vec<String>,
@@ -372,6 +400,15 @@ impl App {
             num_vehicles: 1,
             solver_id: "clarke_wright".to_string(),
             optimize_status: Status::Ready,
+
+            vrp_input_file: None,
+            vrp_output_dir: "routes/".to_string(),
+            vrp_vehicles: 1,
+            vrp_algo: "greedy".to_string(),
+            vrp_capacity: Some(100.0),
+            vrp_depots: Vec::new(),
+            vrp_waypoints_file: None,
+            vrp_status: Status::Ready,
 
             cached_maps: Vec::new(),
             saved_routes: Vec::new(),
@@ -585,6 +622,32 @@ impl App {
                 self.clean_output_file = Some(value.clone());
                 self.log(LogLevel::Success, format!("Clean output set: {}", value));
             }
+            InputField::VrpInputFile => {
+                self.vrp_input_file = Some(value.clone());
+                self.log(LogLevel::Success, format!("VRP input set: {}", value));
+            }
+            InputField::VrpOutputDir => {
+                self.vrp_output_dir = value.clone();
+                self.log(LogLevel::Success, format!("VRP output dir: {}", value));
+            }
+            InputField::VrpWaypointsFile => {
+                self.vrp_waypoints_file = Some(value.clone());
+                self.log(LogLevel::Success, format!("VRP waypoints file: {}", value));
+            }
+            InputField::VrpAlgorithm => {
+                self.vrp_algo = value.clone();
+                self.log(LogLevel::Success, format!("VRP algorithm: {}", value));
+            }
+            InputField::VrpCapacity => {
+                if let Ok(v) = value.parse::<f64>() {
+                    self.vrp_capacity = Some(v);
+                    self.log(LogLevel::Success, format!("VRP capacity: {}", v));
+                }
+            }
+            InputField::VrpDepot => {
+                self.vrp_depots.push(value.clone());
+                self.log(LogLevel::Success, format!("VRP depot added: {}", value));
+            }
             InputField::DepotCoordinates => {
                 let parts: Vec<&str> = value.split(',').collect();
                 if parts.len() == 2 {
@@ -620,7 +683,7 @@ impl App {
     pub fn navigate_up(&mut self) {
         match self.current_view {
             View::Home => {
-                self.workflow_selection = (self.workflow_selection + 5) % 6;
+                self.workflow_selection = (self.workflow_selection + 6) % 7;
             }
             View::BrowseMaps => {
                 let max = self.cached_maps.len().max(1);
@@ -641,7 +704,7 @@ impl App {
     pub fn navigate_down(&mut self) {
         match self.current_view {
             View::Home => {
-                self.workflow_selection = (self.workflow_selection + 1) % 6;
+                self.workflow_selection = (self.workflow_selection + 1) % 7;
             }
             View::BrowseMaps => {
                 let max = self.cached_maps.len().max(1);
@@ -667,10 +730,42 @@ mod tests {
     #[test]
     fn test_app_initialization() {
         let app = App::new();
-        assert_eq!(app.current_view, View::Home);
         assert!(app.running);
+        assert_eq!(app.workflow_selection, 0);
         assert!(app.log_entries.is_empty());
+        assert_eq!(app.log_scroll, 0);
+
+        assert_eq!(app.data_source, DataSource::Osm);
         assert!(app.bounding_box.is_none());
+        assert_eq!(app.extract_status, Status::Ready);
+
+        assert!(app.input_file.is_none());
+        assert!(app.output_file.is_none());
+        assert_eq!(app.compile_status, Status::Ready);
+
+        assert_eq!(app.clean_options, CleanOptions::default());
+        assert!(app.clean_input_file.is_none());
+        assert!(app.clean_output_file.is_none());
+        assert_eq!(app.clean_status, Status::Ready);
+        assert_eq!(app.clean_selection, 0);
+
+        assert!(app.cache_file.is_none());
+        assert!(app.route_file.is_none());
+        assert_eq!(app.turn_penalties, TurnPenalties::default());
+        assert!(app.depot_coords.is_none());
+        assert_eq!(app.num_vehicles, 1);
+        assert_eq!(app.solver_id, "clarke_wright");
+        assert_eq!(app.optimize_status, Status::Ready);
+
+        assert!(app.cached_maps.is_empty());
+        assert!(app.saved_routes.is_empty());
+        assert_eq!(app.browse_selection, 0);
+
+        assert!(app.file_browser.is_none());
+
+        assert!(!app.input_mode.active);
+        assert_eq!(app.input_mode.field, InputField::BoundingBox);
+        assert!(app.input_mode.buffer.is_empty());
     }
 
     #[test]

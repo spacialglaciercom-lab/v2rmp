@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::clean::{clean_geojson, CleanOptions};
 use crate::core::compile::CompileRequest;
+use crate::core::elevation::{FuelCalculator, LocalDem};
 use crate::core::extract::{BBoxRequest, ExtractRequest, ExtractSource, RoadClass};
 use crate::core::optimize::{OnewayMode, OptimizeRequest, SolverMode, TurnPenalties};
 
@@ -38,7 +39,104 @@ enum Commands {
     List(ListArgs),
     /// Execute a JSON-encoded task plan
     Agent(AgentArgs),
+    /// Start a headless, long-running JSON-RPC/STDIO server for frontend integrations
+    Serve(ServeArgs),
+    /// Generate embeddings for text using fastembed
+    Embed(EmbedArgs),
+    /// DEM elevation queries from local GeoTIFF
+    Elevation(ElevationArgs),
 }
+
+#[derive(clap::Args, Serialize, Deserialize)]
+struct EmbedArgs {
+    /// Text to embed (can be specified multiple times)
+    #[arg(short, long, action = clap::ArgAction::Append)]
+    text: Vec<String>,
+}
+
+// ── Elevation ─────────────────────────────────────────────────────────
+
+#[derive(clap::Args, Serialize, Deserialize)]
+struct ElevationArgs {
+    /// Path to DEM GeoTIFF file
+    #[arg(short, long)]
+    dem: String,
+
+    #[command(subcommand)]
+    command: ElevationCommand,
+}
+
+#[derive(Subcommand, Serialize, Deserialize)]
+enum ElevationCommand {
+    /// Query elevation at a single LON,LAT point
+    Point(PointElevationArgs),
+    /// Query elevation at multiple points from a JSON file
+    Points(PointsElevationArgs),
+    /// Get elevation profile along a route
+    Profile(ProfileElevationArgs),
+    /// Get elevation statistics for a bounding box
+    Stats(StatsElevationArgs),
+    /// Show DEM file metadata (size, bbox, nodata)
+    Info(InfoElevationArgs),
+    /// Calculate fuel consumption from a route profile
+    Fuel(FuelElevationArgs),
+}
+
+#[derive(clap::Args, Serialize, Deserialize)]
+struct PointElevationArgs {
+    /// Longitude
+    #[arg(long, allow_hyphen_values = true)]
+    lon: f64,
+    /// Latitude
+    #[arg(long, allow_hyphen_values = true)]
+    lat: f64,
+}
+
+#[derive(clap::Args, Serialize, Deserialize)]
+struct PointsElevationArgs {
+    /// Path to JSON file with [[lon,lat],...] array (or '-' for stdin)
+    #[arg(short, long, default_value = "-")]
+    input: String,
+}
+
+#[derive(clap::Args, Serialize, Deserialize)]
+struct ProfileElevationArgs {
+    /// Path to JSON file with [[lon,lat],...] route (or '-' for stdin)
+    #[arg(short, long, default_value = "-")]
+    input: String,
+    /// Distance between samples in meters
+    #[arg(short = 's', long, default_value_t = 10.0)]
+    interval: f64,
+}
+
+#[derive(clap::Args, Serialize, Deserialize)]
+struct StatsElevationArgs {
+    /// Bounding box: MIN_LON,MIN_LAT,MAX_LON,MAX_LAT
+    #[arg(long, allow_hyphen_values = true)]
+    bbox: String,
+    /// Pixel skip for sampling (1 = every pixel, 10 = every 10th)
+    #[arg(long, default_value_t = 10)]
+    step: usize,
+}
+
+#[derive(clap::Args, Serialize, Deserialize)]
+struct InfoElevationArgs;
+
+#[derive(clap::Args, Serialize, Deserialize)]
+struct FuelElevationArgs {
+    /// Path to JSON file with [[lon,lat],...] route (or '-' for stdin)
+    #[arg(short, long, default_value = "-")]
+    input: String,
+    /// Distance between samples in meters
+    #[arg(short = 's', long, default_value_t = 10.0)]
+    interval: f64,
+    /// Base fuel consumption in L/km
+    #[arg(long, default_value_t = 0.35)]
+    base_consumption: f64,
+}
+
+#[derive(clap::Args)]
+struct ServeArgs {}
 
 #[derive(clap::Args)]
 struct ListArgs {
@@ -70,6 +168,8 @@ enum AgentTask {
     Optimize(OptimizeArgs),
     Vrp(VrpArgs),
     Pipeline(PipelineArgs),
+    Embed(EmbedArgs),
+    Elevation(ElevationArgs),
 }
 
 // ── VRP ───────────────────────────────────────────────────────────────
@@ -254,6 +354,11 @@ struct CompileArgs {
     #[arg(long)]
     #[serde(default)]
     clean: bool,
+
+    /// Prune disconnected subgraphs
+    #[arg(long)]
+    #[serde(default)]
+    prune_disconnected: bool,
 }
 
 // ── Clean ─────────────────────────────────────────────────────────────
@@ -406,6 +511,11 @@ struct PipelineArgs {
     #[arg(long)]
     #[serde(default, deserialize_with = "deserialize_depot_opt")]
     depot: Option<String>,
+
+    /// Prune disconnected subgraphs during compilation
+    #[arg(long)]
+    #[serde(default)]
+    prune_disconnected: bool,
 }
 
 #[derive(Serialize)]
@@ -563,6 +673,7 @@ fn run_compile_cmd(args: CompileArgs, json: bool) -> Result<()> {
         compress: false,
         road_classes: vec![],
         clean_options,
+        prune_disconnected: args.prune_disconnected,
     };
 
     let result = crate::core::compile::run_compile(&req)?;
@@ -712,7 +823,18 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
+impl VrpAlgorithm {
+    fn to_solver_id(&self) -> &'static str {
+        match self {
+            VrpAlgorithm::Greedy => "default",
+            VrpAlgorithm::Savings => "clarke_wright",
+            VrpAlgorithm::LocalSearch => "two_opt",
+            VrpAlgorithm::SimulatedAnnealing => "or_opt",
+        }
+    }
+}
+
+async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
     tracing::info!("VRP solving requested for {}", args.input);
     tracing::info!("Algorithm: {:?}", args.algo);
     tracing::info!(
@@ -723,17 +845,76 @@ fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
     );
 
     // Parse all depots
-    let _depots: Vec<(f64, f64)> = args
+    let depots: Vec<(f64, f64)> = args
         .depot
         .iter()
         .map(|s| parse_depot(s))
         .collect::<Result<Vec<_>>>()?;
 
-    // Placeholder for actual VRP logic
-    tracing::warn!(
-        "VRP implementation ({:?}) is currently a wireframe.",
-        args.algo
-    );
+    if depots.is_empty() {
+        anyhow::bail!("At least one depot must be specified via --depot");
+    }
+
+    let mut stops = Vec::new();
+
+    // 1. Add depot
+    stops.push(crate::core::vrp::types::VRPSolverStop {
+        lat: depots[0].0,
+        lon: depots[0].1,
+        label: "Depot".into(),
+        demand: Some(0.0),
+        arrival_time: None,
+    });
+
+    // 2. Add waypoints
+    if let Some(wp_path) = args.waypoints {
+        let wp_data = std::fs::read_to_string(&wp_path).context("Failed to read waypoints file")?;
+        // We will try to parse an array of [lat, lon]
+        let points: Vec<[f64; 2]> = serde_json::from_str(&wp_data).context("Waypoints must be a JSON array of [lat, lon]")?;
+        for (i, p) in points.into_iter().enumerate() {
+            stops.push(crate::core::vrp::types::VRPSolverStop {
+                lat: p[0],
+                lon: p[1],
+                label: format!("WP {}", i),
+                demand: Some(1.0),
+                arrival_time: None,
+            });
+        }
+    } else {
+        anyhow::bail!("--waypoints JSON file is required for VRP to define the delivery stops");
+    }
+
+    let solver_id = args.algo.to_solver_id();
+    let capacity = args.capacity.unwrap_or(100.0);
+
+    let matrix = crate::core::vrp::utils::build_haversine_matrix(&stops, 40.0);
+
+    let vrp_input = crate::core::vrp::types::VRPSolverInput {
+        locations: stops,
+        num_vehicles: args.vehicles,
+        vehicle_capacity: capacity,
+        objective: crate::core::vrp::types::VrpObjective::MinDistance,
+        matrix: Some(matrix),
+        service_time_secs: Some(30.0),
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+    };
+
+    let output = crate::core::vrp::registry::solve_with(solver_id, &vrp_input).await
+        .map_err(|e| anyhow::anyhow!("VRP Solver error: {}", e))?;
+
+    std::fs::create_dir_all(&args.output_dir)?;
+
+    if let Some(routes) = output.routes {
+        for (i, route) in routes.iter().enumerate() {
+            let path = format!("{}/vehicle_{}.gpx", args.output_dir, i + 1);
+            crate::core::optimize::write_gpx_multi(&path, std::slice::from_ref(route))?;
+            tracing::info!("Wrote route to {}", path);
+        }
+    } else {
+        tracing::warn!("No routes produced by VRP solver.");
+    }
 
     Ok(())
 }
@@ -794,6 +975,7 @@ async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         compress: false,
         road_classes: vec![],
         clean_options: None,
+        prune_disconnected: args.prune_disconnected,
     };
     let compile_result = crate::core::compile::run_compile(&compile_req)
         .context("Pipeline failed at stage 'compile'")?;
@@ -871,9 +1053,81 @@ async fn run_agent_cmd(args: AgentArgs, json: bool) -> Result<()> {
         AgentTask::Compile(a) => run_compile_cmd(a, json),
         AgentTask::Clean(a) => run_clean_cmd(a, json),
         AgentTask::Optimize(a) => run_optimize_cmd(a, json).await,
-        AgentTask::Vrp(a) => run_vrp_cmd(a, json),
+        AgentTask::Vrp(a) => run_vrp_cmd(a, json).await,
         AgentTask::Pipeline(a) => run_pipeline_cmd(a, json).await,
+        AgentTask::Embed(a) => run_embed_cmd(a, json).await,
+        AgentTask::Elevation(a) => run_elevation_cmd(a, json),
     }
+}
+async fn run_serve_cmd(_args: ServeArgs) -> Result<()> {
+    use std::io::BufRead;
+
+    #[derive(Serialize)]
+    struct ErrorResponse {
+        error: String,
+    }
+
+    tracing::info!("Headless engine started. Listening on stdin for JSON-RPC/STDIO tasks...");
+
+    let stdin = std::io::stdin();
+    for line_result in stdin.lock().lines() {
+        let line = match line_result {
+            Ok(l) => l,
+            Err(e) => {
+                tracing::error!("Failed to read stdin: {}", e);
+                break;
+            }
+        };
+
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        match serde_json::from_str::<AgentTask>(&line) {
+            Ok(task) => {
+                let res = match task {
+                    AgentTask::Extract(a) => run_extract_cmd(a, true).await,
+                    AgentTask::Compile(a) => run_compile_cmd(a, true),
+                    AgentTask::Clean(a) => run_clean_cmd(a, true),
+                    AgentTask::Optimize(a) => run_optimize_cmd(a, true).await,
+                    AgentTask::Vrp(a) => run_vrp_cmd(a, true).await,
+                    AgentTask::Pipeline(a) => run_pipeline_cmd(a, true).await,
+                    AgentTask::Embed(a) => run_embed_cmd(a, true).await,
+                    AgentTask::Elevation(a) => run_elevation_cmd(a, true),
+                };
+                if let Err(e) = res {
+                    let _ = output_json(&ErrorResponse {
+                        error: format!("Task failed: {}", e),
+                    });
+                }
+            }
+            Err(e) => {
+                let _ = output_json(&ErrorResponse {
+                    error: format!("Failed to parse agent task JSON: {}", e),
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_embed_cmd(args: EmbedArgs, json: bool) -> Result<()> {
+    if !json {
+        tracing::info!("Generating embeddings for {} texts...", args.text.len());
+    }
+
+    let embeddings = crate::core::embed::run_embed(args.text)?;
+
+    if json {
+        output_json(&embeddings)?;
+    } else {
+        for (i, emb) in embeddings.iter().enumerate() {
+            tracing::info!("Embedding {}: dimension {}, first few values: {:?}", i, emb.len(), &emb[..5.min(emb.len())]);
+        }
+    }
+
+    Ok(())
 }
 
 fn run_list_cmd(args: ListArgs, json: bool) -> Result<()> {
@@ -902,12 +1156,135 @@ fn run_list_cmd(args: ListArgs, json: bool) -> Result<()> {
     if json {
         output_json(&files)?;
     } else {
-        println!("Available {:?}:", args.resource);
+        eprintln!("Available {:?}:", args.resource);
         for f in files {
-            println!("  - {f}");
+            eprintln!("  - {f}");
         }
     }
     Ok(())
+}
+
+// ── Elevation handler ─────────────────────────────────────────────────
+
+fn run_elevation_cmd(args: ElevationArgs, json: bool) -> Result<()> {
+    let dem_path = std::path::Path::new(&args.dem);
+    if !json {
+        tracing::info!("Opening DEM: {}", dem_path.display());
+    }
+    let dem = LocalDem::open(dem_path)?;
+
+    match args.command {
+        ElevationCommand::Point(p) => {
+            let result = dem.get_elevation(p.lon, p.lat)?;
+            if json {
+                #[derive(Serialize)]
+                struct Out {
+                    lon: f64,
+                    lat: f64,
+                    elevation: Option<f64>,
+                    has_coverage: bool,
+                }
+                output_json(&Out {
+                    lon: p.lon,
+                    lat: p.lat,
+                    elevation: result,
+                    has_coverage: result.is_some(),
+                })?;
+            } else {
+                match result {
+                    Some(e) => println!("Elevation at ({}, {}): {:.2} m", p.lon, p.lat, e),
+                    None => println!("No coverage at ({}, {})", p.lon, p.lat),
+                }
+            }
+        }
+
+        ElevationCommand::Points(p) => {
+            let points: Vec<(f64, f64)> = read_json_input(&p.input)?;
+            let elevations = dem.get_elevations(&points)?;
+            if json {
+                #[derive(Serialize)]
+                struct Out {
+                    points: Vec<(f64, f64)>,
+                    elevations: Vec<Option<f64>>,
+                }
+                output_json(&Out { points, elevations })?;
+            } else {
+                for (i, (pt, elev)) in points.iter().zip(elevations.iter()).enumerate() {
+                    match elev {
+                        Some(e) => println!("  [{}] ({}, {}): {:.2} m", i, pt.0, pt.1, e),
+                        None => println!("  [{}] ({}, {}): no coverage", i, pt.0, pt.1),
+                    }
+                }
+            }
+        }
+
+        ElevationCommand::Profile(p) => {
+            let route: Vec<(f64, f64)> = read_json_input(&p.input)?;
+            let profile = dem.route_profile(&route, p.interval)?;
+            if json {
+                output_json(&profile)?;
+            } else {
+                println!("Route Elevation Profile:");
+                println!("  Distance: {:.2} km", profile.distance_km);
+                println!("  Elevation: {:.1} - {:.1} m (avg {:.1} m)", profile.min_elevation, profile.max_elevation, profile.avg_elevation);
+                println!("  Ascent: {:.1} m, Descent: {:.1} m", profile.total_ascent, profile.total_descent);
+                println!("  Sample points: {}", profile.points.len());
+            }
+        }
+
+        ElevationCommand::Stats(s) => {
+            let (min_lon, min_lat, max_lon, max_lat) = parse_bbox(&s.bbox)?;
+            let bbox = crate::core::elevation::BBox { min_lon, min_lat, max_lon, max_lat };
+            let stats = dem.bbox_stats(bbox, s.step)?;
+            if json {
+                output_json(&stats)?;
+            } else {
+                println!("Elevation Stats:");
+                println!("  Range: {:.1} - {:.1} m (avg {:.1} m)", stats.min_elevation, stats.max_elevation, stats.avg_elevation);
+                println!("  Coverage: {:.1}%", stats.coverage_percent);
+                println!("  Valid pixels: {}", stats.pixel_count);
+            }
+        }
+
+        ElevationCommand::Info(_) => {
+            let info = dem.info();
+            if json {
+                output_json(&info)?;
+            } else {
+                println!("DEM Info:");
+                println!("  Size: {} x {} pixels", info.width, info.height);
+                println!("  BBox: [{:.4}, {:.4}, {:.4}, {:.4}]", info.bbox.min_lon, info.bbox.min_lat, info.bbox.max_lon, info.bbox.max_lat);
+                println!("  Pixel size: {:.6} x {:.6}", info.pixel_size_x, info.pixel_size_y);
+                println!("  NoData: {:?}", info.nodata);
+            }
+        }
+
+        ElevationCommand::Fuel(f) => {
+            let route: Vec<(f64, f64)> = read_json_input(&f.input)?;
+            let profile = dem.route_profile(&route, f.interval)?;
+            let fuel = FuelCalculator::calculate(&profile, f.base_consumption);
+            if json {
+                output_json(&fuel)?;
+            } else {
+                println!("Fuel Consumption:");
+                println!("  Total: {:.2} L", fuel.total_fuel_l);
+                println!("  Avg: {:.3} L/km", fuel.avg_consumption_l_per_km);
+                println!("  Elevation penalty: {:.2} L", fuel.elevation_penalty_l);
+                println!("  Elevation benefit: {:.2} L", fuel.elevation_benefit_l);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn read_json_input<T: serde::de::DeserializeOwned>(path: &str) -> Result<T> {
+    let input: Box<dyn std::io::Read> = if path == "-" {
+        Box::new(std::io::stdin())
+    } else {
+        Box::new(std::fs::File::open(path)?)
+    };
+    Ok(serde_json::from_reader(input)?)
 }
 
 // ── Entry point ───────────────────────────────────────────────────────
@@ -921,10 +1298,13 @@ pub async fn run() -> Result<()> {
         Commands::Compile(args) => run_compile_cmd(args, cli.json),
         Commands::Clean(args) => run_clean_cmd(args, cli.json),
         Commands::Optimize(args) => run_optimize_cmd(args, cli.json).await,
-        Commands::Vrp(args) => run_vrp_cmd(args, cli.json),
+        Commands::Vrp(args) => run_vrp_cmd(args, cli.json).await,
         Commands::Pipeline(args) => run_pipeline_cmd(args, cli.json).await,
         Commands::List(args) => run_list_cmd(args, cli.json),
         Commands::Agent(args) => run_agent_cmd(args, cli.json).await,
+        Commands::Serve(args) => run_serve_cmd(args).await,
+        Commands::Embed(args) => run_embed_cmd(args, cli.json).await,
+        Commands::Elevation(args) => run_elevation_cmd(args, cli.json),
     };
 
     if let Err(e) = result {
