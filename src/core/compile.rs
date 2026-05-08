@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::time::Instant;
 
-use super::clean::{clean_geojson, CleanOptions, CleanStats};
+use super::clean::{clean_geojson, CleanOptions};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompileRequest {
@@ -69,44 +69,9 @@ pub fn run_compile(req: &CompileRequest) -> anyhow::Result<CompileResult> {
     })
 }
 
-/// Compile a GeoJSON byte slice into a `.rmp` binary blob (in-memory).
-///
-/// Returns the compiled `.rmp` bytes and counts. No filesystem access.
-pub fn compile_geojson_bytes(
-    geojson_bytes: &[u8],
-    clean_options: Option<&CleanOptions>,
-    prune_disconnected: bool,
-) -> anyhow::Result<(Vec<u8>, CompileResult)> {
-    let start = Instant::now();
-    let input_size_bytes = geojson_bytes.len() as u64;
-
-    let mut geojson: geojson::FeatureCollection = serde_json::from_slice(geojson_bytes)
-        .with_context(|| "Failed to parse GeoJSON FeatureCollection")?;
-
-    if let Some(clean_opts) = clean_options {
-        let (cleaned_fc, _stats, _warnings) =
-            clean_geojson(&geojson, clean_opts).with_context(|| "Failed to clean GeoJSON")?;
-        geojson = cleaned_fc;
-    }
-
-    let (buf, node_count, edge_count) =
-        build_rmp_buffer(&geojson, prune_disconnected)?;
-
-    let output_size_bytes = buf.len() as u64;
-    let elapsed_ms = start.elapsed().as_millis() as u64;
-
-    Ok((buf, CompileResult {
-        input_size_bytes,
-        output_size_bytes,
-        node_count,
-        edge_count,
-        elapsed_ms,
-    }))
-}
-
 /// Build a `.rmp` binary buffer from a parsed GeoJSON FeatureCollection.
 ///
-/// Shared by both `run_compile` and `compile_geojson_bytes`.
+/// Shared by `run_compile` (and the in-memory compile path).
 fn build_rmp_buffer(
     geojson: &geojson::FeatureCollection,
     prune_disconnected: bool,

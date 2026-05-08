@@ -32,7 +32,7 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
                 );
             }
             ui.horizontal(|ui| {
-                ui.label("min_lat,min_lon,max_lat,max_lon:");
+                ui.label("min_lon,min_lat,max_lon,max_lat:");
                 let response = ui.text_edit_singleline(&mut app.bbox_input);
                 if ui.button("Set BBox").clicked() || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
                     if let Some(bbox) = parse_bbox(&app.bbox_input) {
