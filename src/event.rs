@@ -585,7 +585,7 @@ async fn handle_vrp_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                                         );
                                         match crate::core::optimize::write_gpx_multi(
                                             &path,
-                                            &[route.clone()],
+                                            std::slice::from_ref(route),
                                         ) {
                                             Ok(_) => log_routes.push(path),
                                             Err(e) => {
