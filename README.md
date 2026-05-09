@@ -24,6 +24,7 @@ A powerful Terminal User Interface (TUI) and Command-Line Interface (CLI) for ro
 - ⛰️ **Elevation & Terrain**: DEM GeoTIFF queries (point, profile, stats, fuel calculation)
 - 🧠 **Embedding Engine**: Generate text embeddings via fastembed for semantic search
 - 🌐 **Headless Server**: JSON-RPC/STDIO `serve` mode for frontend integrations
+- 🤝 **MCP Server**: Model Context Protocol server for AI agent integration (extract, compile, optimize)
 - 📁 **Resource Discovery**: `list` command to discover maps and routes programmatically
 - ⚡ **Asynchronous Runtime**: Fully non-blocking I/O with `tokio` for high-performance extraction and processing
 
@@ -115,6 +116,52 @@ rmpca optimize -i map.rmp -o route.gpx --depot "40.71,-74.01"
 | `elevation` | DEM GeoTIFF queries (point, profile, stats, fuel) |
 | `embed` | Generate text embeddings via fastembed |
 | `serve` | Headless JSON-RPC/STDIO server |
+
+### MCP Server
+
+rmpca ships an MCP (Model Context Protocol) server that exposes the route optimization pipeline as tools for AI agents (Claude Desktop, Cursor, Continue, etc.).
+
+**Start the server:**
+
+```bash
+cargo run --bin rmpca-mcp-server --release
+```
+
+**Configure in your MCP client:**
+
+```json
+{
+  "mcpServers": {
+    "rmpca": {
+      "command": "cargo",
+      "args": ["run", "--bin", "rmpca-mcp-server", "--release"]
+    }
+  }
+}
+```
+
+**Available tools:**
+
+| Tool | Description |
+|------|-------------|
+| `extract_overture` | Extract road network from Overture Maps S3 by bounding box |
+| `extract_osm` | Extract road network from OSM (local PBF or Overpass API) |
+| `compile` | Convert GeoJSON to binary `.rmp` format with optional cleaning |
+| `optimize` | Run CPP (edge coverage) or VRP (multi-vehicle) route optimization |
+
+**Example — extract, compile, and optimize a route:**
+
+```
+User:  Extract Overture data for Monaco and compile it
+Agent: [calls extract_overture with bbox 7.409,43.723,7.439,43.751]
+       → 2340 nodes, 3102 edges, 45.6 km
+       [calls compile with input → monaco.rmp]
+       → 1500 nodes, 2100 edges, 12 KB
+
+User:  Now optimize it for a sweeper route
+Agent: [calls optimize with monaco.rmp, mode=cpp]
+       → 52.3 km total, 92% efficiency, 12ms
+```
 
 ### AI Agent Task Format
 The `agent` command consumes a JSON payload, allowing agents to trigger complex workflows without manual flag management.
@@ -254,6 +301,7 @@ let output = solver.solve(&vrp_input).await?;
 - [x] **v0.4.1**: Multi-vehicle VRP CLI command operational with CSV coordinates input
 - [x] **v0.4.2**: Elevation engine (DEM GeoTIFF), Embedding engine (fastembed), Headless serve mode
 - [x] **v0.4.3**: BBox deduplication, TUI version auto-sync, FileBrowser ESC fix, CLI guard
+- [x] **v0.4.4**: MCP server for AI agent integration (extract, compile, optimize tools)
 - [ ] **v0.5.0**: Time Window support (VRPTW) and 3D terrain-aware routing
 
 ## License

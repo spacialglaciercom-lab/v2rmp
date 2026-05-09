@@ -34,6 +34,11 @@ name = "zilliz-mcp-server"
 path = "src/bin/zilliz-mcp-server.rs"
 
 [[bin]]
+name = "rmpca-mcp-server"
+path = "src/bin/rmpca-mcp-server.rs"
+required-features = ["extract"]
+
+[[bin]]
 name = "web-ui"
 path = "src/bin/web_ui.rs"
 required-features = ["gui"]
