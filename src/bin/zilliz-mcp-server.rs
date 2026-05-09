@@ -31,8 +31,7 @@ use std::io::{BufRead, Write};
 const ZILLIZ_URI: &str =
     "https://in05-895d375123308f8.serverless.aws-eu-central-1.cloud.zilliz.com";
 fn zilliz_token() -> Result<String> {
-    std::env::var("ZILLIZ_TOKEN")
-        .context("ZILLIZ_TOKEN environment variable not set")
+    std::env::var("ZILLIZ_TOKEN").context("ZILLIZ_TOKEN environment variable not set")
 }
 const OLLAMA_URL: &str = "http://localhost:11434/api/embed";
 const EMBED_MODEL: &str = "mxbai-embed-large";
@@ -106,10 +105,7 @@ struct ZillizHit {
     code: Option<String>,
 }
 
-async fn zilliz_search(
-    vector: &[f32],
-    limit: usize,
-) -> Result<Vec<ZillizHit>> {
+async fn zilliz_search(vector: &[f32], limit: usize) -> Result<Vec<ZillizHit>> {
     let client = reqwest::Client::new();
 
     let body = json!({
@@ -138,8 +134,7 @@ async fn zilliz_search(
         anyhow::bail!("Zilliz returned {status}: {text}");
     }
 
-    let mut result: ZillizSearchResp =
-        resp.json().await.context("Zilliz search response parse")?;
+    let mut result: ZillizSearchResp = resp.json().await.context("Zilliz search response parse")?;
 
     Ok(std::mem::take(&mut result.data))
 }
@@ -283,7 +278,8 @@ async fn main() -> Result<()> {
                         "and retrieves the most relevant code chunks from the Zilliz ",
                         "vector database. Returns file path, line range, code snippet, ",
                         "and L2 similarity score for each match."
-                    ).into(),
+                    )
+                    .into(),
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -305,7 +301,11 @@ async fn main() -> Result<()> {
 
             // ── tools/call ────────────────────────────────────────────
             "tools/call" => {
-                let name = req.params.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let name = req
+                    .params
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 let args = req.params.get("arguments").cloned().unwrap_or(Value::Null);
 
                 match name {
@@ -335,11 +335,7 @@ async fn main() -> Result<()> {
                         }
                     },
                     other => {
-                        send_err(
-                            &req.id,
-                            -32602,
-                            &format!("Unknown tool: {other}"),
-                        );
+                        send_err(&req.id, -32602, &format!("Unknown tool: {other}"));
                     }
                 }
             }

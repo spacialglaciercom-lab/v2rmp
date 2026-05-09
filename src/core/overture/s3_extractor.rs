@@ -46,8 +46,6 @@ pub fn segment_path() -> String {
     )
 }
 
-
-
 pub use crate::core::geo_types::BBox;
 /// Overture segment extracted from S3
 #[derive(Debug, Clone)]
