@@ -119,47 +119,57 @@ rmpca optimize -i map.rmp -o route.gpx --depot "40.71,-74.01"
 
 ### MCP Server
 
-rmpca ships an MCP (Model Context Protocol) server that exposes the route optimization pipeline as tools for AI agents (Claude Desktop, Cursor, Continue, etc.).
+rmpca ships an MCP (Model Context Protocol) server that exposes the route optimization pipeline as tools for AI agents. Compatible with Claude Desktop, Claude Code, Cursor, Continue, and any MCP-compliant client.
 
-**Start the server:**
+#### Quick Start
 
-```bash
-cargo run --bin rmpca-mcp-server --release
+1. **Add to your MCP client config.** The `cargo run` command handles building automatically — no separate build step needed.
+
+   **Claude Desktop** — edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+   ```json
+   {
+     "mcpServers": {
+       "rmpca": {
+         "command": "cargo",
+         "args": ["run", "--bin", "rmpca-mcp-server", "--release"],
+         "cwd": "/path/to/v2rmp"
+       }
+     }
+   }
+   ```
+
+   **Claude Code** — run in your project directory:
+
+   ```bash
+   claude mcp add rmpca -- cargo run --bin rmpca-mcp-server --release
+   ```
+
+   **Cursor / Continue / other clients** — add the same JSON to your client's MCP server config under `mcpServers`.
+
+2. **Restart your MCP client** (or reload the server list).
+
+3. **Ask your AI agent to use the tools.** The agent will discover all four tools automatically.
+
+#### Available Tools
+
+| Tool | Required Params | Description |
+|------|----------------|-------------|
+| `extract_overture` | `bbox` | Extract road network from Overture Maps S3 by bounding box |
+| `extract_osm` | `bbox` | Extract road network from OSM (local PBF or Overpass API) |
+| `compile` | `input`, `output` | Convert GeoJSON to binary `.rmp` format with optional cleaning |
+| `optimize` | `input` | Run CPP (edge coverage) or VRP (multi-vehicle) route optimization |
+
+#### Example Conversation
+
 ```
+User:  Extract Overture data for Monaco, compile it, and optimize a sweeper route
 
-**Configure in your MCP client:**
-
-```json
-{
-  "mcpServers": {
-    "rmpca": {
-      "command": "cargo",
-      "args": ["run", "--bin", "rmpca-mcp-server", "--release"]
-    }
-  }
-}
-```
-
-**Available tools:**
-
-| Tool | Description |
-|------|-------------|
-| `extract_overture` | Extract road network from Overture Maps S3 by bounding box |
-| `extract_osm` | Extract road network from OSM (local PBF or Overpass API) |
-| `compile` | Convert GeoJSON to binary `.rmp` format with optional cleaning |
-| `optimize` | Run CPP (edge coverage) or VRP (multi-vehicle) route optimization |
-
-**Example — extract, compile, and optimize a route:**
-
-```
-User:  Extract Overture data for Monaco and compile it
-Agent: [calls extract_overture with bbox 7.409,43.723,7.439,43.751]
-       → 2340 nodes, 3102 edges, 45.6 km
-       [calls compile with input → monaco.rmp]
+Agent: [calls extract_overture with bbox {min_lon:7.409, min_lat:43.723, max_lon:7.439, max_lat:43.751}]
+       → 2340 nodes, 3102 edges, 45.6 km → extract-output.geojson
+       [calls compile with input="extract-output.geojson", output="monaco.rmp"]
        → 1500 nodes, 2100 edges, 12 KB
-
-User:  Now optimize it for a sweeper route
-Agent: [calls optimize with monaco.rmp, mode=cpp]
+       [calls optimize with input="monaco.rmp", mode="cpp"]
        → 52.3 km total, 92% efficiency, 12ms
 ```
 
