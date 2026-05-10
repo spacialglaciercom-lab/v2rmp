@@ -150,8 +150,6 @@ pub struct RmpEdge {
 
 // ── Turn classification ──────────────────────────────────
 
-pub(crate) use super::haversine_m;
-
 /// Classify a turn by bearing delta (degrees).
 /// Returns "straight", "right", "left", or "u_turn".
 pub fn classify_turn(bearing_delta: f64) -> &'static str {
@@ -263,14 +261,41 @@ fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let lat1_r = lat1.to_radians();
     let lat2_r = lat2.to_radians();
 
-    let x = dlon.cos() * lat2_r.sin();
-    let y = lat1_r.cos() * lat2_r.sin() - lat1_r.sin() * lat2_r.cos() * dlon.cos();
+    let y = dlon.sin() * lat2_r.cos();
+    let x = lat1_r.cos() * lat2_r.sin() - lat1_r.sin() * lat2_r.cos() * dlon.cos();
 
     let bearing_rad = y.atan2(x);
     (bearing_rad.to_degrees() + 360.0) % 360.0
 }
 
+/// Haversine distance in meters using pre-calculated radian values.
+fn haversine_m_rad(n1: &RmpNodeRad, n2: &RmpNodeRad) -> f64 {
+    const R: f64 = 6_371_000.0;
+    let dlat = n2.lat_rad - n1.lat_rad;
+    let dlon = n2.lon_rad - n1.lon_rad;
+    let a = (dlat / 2.0).sin().powi(2)
+        + n1.cos_lat * n2.cos_lat * (dlon / 2.0).sin().powi(2);
+    R * 2.0 * a.sqrt().atan2((1.0 - a).sqrt())
+}
+
+/// Initial bearing in degrees using pre-calculated radian values.
+fn bearing_rad(n1: &RmpNodeRad, n2: &RmpNodeRad) -> f64 {
+    let dlon = n2.lon_rad - n1.lon_rad;
+    let y = dlon.sin() * n2.cos_lat;
+    let x = n1.cos_lat * n2.sin_lat - n1.sin_lat * n2.cos_lat * dlon.cos();
+    let b_rad = y.atan2(x);
+    (b_rad.to_degrees() + 360.0) % 360.0
+}
+
 // ── CPP internals ────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy)]
+struct RmpNodeRad {
+    lat_rad: f64,
+    lon_rad: f64,
+    sin_lat: f64,
+    cos_lat: f64,
+}
 
 #[derive(Debug, Clone, Copy)]
 struct AdjEntry {
@@ -296,6 +321,16 @@ pub struct CppOutput {
 /// Returns a `CppOutput` with both summary statistics and the full circuit.
 pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot: Option<(f64, f64)>) -> anyhow::Result<CppOutput> {
     let start = Instant::now();
+
+    let nodes_rad: Vec<RmpNodeRad> = nodes.iter().map(|n| {
+        let lat_rad = n.lat.to_radians();
+        RmpNodeRad {
+            lat_rad,
+            lon_rad: n.lon.to_radians(),
+            sin_lat: lat_rad.sin(),
+            cos_lat: lat_rad.cos(),
+        }
+    }).collect();
 
     if nodes.is_empty() || edges.is_empty() {
         return Ok(CppOutput {
@@ -374,7 +409,6 @@ pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot
         let mut best_v = None;
         let mut best_dist = f64::MAX;
         let u_lat = nodes[u].lat;
-        let u_lon = nodes[u].lon;
         let u_pos = pos_in_sorted[u];
 
         let mut forward_idx = u_pos + 1;
@@ -389,7 +423,7 @@ pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot
                 if (v_lat - u_lat) * METERS_PER_LAT_DEGREE >= best_dist {
                     forward_done = true;
                 } else if !matched[v] {
-                    let dist = haversine_m(u_lat, u_lon, v_lat, nodes[v].lon);
+                    let dist = haversine_m_rad(&nodes_rad[u], &nodes_rad[v]);
                     if dist < best_dist { best_dist = dist; best_v = Some(v); }
                 }
                 forward_idx += 1;
@@ -402,7 +436,7 @@ pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot
                 if (u_lat - v_lat) * METERS_PER_LAT_DEGREE >= best_dist {
                     backward_done = true;
                 } else if !matched[v] {
-                    let dist = haversine_m(u_lat, u_lon, v_lat, nodes[v].lon);
+                    let dist = haversine_m_rad(&nodes_rad[u], &nodes_rad[v]);
                     if dist < best_dist { best_dist = dist; best_v = Some(v); }
                 }
                 if backward_idx == 0 { backward_done = true; } else { backward_idx -= 1; }
@@ -425,10 +459,19 @@ pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot
 
     // Find Eulerian circuit using Hierholzer's algorithm
     let start_node = if let Some((dep_lat, dep_lon)) = depot {
+        let dep_lat_rad = dep_lat.to_radians();
+        let dep_lon_rad = dep_lon.to_radians();
+        let dep_node = RmpNodeRad {
+            lat_rad: dep_lat_rad,
+            lon_rad: dep_lon_rad,
+            sin_lat: dep_lat_rad.sin(),
+            cos_lat: dep_lat_rad.cos(),
+        };
+
         let mut best_node = 0;
         let mut best_dist = f64::MAX;
-        for (i, node) in nodes.iter().enumerate() {
-            let dist = haversine_m(dep_lat, dep_lon, node.lat, node.lon);
+        for (i, n_rad) in nodes_rad.iter().enumerate() {
+            let dist = haversine_m_rad(&dep_node, n_rad);
             if dist < best_dist { best_dist = dist; best_node = i; }
         }
         best_node
@@ -482,21 +525,24 @@ pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot
 
     // Turn classification
     if circuit.len() > 2 {
-        for i in 1..circuit.len().saturating_sub(1) {
+        let mut b_in = None;
+        for i in 1..circuit.len() {
             let prev = circuit[i - 1] as usize;
             let curr = circuit[i] as usize;
-            let next = circuit[i + 1] as usize;
-            if prev == curr || curr == next { continue; }
-            let b_in = bearing(nodes[prev].lat, nodes[prev].lon, nodes[curr].lat, nodes[curr].lon);
-            let b_out = bearing(nodes[curr].lat, nodes[curr].lon, nodes[next].lat, nodes[next].lon);
-            let b_in_reverse = (b_in + 180.0).normalize(0.0, 360.0);
-            let delta = b_out - b_in_reverse;
-            match classify_turn(delta) {
-                "left" => turns.left += 1,
-                "right" => turns.right += 1,
-                "u_turn" => turns.u_turn += 1,
-                _ => turns.straight += 1,
+            if prev == curr {
+                continue;
             }
+            let b_out = bearing_rad(&nodes_rad[prev], &nodes_rad[curr]);
+            if let Some(in_bearing) = b_in {
+                let delta = b_out - in_bearing;
+                match classify_turn(delta) {
+                    "left" => turns.left += 1,
+                    "right" => turns.right += 1,
+                    "u_turn" => turns.u_turn += 1,
+                    _ => turns.straight += 1,
+                }
+            }
+            b_in = Some(b_out);
         }
     }
 
@@ -633,8 +679,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
                     let next = &route[i + 1];
                     let b_in = bearing(prev.lat, prev.lon, curr.lat, curr.lon);
                     let b_out = bearing(curr.lat, curr.lon, next.lat, next.lon);
-                    let b_in_rev = (b_in + 180.0) % 360.0;
-                    let delta = b_out - b_in_rev;
+                    let delta = b_out - b_in;
                     match classify_turn(delta) {
                         "left" => turns.left += 1,
                         "right" => turns.right += 1,

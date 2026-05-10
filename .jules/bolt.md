@@ -20,3 +20,7 @@
 ## 2026-05-08 - [Avoid Redundant Allocations]
 **Learning:** Using `std::slice::from_ref(item)` is a zero-cost way to pass a single item to a function expecting a slice, avoiding unnecessary vector allocations or clones that occur with `&[item.clone()]`.
 **Action:** Prefer `std::slice::from_ref` for performance-critical paths where single items are passed as slices.
+
+## 2026-05-10 - [Geographic Formula Integrity]
+**Learning:** Even well-known formulas like initial bearing can be subtly incorrect in implementation (e.g., using `dlon.cos()` instead of `dlon.sin()` for the Y component), leading to widespread metric errors like classifying all straight paths as U-turns. Performance optimization is futile if the underlying math is incorrect.
+**Action:** Always validate the mathematical correctness of geographic primitives using known test patterns (like a grid) before and after optimizing them.
