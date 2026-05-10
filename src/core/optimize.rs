@@ -349,7 +349,7 @@ pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot
     }
     let odd_vertices: Vec<usize> = (0..n).filter(|&i| !degrees[i].is_multiple_of(2)).collect();
 
-    // Minimum weight perfect matching (greedy nearest-neighbor)
+    // Minimum weight perfect matching (greedy nearest-neighbor using Dijkstra)
     let mut duplicate_edges: Vec<(usize, usize, f64, usize)> = Vec::new();
     let mut matched = vec![false; n];
     for i in 0..n {
@@ -358,61 +358,69 @@ pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot
         }
     }
 
-    let mut sorted_odd = odd_vertices.clone();
-    sorted_odd.sort_by(|&a, &b| nodes[a].lat.total_cmp(&nodes[b].lat));
+    use std::collections::BinaryHeap;
+    use std::cmp::Ordering;
 
-    let mut pos_in_sorted = vec![0usize; n];
-    for (i, &idx) in sorted_odd.iter().enumerate() {
-        pos_in_sorted[idx] = i;
+    #[derive(Copy, Clone, PartialEq)]
+    struct State {
+        cost: f64,
+        position: usize,
     }
-
-    const METERS_PER_LAT_DEGREE: f64 = 111_111.0;
+    impl Eq for State {}
+    impl Ord for State {
+        fn cmp(&self, other: &Self) -> Ordering {
+            other.cost.partial_cmp(&self.cost).unwrap_or(Ordering::Equal)
+        }
+    }
+    impl PartialOrd for State {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
 
     for &u in &odd_vertices {
         if matched[u] { continue; }
 
+        let mut dists = vec![f64::MAX; n];
+        let mut prev = vec![None; n];
+        let mut heap = BinaryHeap::new();
+
+        dists[u] = 0.0;
+        heap.push(State { cost: 0.0, position: u });
+
         let mut best_v = None;
-        let mut best_dist = f64::MAX;
-        let u_lat = nodes[u].lat;
-        let u_lon = nodes[u].lon;
-        let u_pos = pos_in_sorted[u];
 
-        let mut forward_idx = u_pos + 1;
-        let mut backward_idx = u_pos.wrapping_sub(1);
-        let mut forward_done = forward_idx >= sorted_odd.len();
-        let mut backward_done = u_pos == 0;
+        while let Some(State { cost, position }) = heap.pop() {
+            if cost > dists[position] { continue; }
 
-        while !forward_done || !backward_done {
-            if !forward_done {
-                let v = sorted_odd[forward_idx];
-                let v_lat = nodes[v].lat;
-                if (v_lat - u_lat) * METERS_PER_LAT_DEGREE >= best_dist {
-                    forward_done = true;
-                } else if !matched[v] {
-                    let dist = haversine_m(u_lat, u_lon, v_lat, nodes[v].lon);
-                    if dist < best_dist { best_dist = dist; best_v = Some(v); }
-                }
-                forward_idx += 1;
-                if forward_idx >= sorted_odd.len() { forward_done = true; }
+            if position != u && !matched[position] {
+                best_v = Some(position);
+                break;
             }
 
-            if !backward_done {
-                let v = sorted_odd[backward_idx];
-                let v_lat = nodes[v].lat;
-                if (u_lat - v_lat) * METERS_PER_LAT_DEGREE >= best_dist {
-                    backward_done = true;
-                } else if !matched[v] {
-                    let dist = haversine_m(u_lat, u_lon, v_lat, nodes[v].lon);
-                    if dist < best_dist { best_dist = dist; best_v = Some(v); }
+            for edge in &adj[position] {
+                let next = State { cost: cost + edge.weight_m, position: edge.to as usize };
+                if next.cost < dists[next.position] {
+                    dists[next.position] = next.cost;
+                    prev[next.position] = Some((position, edge.weight_m, edge.edge_idx));
+                    heap.push(next);
                 }
-                if backward_idx == 0 { backward_done = true; } else { backward_idx -= 1; }
             }
         }
 
         if let Some(v) = best_v {
             matched[u] = true;
             matched[v] = true;
-            duplicate_edges.push((u, v, best_dist, usize::MAX));
+
+            // Trace path back from v to u
+            let mut curr = v;
+            while let Some((p, weight, eidx)) = prev[curr] {
+                duplicate_edges.push((p, curr, weight, eidx));
+                curr = p;
+            }
+        } else {
+            // Fallback: If disconnected, just skip (graph must be disconnected)
+            matched[u] = true;
         }
     }
 
@@ -539,14 +547,18 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     let output = solve_cpp(&nodes, &edges, req.oneway_mode, req.depot)?;
 
     if let Some(ref route_path) = req.route_file {
-        let route_json = serde_json::json!({
-            "route": output.circuit,
-            "total_distance_km": output.summary.total_distance_km,
-            "deadhead_distance_km": output.summary.deadhead_distance_km,
-            "efficiency_pct": output.summary.efficiency_pct,
-            "nodes": nodes.iter().enumerate().map(|(i, n)| serde_json::json!({ "id": i, "lat": n.lat, "lon": n.lon })).collect::<Vec<_>>(),
-        });
-        std::fs::write(route_path, serde_json::to_string_pretty(&route_json)?)?;
+        if route_path.ends_with(".json") {
+            let route_json = serde_json::json!({
+                "route": output.circuit,
+                "total_distance_km": output.summary.total_distance_km,
+                "deadhead_distance_km": output.summary.deadhead_distance_km,
+                "efficiency_pct": output.summary.efficiency_pct,
+                "nodes": nodes.iter().enumerate().map(|(i, n)| serde_json::json!({ "id": i, "lat": n.lat, "lon": n.lon })).collect::<Vec<_>>(),
+            });
+            std::fs::write(route_path, serde_json::to_string_pretty(&route_json)?)?;
+        } else {
+            write_gpx_cpp(route_path, &nodes, &output.circuit)?;
+        }
     }
 
     let mut result = output.summary;
@@ -1215,3 +1227,4 @@ fn test_cpp_completeness_large() {
 }
 
 }
+

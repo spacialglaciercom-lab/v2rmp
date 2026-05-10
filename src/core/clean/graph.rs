@@ -42,19 +42,6 @@ pub fn build_graph(features: &[Feature], decimals: u32) -> Result<RoadGraph> {
             continue;
         }
 
-        // Calculate length
-        let mut length_m = 0.0;
-        for i in 0..coords.len() - 1 {
-            if coords[i].len() >= 2 && coords[i + 1].len() >= 2 {
-                length_m += haversine_m(
-                    coords[i][1],
-                    coords[i][0],
-                    coords[i + 1][1],
-                    coords[i + 1][0],
-                );
-            }
-        }
-
         // Get or create nodes
         let start = &coords[0];
         let end = &coords[coords.len() - 1];
@@ -81,11 +68,35 @@ pub fn build_graph(features: &[Feature], decimals: u32) -> Result<RoadGraph> {
         });
 
         // Add edge
-        let edge_coords: Vec<[f64; 2]> = coords
+        let mut edge_coords: Vec<[f64; 2]> = coords
             .iter()
             .filter(|c| c.len() >= 2)
             .map(|c| [c[0], c[1]])
             .collect();
+
+        if edge_coords.len() < 2 {
+            continue;
+        }
+
+        // Snap edge coordinates to the exact node positions to ensure geometric connectivity matches topology
+        if let Some(start_node) = graph.node_weight(start_idx) {
+            edge_coords[0] = [start_node.lon, start_node.lat];
+        }
+        if let Some(end_node) = graph.node_weight(end_idx) {
+            let last_idx = edge_coords.len() - 1;
+            edge_coords[last_idx] = [end_node.lon, end_node.lat];
+        }
+
+        // Calculate length based on the final snapped edge coordinates
+        let mut length_m = 0.0;
+        for i in 0..edge_coords.len() - 1 {
+            length_m += haversine_m(
+                edge_coords[i][1],
+                edge_coords[i][0],
+                edge_coords[i + 1][1],
+                edge_coords[i + 1][0],
+            );
+        }
 
         let properties = feature.properties.clone().unwrap_or_default();
 
@@ -150,9 +161,16 @@ pub fn dedupe_edges(graph: &mut RoadGraph) -> usize {
             if let Some(edge) = graph.edge_weight(edge_idx) {
                 // Hash the coordinates
                 let mut hasher = DefaultHasher::new();
-                for coord in &edge.coords {
-                    coord[0].to_bits().hash(&mut hasher);
-                    coord[1].to_bits().hash(&mut hasher);
+                if a <= b {
+                    for coord in &edge.coords {
+                        coord[0].to_bits().hash(&mut hasher);
+                        coord[1].to_bits().hash(&mut hasher);
+                    }
+                } else {
+                    for coord in edge.coords.iter().rev() {
+                        coord[0].to_bits().hash(&mut hasher);
+                        coord[1].to_bits().hash(&mut hasher);
+                    }
                 }
                 let hash = hasher.finish();
 
@@ -323,7 +341,7 @@ pub fn merge_parallel_edges(graph: &mut RoadGraph, merge_properties: bool) -> us
         // Update first edge
         let first_edge_idx = edges[0];
         if let Some(edge) = graph.edge_weight_mut(first_edge_idx) {
-            edge.length_m = total_length;
+            edge.length_m = total_length / (edges.len() as f64);
             edge.properties = merged_props;
         }
 
@@ -678,9 +696,9 @@ mod tests {
         let merged = merge_parallel_edges(&mut g, true);
         assert_eq!(merged, 1);
         assert_eq!(g.edge_count(), 1);
-        // Length should be summed
+        // Length should be averaged
         let edge = g.edge_weights().next().unwrap();
-        assert_eq!(edge.length_m, 180.0);
+        assert_eq!(edge.length_m, 90.0);
         // Properties should be merged (strings joined with ";")
         assert!(edge.properties.contains_key("name"));
     }

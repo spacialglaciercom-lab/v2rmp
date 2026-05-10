@@ -90,6 +90,7 @@ struct ZillizSearchResp {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ZillizHit {
     #[serde(default)]
     #[allow(dead_code)]

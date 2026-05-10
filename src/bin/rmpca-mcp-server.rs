@@ -1,6 +1,7 @@
 //! rmpca-mcp-server — MCP server exposing the route optimization pipeline.
 //!
-//! Tools: extract_overture, extract_osm, compile, optimize
+//! Tools: extract_overture, extract_osm, compile, optimize,
+//!        clean, vrp_solve, elevation_query, elevation_profile
 //!
 //! Runs over stdio with JSON-RPC 2.0 framing (one line per message).
 //!
@@ -21,11 +22,20 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
+use std::path::Path;
+use v2rmp::core::clean::{clean_geojson, CleanOptions};
 use v2rmp::core::compile::{CompileRequest, CompileResult};
+use v2rmp::core::elevation::local::LocalDem;
 use v2rmp::core::extract::{BBoxRequest, ExtractRequest, ExtractResult, ExtractSource, RoadClass};
 use v2rmp::core::optimize::{
     OnewayMode, OptimizeRequest, OptimizeResult, SolverMode, TurnPenalties,
 };
+use v2rmp::core::vrp::registry::solve_with;
+use v2rmp::core::vrp::types::{
+    VRPSolverInput, VRPSolverStop, VrpObjective,
+};
+use v2rmp::core::vrp::utils::{build_haversine_matrix, get_valhalla_matrix};
+use v2rmp::core::elevation::{FuelCalculator};
 
 // ── JSON-RPC / MCP types ───────────────────────────────────────────────────
 
@@ -261,6 +271,415 @@ fn tool_definitions() -> Vec<ToolDef> {
                 "required": ["input"]
             }),
         },
+        // ── New tools ──────────────────────────────────────────────────────────
+        ToolDef {
+            name: "clean",
+            description: "Clean a GeoJSON road network with full control over all cleaning parameters. \
+                Runs the 11-stage cleaning pipeline: repair → build graph → remove self-loops → \
+                remove short edges → merge nearby nodes → deduplicate edges → remove edges missing attrs → \
+                merge parallel edges → remove isolates → keep largest components → export. \
+                Returns cleaned GeoJSON plus detailed statistics.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "input": {
+                        "type": "string",
+                        "description": "Path to input GeoJSON file"
+                    },
+                    "output": {
+                        "type": "string",
+                        "description": "Path to output cleaned GeoJSON file"
+                    },
+                    "make_valid": {
+                        "type": "boolean",
+                        "description": "Repair invalid geometries (default: true)"
+                    },
+                    "drop_invalid": {
+                        "type": "boolean",
+                        "description": "Drop features that cannot be repaired (default: true)"
+                    },
+                    "remove_selfloops": {
+                        "type": "boolean",
+                        "description": "Remove self-loop edges (default: true)"
+                    },
+                    "min_length_m": {
+                        "type": "number",
+                        "description": "Remove edges shorter than this in metres (default: 0.1)"
+                    },
+                    "node_snap_m": {
+                        "type": "number",
+                        "description": "Merge nodes within this distance in metres (default: 1.0)"
+                    },
+                    "node_precision_decimals": {
+                        "type": "integer",
+                        "description": "Decimal places for node ID generation (default: 6)"
+                    },
+                    "merge_node_positions": {
+                        "type": "boolean",
+                        "description": "Average coordinates when merging nodes (default: true)"
+                    },
+                    "dedupe_edges": {
+                        "type": "boolean",
+                        "description": "Remove duplicate edges (default: true)"
+                    },
+                    "remove_isolates": {
+                        "type": "boolean",
+                        "description": "Remove isolated nodes (default: true)"
+                    },
+                    "max_components": {
+                        "type": "integer",
+                        "description": "Keep only the N largest connected components (0 = keep all, default: 1)"
+                    },
+                    "required_attrs": {
+                        "type": "array",
+                        "description": "Remove edges missing any of these property names",
+                        "items": { "type": "string" }
+                    },
+                    "merge_parallel_edges": {
+                        "type": "boolean",
+                        "description": "Merge parallel edges between same nodes (default: false)"
+                    },
+                    "merge_parallel_edge_properties": {
+                        "type": "boolean",
+                        "description": "When merging parallel edges, also merge their properties (default: false)"
+                    },
+                    "property_merge_strategy": {
+                        "type": "string",
+                        "enum": ["first", "merge"],
+                        "description": "How to merge properties on parallel edges: 'first' keeps first edge's props, 'merge' combines them (default: first)"
+                    },
+                    "simplify_tolerance_m": {
+                        "type": "number",
+                        "description": "Douglas-Peucker simplification tolerance in metres (0 = no simplification, default: 0)"
+                    },
+                    "include_polygons": {
+                        "type": "boolean",
+                        "description": "Include polygon features in output (default: false)"
+                    },
+                    "include_points": {
+                        "type": "boolean",
+                        "description": "Include point features in output (default: false)"
+                    }
+                },
+                "required": ["input", "output"]
+            }),
+        },
+        ToolDef {
+            name: "vrp_solve",
+            description: "Solve a Vehicle Routing Problem (VRP) with explicit stop coordinates. \
+                Unlike the 'optimize' tool (which operates on .rmp files), this tool takes an array \
+                of stop coordinates, builds a haversine distance matrix, and dispatches to the chosen \
+                solver algorithm. Returns per-vehicle routes with stop assignments and statistics.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "stops": {
+                        "type": "array",
+                        "description": "Array of stops. The first stop is the depot.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "lat": { "type": "number", "description": "Latitude" },
+                                "lon": { "type": "number", "description": "Longitude" },
+                                "label": { "type": "string", "description": "Label for this stop (optional)" },
+                                "demand": { "type": "number", "description": "Demand at this stop (default: 1.0)" }
+                            },
+                            "required": ["lat", "lon"]
+                        }
+                    },
+                    "num_vehicles": {
+                        "type": "integer",
+                        "description": "Number of vehicles (default: 1)"
+                    },
+                    "vehicle_capacity": {
+                        "type": "number",
+                        "description": "Vehicle capacity (default: 100.0)"
+                    },
+                    "solver_id": {
+                        "type": "string",
+                        "description": "VRP solver algorithm: default, clarke_wright, sweep, two_opt, or_opt",
+                        "default": "default"
+                    },
+                    "avg_speed_kmh": {
+                        "type": "number",
+                        "description": "Average speed in km/h for time estimation (default: 40.0)"
+                    },
+                    "objective": {
+                        "type": "string",
+                        "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"],
+                        "description": "Optimization objective (default: min_distance)"
+                    }
+                },
+                "required": ["stops"]
+            }),
+        },
+        ToolDef {
+            name: "elevation_query",
+            description: "Query elevation at one or more lat/lon points from a local DEM GeoTIFF file. \
+                Uses bilinear interpolation with nearest-neighbor fallback for nodata pixels. \
+                Returns an array of elevations (or null for points outside coverage).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "dem_path": {
+                        "type": "string",
+                        "description": "Path to the DEM GeoTIFF file"
+                    },
+                    "points": {
+                        "type": "array",
+                        "description": "Array of {lon, lat} points to query",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "lon": { "type": "number" },
+                                "lat": { "type": "number" }
+                            },
+                            "required": ["lon", "lat"]
+                        }
+                    }
+                },
+                "required": ["dem_path", "points"]
+            }),
+        },
+        ToolDef {
+            name: "elevation_profile",
+            description: "Sample elevation along a route at fixed intervals from a local DEM GeoTIFF file. \
+                Returns per-sample points with distance and elevation, plus total ascent, descent, \
+                min/max/avg elevation, and total distance.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "dem_path": {
+                        "type": "string",
+                        "description": "Path to the DEM GeoTIFF file"
+                    },
+                    "route": {
+                        "type": "array",
+                        "description": "Ordered array of {lon, lat} waypoints forming the route",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "lon": { "type": "number" },
+                                "lat": { "type": "number" }
+                            },
+                            "required": ["lon", "lat"]
+                        }
+                    },
+                    "sample_interval_m": {
+                        "type": "number",
+                        "description": "Distance between elevation samples in metres (default: 100.0)"
+                    }
+                },
+                "required": ["dem_path", "route"]
+            }),
+        },
+        ToolDef {
+            name: "list_solvers",
+            description: "List available VRP solvers and their labels.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {}
+            }),
+        },
+        // ── Medium-priority tools ──────────────────────────────────────────
+        ToolDef {
+            name: "elevation_stats",
+            description: "Compute elevation statistics (min, max, avg, coverage %) within a bounding box \
+                from a DEM GeoTIFF file. Samples on a grid with configurable step size.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "dem_path": {
+                        "type": "string",
+                        "description": "Path to the DEM GeoTIFF file"
+                    },
+                    "bbox": {
+                        "type": "object",
+                        "description": "Bounding box: {min_lon, min_lat, max_lon, max_lat}",
+                        "properties": {
+                            "min_lon": { "type": "number" },
+                            "min_lat": { "type": "number" },
+                            "max_lon": { "type": "number" },
+                            "max_lat": { "type": "number" }
+                        },
+                        "required": ["min_lon", "min_lat", "max_lon", "max_lat"]
+                    },
+                    "grid_step": {
+                        "type": "integer",
+                        "description": "Pixel skip for sampling (1 = every pixel, 10 = every 10th). Default: 1",
+                        "default": 1
+                    }
+                },
+                "required": ["dem_path", "bbox"]
+            }),
+        },
+        ToolDef {
+            name: "dem_info",
+            description: "Return metadata about a DEM GeoTIFF file: width, height, bounding box, \
+                nodata value, and pixel size in degrees.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "dem_path": {
+                        "type": "string",
+                        "description": "Path to the DEM GeoTIFF file"
+                    }
+                },
+                "required": ["dem_path"]
+            }),
+        },
+        ToolDef {
+            name: "fuel_estimate",
+            description: "Calculate fuel consumption from an elevation profile. Takes an array of \
+                {distance_m, elevation_m} samples and a base consumption rate (L/km). Applies grade-based \
+                adjustments: +15% per 1% uphill grade, -5% per 1% downhill grade (capped at -20%).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "samples": {
+                        "type": "array",
+                        "description": "Array of {distance_m, elevation_m} points along the route",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "distance_m": { "type": "number", "description": "Cumulative distance in metres" },
+                                "elevation_m": { "type": "number", "description": "Elevation in metres" }
+                            },
+                            "required": ["distance_m", "elevation_m"]
+                        }
+                    },
+                    "base_consumption": {
+                        "type": "number",
+                        "description": "Base fuel consumption in L/km on flat terrain (default: 0.08, ~8L/100km)",
+                        "default": 0.08
+                    }
+                },
+                "required": ["samples"]
+            }),
+        },
+        ToolDef {
+            name: "inspect_rmp",
+            description: "Parse a .rmp binary network file and return node count, edge count, and \
+                bounding box without running optimization. Useful for validating files and inspecting \
+                network geometry.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "input": {
+                        "type": "string",
+                        "description": "Path to the .rmp binary file"
+                    }
+                },
+                "required": ["input"]
+            }),
+        },
+        ToolDef {
+            name: "pipeline",
+            description: "End-to-end route optimization pipeline: extract road network → clean → \
+                compile to .rmp binary → optimize. Runs all four stages in sequence and returns \
+                combined results. Can take significant time for large bounding boxes.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "bbox": {
+                        "type": "object",
+                        "description": "Bounding box: {min_lon, min_lat, max_lon, max_lat}",
+                        "properties": {
+                            "min_lon": { "type": "number" },
+                            "min_lat": { "type": "number" },
+                            "max_lon": { "type": "number" },
+                            "max_lat": { "type": "number" }
+                        },
+                        "required": ["min_lon", "min_lat", "max_lon", "max_lat"]
+                    },
+                    "output_dir": {
+                        "type": "string",
+                        "description": "Directory for intermediate and output files (default: ./pipeline-output)",
+                        "default": "./pipeline-output"
+                    },
+                    "source": {
+                        "type": "string",
+                        "enum": ["overture", "osm"],
+                        "description": "Data source for extraction (default: overture)"
+                    },
+                    "pbf_path": {
+                        "type": "string",
+                        "description": "Path to local OSM PBF file (OSM source only)"
+                    },
+                    "depot": {
+                        "type": "object",
+                        "description": "Depot coordinates {lat, lon}",
+                        "properties": {
+                            "lat": { "type": "number" },
+                            "lon": { "type": "number" }
+                        }
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["cpp", "vrp"],
+                        "description": "Solver mode: cpp for edge coverage, vrp for stop visits (default: cpp)"
+                    },
+                    "prune_disconnected": {
+                        "type": "boolean",
+                        "description": "Prune disconnected subgraphs during compilation (default: false)"
+                    }
+                },
+                "required": ["bbox"]
+            }),
+        },
+        ToolDef {
+            name: "haversine_distance",
+            description: "Calculate the great-circle distance between two WGS-84 lat/lon points \
+                using the haversine formula. Returns distance in metres and kilometres.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "from": {
+                        "type": "object",
+                        "description": "Origin point",
+                        "properties": {
+                            "lat": { "type": "number", "description": "Latitude in degrees" },
+                            "lon": { "type": "number", "description": "Longitude in degrees" }
+                        },
+                        "required": ["lat", "lon"]
+                    },
+                    "to": {
+                        "type": "object",
+                        "description": "Destination point",
+                        "properties": {
+                            "lat": { "type": "number", "description": "Latitude in degrees" },
+                            "lon": { "type": "number", "description": "Longitude in degrees" }
+                        },
+                        "required": ["lat", "lon"]
+                    }
+                },
+                "required": ["from", "to"]
+            }),
+        },
+        ToolDef {
+            name: "get_valhalla_matrix",
+            description: "Fetch a real-road distance/time matrix from the public Valhalla/OSRM API. \
+                Takes an array of stop coordinates and returns an NxN matrix with distance (km) and \
+                time (seconds) for each pair. Requires internet connectivity.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "locations": {
+                        "type": "array",
+                        "description": "Array of {lat, lon} coordinates",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "lat": { "type": "number" },
+                                "lon": { "type": "number" }
+                            },
+                            "required": ["lat", "lon"]
+                        }
+                    }
+                },
+                "required": ["locations"]
+            }),
+        },
     ]
 }
 
@@ -492,6 +911,636 @@ async fn handle_optimize(args: &Value) -> Result<Value> {
     Ok(serde_json::to_value(result)?)
 }
 
+// ── Clean handler ─────────────────────────────────────────────────────────
+
+fn handle_clean(args: &Value) -> Result<Value> {
+    let input = args
+        .get("input")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'input' parameter"))?
+        .to_string();
+    let output = args
+        .get("output")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'output' parameter"))?
+        .to_string();
+
+    // Build CleanOptions from args, using defaults where not specified
+    let defaults = CleanOptions::default();
+    let options = CleanOptions {
+        make_valid: args.get("make_valid").and_then(|v| v.as_bool()).unwrap_or(defaults.make_valid),
+        drop_invalid: args.get("drop_invalid").and_then(|v| v.as_bool()).unwrap_or(defaults.drop_invalid),
+        remove_selfloops: args.get("remove_selfloops").and_then(|v| v.as_bool()).unwrap_or(defaults.remove_selfloops),
+        min_length_m: args.get("min_length_m").and_then(|v| v.as_f64()).unwrap_or(defaults.min_length_m),
+        node_snap_m: args.get("node_snap_m").and_then(|v| v.as_f64()).unwrap_or(defaults.node_snap_m),
+        node_precision_decimals: args.get("node_precision_decimals").and_then(|v| v.as_u64()).map(|v| v as u32).unwrap_or(defaults.node_precision_decimals),
+        merge_node_positions: args.get("merge_node_positions").and_then(|v| v.as_bool()).unwrap_or(defaults.merge_node_positions),
+        dedupe_edges: args.get("dedupe_edges").and_then(|v| v.as_bool()).unwrap_or(defaults.dedupe_edges),
+        remove_isolates: args.get("remove_isolates").and_then(|v| v.as_bool()).unwrap_or(defaults.remove_isolates),
+        max_components: args.get("max_components").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(defaults.max_components),
+        required_attrs: args.get("required_attrs").and_then(|v| v.as_array()).map(|arr| {
+            arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
+        }),
+        merge_parallel_edges: args.get("merge_parallel_edges").and_then(|v| v.as_bool()).unwrap_or(defaults.merge_parallel_edges),
+        merge_parallel_edge_properties: args.get("merge_parallel_edge_properties").and_then(|v| v.as_bool()).unwrap_or(defaults.merge_parallel_edge_properties),
+        property_merge_strategy: args.get("property_merge_strategy").and_then(|v| v.as_str()).map(String::from).unwrap_or(defaults.property_merge_strategy),
+        simplify_tolerance_m: args.get("simplify_tolerance_m").and_then(|v| v.as_f64()).unwrap_or(defaults.simplify_tolerance_m),
+        include_polygons: args.get("include_polygons").and_then(|v| v.as_bool()).unwrap_or(defaults.include_polygons),
+        include_points: args.get("include_points").and_then(|v| v.as_bool()).unwrap_or(defaults.include_points),
+    };
+
+    tracing::info!("clean: {} -> {} (min_length={}, node_snap={}, max_components={})",
+        input, output, options.min_length_m, options.node_snap_m, options.max_components);
+
+    // Read input GeoJSON
+    let input_str = std::fs::read_to_string(&input)
+        .map_err(|e| anyhow::anyhow!("Failed to read input file '{}': {}", input, e))?;
+    let geojson: geojson::FeatureCollection = serde_json::from_str(&input_str)
+        .map_err(|e| anyhow::anyhow!("Failed to parse GeoJSON: {}", e))?;
+
+    // Run clean pipeline
+    let (cleaned, stats, warnings) = clean_geojson(&geojson, &options)
+        .map_err(|e| anyhow::anyhow!("Clean pipeline failed: {}", e))?;
+
+    // Write output
+    let output_str = serde_json::to_string_pretty(&cleaned)
+        .map_err(|e| anyhow::anyhow!("Failed to serialize output: {}", e))?;
+    std::fs::write(&output, &output_str)
+        .map_err(|e| anyhow::anyhow!("Failed to write output file '{}': {}", output, e))?;
+
+    Ok(json!({
+        "output_file": output,
+        "input_features": stats.input_features,
+        "output_features": stats.output_features,
+        "invalid_dropped": stats.invalid_dropped,
+        "selfloops_removed": stats.selfloops_removed,
+        "short_edges_removed": stats.short_edges_removed,
+        "nodes_merged": stats.nodes_merged,
+        "duplicate_edges_removed": stats.duplicate_edges_removed,
+        "incomplete_edges_removed": stats.incomplete_edges_removed,
+        "parallel_edges_merged": stats.parallel_edges_merged,
+        "isolates_removed": stats.isolates_removed,
+        "components_removed": stats.components_removed,
+        "total_removed": stats.total_removed(),
+        "warnings": warnings,
+    }))
+}
+
+// ── VRP Solve handler ────────────────────────────────────────────────────
+
+async fn handle_vrp_solve(args: &Value) -> Result<Value> {
+    let stops_val = args
+        .get("stops")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
+
+    if stops_val.is_empty() {
+        anyhow::bail!("At least one stop (the depot) is required");
+    }
+
+    let stops: Vec<VRPSolverStop> = stops_val
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let lat = s.get("lat").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+            let lon = s.get("lon").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+            let label = s.get("label").and_then(|v| v.as_str())
+                .unwrap_or_else(|| "")
+                .to_string();
+            let demand = s.get("demand").and_then(|v| v.as_f64());
+            Ok(VRPSolverStop {
+                lat,
+                lon,
+                label: if label.is_empty() { format!("Stop {}", i) } else { label },
+                demand,
+                arrival_time: None,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let num_vehicles = args.get("num_vehicles").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+    let vehicle_capacity = args.get("vehicle_capacity").and_then(|v| v.as_f64()).unwrap_or(100.0);
+    let solver_id = args.get("solver_id").and_then(|v| v.as_str()).unwrap_or("default").to_string();
+    let avg_speed_kmh = args.get("avg_speed_kmh").and_then(|v| v.as_f64()).unwrap_or(40.0);
+    let objective = match args.get("objective").and_then(|v| v.as_str()).unwrap_or("min_distance") {
+        "min_time" => VrpObjective::MinTime,
+        "balance_load" => VrpObjective::BalanceLoad,
+        "min_vehicles" => VrpObjective::MinVehicles,
+        _ => VrpObjective::MinDistance,
+    };
+
+    // Build haversine distance matrix
+    let matrix = build_haversine_matrix(&stops, avg_speed_kmh);
+
+    let input = VRPSolverInput {
+        locations: stops,
+        num_vehicles,
+        vehicle_capacity,
+        objective,
+        matrix: Some(matrix),
+        service_time_secs: None,
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+    };
+
+    tracing::info!("vrp_solve: {} stops, {} vehicles, solver={}", 
+        input.locations.len(), num_vehicles, solver_id);
+
+    let output = solve_with(&solver_id, &input).await
+        .map_err(|e| anyhow::anyhow!("VRP solver failed: {}", e))?;
+
+    // Convert routes to JSON
+    let routes_json: Vec<Value> = output.routes.iter().flatten().enumerate().map(|(vi, route)| {
+        let stops_json: Vec<Value> = route.iter().map(|s| {
+            json!({
+                "lat": s.lat,
+                "lon": s.lon,
+                "label": s.label,
+                "demand": s.demand,
+            })
+        }).collect();
+        json!({
+            "vehicle": vi,
+            "stops": stops_json,
+        })
+    }).collect();
+
+    Ok(json!({
+        "total_distance_km": output.total_distance_km,
+        "total_time_min": output.total_time_min,
+        "routes": routes_json,
+        "unassigned": output.unassigned,
+    }))
+}
+
+// ── Elevation Query handler ──────────────────────────────────────────────
+
+fn handle_elevation_query(args: &Value) -> Result<Value> {
+    let dem_path = args
+        .get("dem_path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'dem_path' parameter"))?;
+    let points_val = args
+        .get("points")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'points' parameter"))?;
+
+    let dem = LocalDem::open(Path::new(dem_path))
+        .map_err(|e| anyhow::anyhow!("Failed to open DEM file '{}': {}", dem_path, e))?;
+
+    let points: Vec<(f64, f64)> = points_val
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let lon = p.get("lon").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Point {} missing 'lon'", i))?;
+            let lat = p.get("lat").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Point {} missing 'lat'", i))?;
+            Ok((lon, lat))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let elevations = dem.get_elevations(&points)
+        .map_err(|e| anyhow::anyhow!("Elevation query failed: {}", e))?;
+
+    let results: Vec<Value> = points.iter().zip(elevations.iter()).enumerate().map(|(i, ((lon, lat), elev))| {
+        json!({
+            "index": i,
+            "lon": *lon,
+            "lat": *lat,
+            "elevation_m": elev,
+        })
+    }).collect();
+
+    Ok(json!({
+        "dem_path": dem_path,
+        "results": results,
+    }))
+}
+
+// ── Elevation Profile handler ───────────────────────────────────────────
+
+fn handle_elevation_profile(args: &Value) -> Result<Value> {
+    let dem_path = args
+        .get("dem_path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'dem_path' parameter"))?;
+    let route_val = args
+        .get("route")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'route' parameter"))?;
+    let sample_interval_m = args.get("sample_interval_m").and_then(|v| v.as_f64()).unwrap_or(100.0);
+
+    let dem = LocalDem::open(Path::new(dem_path))
+        .map_err(|e| anyhow::anyhow!("Failed to open DEM file '{}': {}", dem_path, e))?;
+
+    let route: Vec<(f64, f64)> = route_val
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let lon = p.get("lon").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Route point {} missing 'lon'", i))?;
+            let lat = p.get("lat").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Route point {} missing 'lat'", i))?;
+            Ok((lon, lat))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    if route.len() < 2 {
+        anyhow::bail!("Route must have at least 2 waypoints");
+    }
+
+    let profile = dem.route_profile(&route, sample_interval_m)
+        .map_err(|e| anyhow::anyhow!("Elevation profile failed: {}", e))?;
+
+    let points_json: Vec<Value> = profile.points.iter().map(|p| {
+        json!({
+            "distance_m": p.distance_m,
+            "elevation_m": p.elevation_m,
+            "lon": p.point.lon,
+            "lat": p.point.lat,
+        })
+    }).collect();
+
+    Ok(json!({
+        "total_ascent_m": profile.total_ascent,
+        "total_descent_m": profile.total_descent,
+        "max_elevation_m": profile.max_elevation,
+        "min_elevation_m": profile.min_elevation,
+        "avg_elevation_m": profile.avg_elevation,
+        "distance_km": profile.distance_km,
+        "sample_interval_m": sample_interval_m,
+        "num_samples": profile.points.len(),
+        "points": points_json,
+    }))
+}
+
+// ── List Solvers handler ───────────────────────────────────────────────────
+
+fn handle_list_solvers(_args: &Value) -> Result<Value> {
+    let options = v2rmp::core::vrp::registry::get_algorithm_options();
+    let results: Vec<Value> = options.into_iter().map(|(id, label)| {
+        json!({
+            "id": id,
+            "label": label
+        })
+    }).collect();
+
+    Ok(json!({
+        "solvers": results
+    }))
+}
+
+// ── Haversine Distance handler ────────────────────────────────────────────
+
+fn handle_haversine_distance(args: &Value) -> Result<Value> {
+    let from = args
+        .get("from")
+        .ok_or_else(|| anyhow::anyhow!("Missing 'from' parameter"))?;
+    let to = args
+        .get("to")
+        .ok_or_else(|| anyhow::anyhow!("Missing 'to' parameter"))?;
+
+    let lat1 = from.get("lat").and_then(|v| v.as_f64())
+        .ok_or_else(|| anyhow::anyhow!("from.lat required"))?;
+    let lon1 = from.get("lon").and_then(|v| v.as_f64())
+        .ok_or_else(|| anyhow::anyhow!("from.lon required"))?;
+    let lat2 = to.get("lat").and_then(|v| v.as_f64())
+        .ok_or_else(|| anyhow::anyhow!("to.lat required"))?;
+    let lon2 = to.get("lon").and_then(|v| v.as_f64())
+        .ok_or_else(|| anyhow::anyhow!("to.lon required"))?;
+
+    let dist_m = v2rmp::core::haversine_m(lat1, lon1, lat2, lon2);
+
+    Ok(json!({
+        "from": { "lat": lat1, "lon": lon1 },
+        "to":   { "lat": lat2, "lon": lon2 },
+        "distance_m": dist_m,
+        "distance_km": dist_m / 1000.0,
+    }))
+}
+
+// ── Elevation Stats handler ──────────────────────────────────────────────
+
+fn handle_elevation_stats(args: &Value) -> Result<Value> {
+    let dem_path = args
+        .get("dem_path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'dem_path' parameter"))?;
+
+    let bbox_val = args
+        .get("bbox")
+        .ok_or_else(|| anyhow::anyhow!("Missing 'bbox' parameter"))?;
+    let bbox = v2rmp::core::geo_types::BBox {
+        min_lon: bbox_val.get("min_lon").and_then(|v| v.as_f64())
+            .ok_or_else(|| anyhow::anyhow!("bbox.min_lon required"))?,
+        min_lat: bbox_val.get("min_lat").and_then(|v| v.as_f64())
+            .ok_or_else(|| anyhow::anyhow!("bbox.min_lat required"))?,
+        max_lon: bbox_val.get("max_lon").and_then(|v| v.as_f64())
+            .ok_or_else(|| anyhow::anyhow!("bbox.max_lon required"))?,
+        max_lat: bbox_val.get("max_lat").and_then(|v| v.as_f64())
+            .ok_or_else(|| anyhow::anyhow!("bbox.max_lat required"))?,
+    };
+
+    let grid_step = args.get("grid_step").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+
+    let dem = LocalDem::open(Path::new(dem_path))
+        .map_err(|e| anyhow::anyhow!("Failed to open DEM file '{}': {}", dem_path, e))?;
+
+    let stats = dem.bbox_stats(bbox, grid_step)
+        .map_err(|e| anyhow::anyhow!("Elevation stats failed: {}", e))?;
+
+    Ok(json!({
+        "min_elevation_m": stats.min_elevation,
+        "max_elevation_m": stats.max_elevation,
+        "avg_elevation_m": stats.avg_elevation,
+        "coverage_percent": stats.coverage_percent,
+        "pixel_count": stats.pixel_count,
+    }))
+}
+
+// ── DEM Info handler ─────────────────────────────────────────────────────
+
+fn handle_dem_info(args: &Value) -> Result<Value> {
+    let dem_path = args
+        .get("dem_path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'dem_path' parameter"))?;
+
+    let dem = LocalDem::open(Path::new(dem_path))
+        .map_err(|e| anyhow::anyhow!("Failed to open DEM file '{}': {}", dem_path, e))?;
+
+    let info = dem.info();
+
+    Ok(json!({
+        "width": info.width,
+        "height": info.height,
+        "bbox": {
+            "min_lon": info.bbox.min_lon,
+            "min_lat": info.bbox.min_lat,
+            "max_lon": info.bbox.max_lon,
+            "max_lat": info.bbox.max_lat,
+        },
+        "nodata": info.nodata,
+        "pixel_size_x": info.pixel_size_x,
+        "pixel_size_y": info.pixel_size_y,
+    }))
+}
+
+// ── Fuel Estimate handler ────────────────────────────────────────────────
+
+fn handle_fuel_estimate(args: &Value) -> Result<Value> {
+    let samples_val = args
+        .get("samples")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'samples' parameter"))?;
+
+    if samples_val.len() < 2 {
+        anyhow::bail!("At least 2 samples are required for fuel estimation");
+    }
+
+    let base_consumption = args
+        .get("base_consumption")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.08);
+
+    // Build an ElevationProfile from the samples
+    let points: Vec<v2rmp::core::elevation::RouteElevationPoint> = samples_val
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let distance_m = s.get("distance_m").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Sample {} missing 'distance_m'", i))?;
+            let elevation_m = s.get("elevation_m").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Sample {} missing 'elevation_m'", i))?;
+            Ok(v2rmp::core::elevation::RouteElevationPoint {
+                distance_m,
+                elevation_m: Some(elevation_m),
+                point: v2rmp::core::elevation::Point { lon: 0.0, lat: 0.0 },
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let total_distance_km = points.last().map(|p| p.distance_m / 1000.0).unwrap_or(0.0);
+
+    let profile = v2rmp::core::elevation::ElevationProfile {
+        points,
+        total_ascent: 0.0, // Not needed for fuel calc
+        total_descent: 0.0,
+        max_elevation: 0.0,
+        min_elevation: 0.0,
+        avg_elevation: 0.0,
+        distance_km: total_distance_km,
+    };
+
+    let consumption = FuelCalculator::calculate(&profile, base_consumption);
+
+    Ok(json!({
+        "total_fuel_l": consumption.total_fuel_l,
+        "avg_consumption_l_per_km": consumption.avg_consumption_l_per_km,
+        "elevation_penalty_l": consumption.elevation_penalty_l,
+        "elevation_benefit_l": consumption.elevation_benefit_l,
+        "base_consumption_l_per_km": base_consumption,
+        "distance_km": total_distance_km,
+    }))
+}
+
+// ── Inspect RMP handler ──────────────────────────────────────────────────
+
+fn handle_inspect_rmp(args: &Value) -> Result<Value> {
+    let input = args
+        .get("input")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'input' parameter"))?;
+
+    let file_data = std::fs::read(input)
+        .map_err(|e| anyhow::anyhow!("Failed to read .rmp file: {}", e))?;
+
+    let (nodes, edges) = v2rmp::core::optimize::read_rmp_file(&file_data)?;
+
+    // Compute bounding box from nodes
+    let (min_lat, max_lat, min_lon, max_lon) = if nodes.is_empty() {
+        (0.0, 0.0, 0.0, 0.0)
+    } else {
+        nodes.iter().fold(
+            (f64::MAX, f64::MIN, f64::MAX, f64::MIN),
+            |(mn_lat, mx_lat, mn_lon, mx_lon), n| {
+                (mn_lat.min(n.lat), mx_lat.max(n.lat), mn_lon.min(n.lon), mx_lon.max(n.lon))
+            },
+        )
+    };
+
+    let total_edge_length_km: f64 = edges.iter().map(|e| e.weight_m / 1000.0).sum();
+
+    Ok(json!({
+        "node_count": nodes.len(),
+        "edge_count": edges.len(),
+        "bbox": {
+            "min_lat": min_lat,
+            "max_lat": max_lat,
+            "min_lon": min_lon,
+            "max_lon": max_lon,
+        },
+        "total_edge_length_km": total_edge_length_km,
+        "file_size_bytes": file_data.len(),
+    }))
+}
+
+// ── Pipeline handler ─────────────────────────────────────────────────────
+
+async fn handle_pipeline(args: &Value) -> Result<Value> {
+    let bbox = parse_bbox(args)?;
+    let output_dir = args
+        .get("output_dir")
+        .and_then(|v| v.as_str())
+        .unwrap_or("./pipeline-output")
+        .to_string();
+    let source = match args.get("source").and_then(|v| v.as_str()).unwrap_or("overture") {
+        "osm" => ExtractSource::Osm,
+        _ => ExtractSource::Overture,
+    };
+    let pbf_path = args.get("pbf_path").and_then(|v| v.as_str()).map(String::from);
+    let depot = args.get("depot").and_then(|d| {
+        let lat = d.get("lat")?.as_f64()?;
+        let lon = d.get("lon")?.as_f64()?;
+        Some((lat, lon))
+    });
+    let mode = parse_solver_mode(args);
+    let prune_disconnected = args.get("prune_disconnected").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    // Ensure output directory exists
+    std::fs::create_dir_all(&output_dir)?;
+
+    let extract_path = format!("{}/extract.geojson", output_dir);
+    let cleaned_path = format!("{}/cleaned.geojson", output_dir);
+    let rmp_path = format!("{}/network.rmp", output_dir);
+    let route_path = format!("{}/route.gpx", output_dir);
+
+    // Stage 1: Extract
+    tracing::info!("pipeline stage 1: extract");
+    let extract_req = ExtractRequest {
+        source,
+        bbox,
+        road_classes: RoadClass::all_vehicle(),
+        output_path: extract_path.clone(),
+        pbf_path,
+    };
+    let extract_result = v2rmp::core::extract::run_extract(&extract_req).await?;
+
+    // Stage 2: Clean
+    tracing::info!("pipeline stage 2: clean");
+    let input_data = std::fs::read_to_string(&extract_path)?;
+    let geojson: geojson::FeatureCollection = serde_json::from_str(&input_data)?;
+    let (cleaned, clean_stats, _warnings) = clean_geojson(&geojson, &CleanOptions::default())?;
+    let cleaned_str = serde_json::to_string_pretty(&cleaned)?;
+    std::fs::write(&cleaned_path, &cleaned_str)?;
+
+    // Stage 3: Compile
+    tracing::info!("pipeline stage 3: compile");
+    let compile_req = CompileRequest {
+        input_geojson: cleaned_path.clone(),
+        output_rmp: rmp_path.clone(),
+        compress: false,
+        road_classes: vec![],
+        clean_options: None,
+        prune_disconnected,
+    };
+    let compile_result = v2rmp::core::compile::run_compile(&compile_req)?;
+
+    // Stage 4: Optimize
+    tracing::info!("pipeline stage 4: optimize");
+    let optimize_req = OptimizeRequest {
+        cache_file: rmp_path.clone(),
+        route_file: Some(route_path.clone()),
+        turn_penalties: TurnPenalties::default(),
+        depot,
+        oneway_mode: OnewayMode::default(),
+        mode,
+        num_vehicles: 1,
+        solver_id: "clarke_wright".to_string(),
+    };
+    let optimize_result = v2rmp::core::optimize::run_optimize(&optimize_req).await?;
+
+    Ok(json!({
+        "output_dir": output_dir,
+        "extract": {
+            "nodes": extract_result.nodes,
+            "edges": extract_result.edges,
+            "total_km": extract_result.total_km,
+        },
+        "clean": {
+            "input_features": clean_stats.input_features,
+            "output_features": clean_stats.output_features,
+            "total_removed": clean_stats.total_removed(),
+        },
+        "compile": {
+            "node_count": compile_result.node_count,
+            "edge_count": compile_result.edge_count,
+            "output_size_bytes": compile_result.output_size_bytes,
+        },
+        "optimize": {
+            "total_distance_km": optimize_result.total_distance_km,
+            "total_segments": optimize_result.total_segments,
+            "deadhead_distance_km": optimize_result.deadhead_distance_km,
+            "efficiency_pct": optimize_result.efficiency_pct,
+            "num_routes": optimize_result.num_routes,
+        },
+    }))
+}
+
+// ── Get Valhalla Matrix handler ──────────────────────────────────────────
+
+async fn handle_get_valhalla_matrix(args: &Value) -> Result<Value> {
+    let locs_val = args
+        .get("locations")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'locations' parameter"))?;
+
+    if locs_val.is_empty() {
+        anyhow::bail!("At least one location is required");
+    }
+
+    let locations: Vec<VRPSolverStop> = locs_val
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            let lat = l.get("lat").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Location {} missing 'lat'", i))?;
+            let lon = l.get("lon").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Location {} missing 'lon'", i))?;
+            Ok(VRPSolverStop {
+                lat,
+                lon,
+                label: format!("Loc {}", i),
+                demand: None,
+                arrival_time: None,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    tracing::info!("get_valhalla_matrix: {} locations", locations.len());
+
+    let matrix = get_valhalla_matrix(&locations).await
+        .map_err(|e| anyhow::anyhow!("Valhalla matrix fetch failed: {}", e))?;
+
+    let matrix_json: Vec<Vec<Value>> = matrix.iter().map(|row| {
+        row.iter().map(|cell| {
+            json!({
+                "distance_km": cell.distance,
+                "time_seconds": cell.time,
+            })
+        }).collect()
+    }).collect();
+
+    Ok(json!({
+        "size": locations.len(),
+        "matrix": matrix_json,
+    }))
+}
+
 // ── Main loop ───────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -571,6 +1620,36 @@ async fn main() -> Result<()> {
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
                     "optimize" => handle_optimize(&args).await,
+                    "clean" => handle_clean(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .map(|v| v),
+                    "vrp_solve" => handle_vrp_solve(&args).await,
+                    "elevation_query" => handle_elevation_query(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .map(|v| v),
+                    "elevation_profile" => handle_elevation_profile(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .map(|v| v),
+                    "list_solvers" => handle_list_solvers(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .map(|v| v),
+                    "haversine_distance" => handle_haversine_distance(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .map(|v| v),
+                    "elevation_stats" => handle_elevation_stats(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .map(|v| v),
+                    "dem_info" => handle_dem_info(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .map(|v| v),
+                    "fuel_estimate" => handle_fuel_estimate(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .map(|v| v),
+                    "inspect_rmp" => handle_inspect_rmp(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .map(|v| v),
+                    "pipeline" => handle_pipeline(&args).await,
+                    "get_valhalla_matrix" => handle_get_valhalla_matrix(&args).await,
                     other => {
                         send_err(&req.id, -32602, &format!("Unknown tool: {other}"));
                         continue;

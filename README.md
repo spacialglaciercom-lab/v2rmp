@@ -24,7 +24,7 @@ A powerful Terminal User Interface (TUI) and Command-Line Interface (CLI) for ro
 - ⛰️ **Elevation & Terrain**: DEM GeoTIFF queries (point, profile, stats, fuel calculation)
 - 🧠 **Embedding Engine**: Generate text embeddings via fastembed for semantic search
 - 🌐 **Headless Server**: JSON-RPC/STDIO `serve` mode for frontend integrations
-- 🤝 **MCP Server**: Model Context Protocol server for AI agent integration (extract, compile, optimize)
+- 🤝 **MCP Server**: Model Context Protocol server with 15 tools for AI agent integration (extract, compile, optimize, clean, VRP, elevation, fuel, and more)
 - 📁 **Resource Discovery**: `list` command to discover maps and routes programmatically
 - ⚡ **Asynchronous Runtime**: Fully non-blocking I/O with `tokio` for high-performance extraction and processing
 
@@ -159,6 +159,17 @@ rmpca ships an MCP (Model Context Protocol) server that exposes the route optimi
 | `extract_osm` | `bbox` | Extract road network from OSM (local PBF or Overpass API) |
 | `compile` | `input`, `output` | Convert GeoJSON to binary `.rmp` format with optional cleaning |
 | `optimize` | `input` | Run CPP (edge coverage) or VRP (multi-vehicle) route optimization |
+| `clean` | `input`, `output` | Full 11-stage GeoJSON cleaning pipeline with all CleanOptions |
+| `vrp_solve` | `stops` | Solve VRP from explicit lat/lon stop coordinates (no .rmp needed) |
+| `elevation_query` | `dem_path`, `points` | Query elevation at lat/lon points from a local DEM GeoTIFF |
+| `elevation_profile` | `dem_path`, `route` | Sample elevation along a route at fixed intervals |
+| `elevation_stats` | `dem_path`, `bbox` | Elevation statistics (min, max, avg, coverage) in a bbox |
+| `dem_info` | `dem_path` | Return DEM metadata (width, height, bbox, nodata, pixel size) |
+| `fuel_estimate` | `samples` | Calculate fuel consumption from an elevation profile |
+| `inspect_rmp` | `input` | Parse .rmp binary: node count, edge count, bbox |
+| `pipeline` | `bbox` | End-to-end: extract → clean → compile → optimize |
+| `get_valhalla_matrix` | `locations` | Fetch real-road distance/time matrix from Valhalla/OSRM |
+| `list_solvers` | — | Return available VRP solver IDs and labels |
 
 #### Example Conversation
 
@@ -221,6 +232,32 @@ let (sub_nodes, sub_edges) = filter_bbox(
 );
 // Pass None to use the full map
 ```
+
+## Elevation & Fuel
+
+Query DEM GeoTIFF files from the CLI or MCP server. Supported via GDAL — works with any GDAL-compatible raster format.
+
+```bash
+# DEM metadata
+rmpca elevation --dem dem.tif info
+
+# Single point query
+rmpca elevation --dem dem.tif point --lon -73.58 --lat 45.50
+
+# Batch point query from JSON file (or stdin)
+echo '[[-73.58,45.50],[-73.57,45.51]]' | rmpca elevation --dem dem.tif points
+
+# Route elevation profile
+echo '[[-73.58,45.50],[-73.57,45.51],[-73.56,45.52]]' | rmpca elevation --dem dem.tif profile -s 100
+
+# Bbox elevation statistics
+rmpca elevation --dem dem.tif stats --bbox "-73.60,45.48,-73.55,45.52" --step 10
+
+# Fuel consumption from a route (base consumption L/km)
+echo '[[-73.58,45.50],[-73.57,45.51]]' | rmpca elevation --dem dem.tif fuel -s 100 --base-consumption 0.08
+```
+
+All subcommands support `--json` for machine-readable output. See the MCP server section above for the corresponding `elevation_query`, `elevation_profile`, `elevation_stats`, `dem_info`, and `fuel_estimate` tools.
 
 ## VRP Coordinate Input
 
@@ -311,7 +348,7 @@ let output = solver.solve(&vrp_input).await?;
 - [x] **v0.4.1**: Multi-vehicle VRP CLI command operational with CSV coordinates input
 - [x] **v0.4.2**: Elevation engine (DEM GeoTIFF), Embedding engine (fastembed), Headless serve mode
 - [x] **v0.4.3**: BBox deduplication, TUI version auto-sync, FileBrowser ESC fix, CLI guard
-- [x] **v0.4.4**: MCP server for AI agent integration (extract, compile, optimize tools)
+- [x] **v0.4.4**: MCP server with 15 tools (extract, compile, optimize, clean, vrp_solve, elevation query/profile/stats, dem_info, fuel_estimate, inspect_rmp, pipeline, get_valhalla_matrix, list_solvers)
 - [ ] **v0.5.0**: Time Window support (VRPTW) and 3D terrain-aware routing
 
 ## License
