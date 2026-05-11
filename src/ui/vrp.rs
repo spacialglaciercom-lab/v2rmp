@@ -11,7 +11,9 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let green = ratatui::style::Color::Green;
 
     let csv_display = match &app.vrp_csv_file {
-        Some(p) => ratatui::text::Span::styled(p.clone(), ratatui::style::Style::default().fg(green)),
+        Some(p) => {
+            ratatui::text::Span::styled(p.clone(), ratatui::style::Style::default().fg(green))
+        }
         None => ratatui::text::Span::styled(
             "(not set)".to_string(),
             ratatui::style::Style::default().fg(yellow),
@@ -19,7 +21,9 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     };
 
     let rmp_display = match &app.vrp_input_file {
-        Some(p) => ratatui::text::Span::styled(p.clone(), ratatui::style::Style::default().fg(green)),
+        Some(p) => {
+            ratatui::text::Span::styled(p.clone(), ratatui::style::Style::default().fg(green))
+        }
         None => ratatui::text::Span::styled(
             "(not set)".to_string(),
             ratatui::style::Style::default().fg(gray),
@@ -27,8 +31,13 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     };
 
     let capacity_display = match app.vrp_capacity {
-        Some(c) => ratatui::text::Span::styled(format!("{:.1}", c), ratatui::style::Style::default().fg(yellow)),
-        None => ratatui::text::Span::styled("(unlimited)", ratatui::style::Style::default().fg(gray)),
+        Some(c) => ratatui::text::Span::styled(
+            format!("{:.1}", c),
+            ratatui::style::Style::default().fg(yellow),
+        ),
+        None => {
+            ratatui::text::Span::styled("(unlimited)", ratatui::style::Style::default().fg(gray))
+        }
     };
 
     let status_text = format!("Status: {}", app.vrp_status);
@@ -102,7 +111,9 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ratatui::text::Line::from("  [I]  Set road network .rmp (optional)"),
         ratatui::text::Line::from("  [O]  Set output directory"),
         ratatui::text::Line::from("  [V]  Set number of vehicles"),
-        ratatui::text::Line::from("  [A]  Change algorithm (greedy|savings|local_search|simulated_annealing)"),
+        ratatui::text::Line::from(
+            "  [A]  Change algorithm (greedy|savings|local_search|simulated_annealing)",
+        ),
         ratatui::text::Line::from("  [K]  Set vehicle capacity"),
         ratatui::text::Line::from("  [Enter]  Run VRP solver"),
         ratatui::text::Line::from("  [Esc]  Return to home"),

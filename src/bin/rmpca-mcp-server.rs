@@ -26,16 +26,14 @@ use std::path::Path;
 use v2rmp::core::clean::{clean_geojson, CleanOptions};
 use v2rmp::core::compile::{CompileRequest, CompileResult};
 use v2rmp::core::elevation::local::LocalDem;
+use v2rmp::core::elevation::FuelCalculator;
 use v2rmp::core::extract::{BBoxRequest, ExtractRequest, ExtractResult, ExtractSource, RoadClass};
 use v2rmp::core::optimize::{
     OnewayMode, OptimizeRequest, OptimizeResult, SolverMode, TurnPenalties,
 };
 use v2rmp::core::vrp::registry::solve_with;
-use v2rmp::core::vrp::types::{
-    VRPSolverInput, VRPSolverStop, VrpObjective,
-};
+use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
 use v2rmp::core::vrp::utils::{build_haversine_matrix, get_valhalla_matrix};
-use v2rmp::core::elevation::{FuelCalculator};
 
 // ── JSON-RPC / MCP types ───────────────────────────────────────────────────
 
@@ -750,11 +748,7 @@ fn parse_oneway_mode(args: &Value) -> OnewayMode {
 }
 
 fn parse_solver_mode(args: &Value) -> SolverMode {
-    match args
-        .get("mode")
-        .and_then(|v| v.as_str())
-        .unwrap_or("cpp")
-    {
+    match args.get("mode").and_then(|v| v.as_str()).unwrap_or("cpp") {
         "vrp" => SolverMode::Vrp,
         _ => SolverMode::Cpp,
     }
@@ -771,8 +765,13 @@ async fn handle_extract_overture(args: &Value) -> Result<Value> {
         .unwrap_or("extract-output.geojson")
         .to_string();
 
-    tracing::info!("extract_overture: bbox={:.4},{:.4},{:.4},{:.4}",
-        bbox.min_lon, bbox.min_lat, bbox.max_lon, bbox.max_lat);
+    tracing::info!(
+        "extract_overture: bbox={:.4},{:.4},{:.4},{:.4}",
+        bbox.min_lon,
+        bbox.min_lat,
+        bbox.max_lon,
+        bbox.max_lat
+    );
 
     let req = ExtractRequest {
         source: ExtractSource::Overture,
@@ -789,15 +788,23 @@ async fn handle_extract_overture(args: &Value) -> Result<Value> {
 async fn handle_extract_osm(args: &Value) -> Result<Value> {
     let bbox = parse_bbox(args)?;
     let road_classes = parse_road_classes(args);
-    let pbf_path = args.get("pbf_path").and_then(|v| v.as_str()).map(String::from);
+    let pbf_path = args
+        .get("pbf_path")
+        .and_then(|v| v.as_str())
+        .map(String::from);
     let output_path = args
         .get("output_path")
         .and_then(|v| v.as_str())
         .unwrap_or("extract-output.geojson")
         .to_string();
 
-    tracing::info!("extract_osm: bbox={:.4},{:.4},{:.4},{:.4}",
-        bbox.min_lon, bbox.min_lat, bbox.max_lon, bbox.max_lat);
+    tracing::info!(
+        "extract_osm: bbox={:.4},{:.4},{:.4},{:.4}",
+        bbox.min_lon,
+        bbox.min_lat,
+        bbox.max_lon,
+        bbox.max_lat
+    );
 
     let req = ExtractRequest {
         source: ExtractSource::Osm,
@@ -822,10 +829,7 @@ fn handle_compile(args: &Value) -> Result<Value> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing 'output' parameter"))?
         .to_string();
-    let clean = args
-        .get("clean")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let clean = args.get("clean").and_then(|v| v.as_bool()).unwrap_or(false);
     let prune = args
         .get("prune_disconnected")
         .and_then(|v| v.as_bool())
@@ -858,14 +862,15 @@ async fn handle_optimize(args: &Value) -> Result<Value> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing 'input' parameter"))?
         .to_string();
-    let route_file = args.get("output").and_then(|v| v.as_str()).map(String::from);
-    let depot = args
-        .get("depot")
-        .and_then(|d| {
-            let lat = d.get("lat")?.as_f64()?;
-            let lon = d.get("lon")?.as_f64()?;
-            Some((lat, lon))
-        });
+    let route_file = args
+        .get("output")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let depot = args.get("depot").and_then(|d| {
+        let lat = d.get("lat")?.as_f64()?;
+        let lon = d.get("lon")?.as_f64()?;
+        Some((lat, lon))
+    });
     let oneway_mode = parse_oneway_mode(args);
     let mode = parse_solver_mode(args);
     let left = args
@@ -928,29 +933,91 @@ fn handle_clean(args: &Value) -> Result<Value> {
     // Build CleanOptions from args, using defaults where not specified
     let defaults = CleanOptions::default();
     let options = CleanOptions {
-        make_valid: args.get("make_valid").and_then(|v| v.as_bool()).unwrap_or(defaults.make_valid),
-        drop_invalid: args.get("drop_invalid").and_then(|v| v.as_bool()).unwrap_or(defaults.drop_invalid),
-        remove_selfloops: args.get("remove_selfloops").and_then(|v| v.as_bool()).unwrap_or(defaults.remove_selfloops),
-        min_length_m: args.get("min_length_m").and_then(|v| v.as_f64()).unwrap_or(defaults.min_length_m),
-        node_snap_m: args.get("node_snap_m").and_then(|v| v.as_f64()).unwrap_or(defaults.node_snap_m),
-        node_precision_decimals: args.get("node_precision_decimals").and_then(|v| v.as_u64()).map(|v| v as u32).unwrap_or(defaults.node_precision_decimals),
-        merge_node_positions: args.get("merge_node_positions").and_then(|v| v.as_bool()).unwrap_or(defaults.merge_node_positions),
-        dedupe_edges: args.get("dedupe_edges").and_then(|v| v.as_bool()).unwrap_or(defaults.dedupe_edges),
-        remove_isolates: args.get("remove_isolates").and_then(|v| v.as_bool()).unwrap_or(defaults.remove_isolates),
-        max_components: args.get("max_components").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(defaults.max_components),
-        required_attrs: args.get("required_attrs").and_then(|v| v.as_array()).map(|arr| {
-            arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
-        }),
-        merge_parallel_edges: args.get("merge_parallel_edges").and_then(|v| v.as_bool()).unwrap_or(defaults.merge_parallel_edges),
-        merge_parallel_edge_properties: args.get("merge_parallel_edge_properties").and_then(|v| v.as_bool()).unwrap_or(defaults.merge_parallel_edge_properties),
-        property_merge_strategy: args.get("property_merge_strategy").and_then(|v| v.as_str()).map(String::from).unwrap_or(defaults.property_merge_strategy),
-        simplify_tolerance_m: args.get("simplify_tolerance_m").and_then(|v| v.as_f64()).unwrap_or(defaults.simplify_tolerance_m),
-        include_polygons: args.get("include_polygons").and_then(|v| v.as_bool()).unwrap_or(defaults.include_polygons),
-        include_points: args.get("include_points").and_then(|v| v.as_bool()).unwrap_or(defaults.include_points),
+        make_valid: args
+            .get("make_valid")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(defaults.make_valid),
+        drop_invalid: args
+            .get("drop_invalid")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(defaults.drop_invalid),
+        remove_selfloops: args
+            .get("remove_selfloops")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(defaults.remove_selfloops),
+        min_length_m: args
+            .get("min_length_m")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(defaults.min_length_m),
+        node_snap_m: args
+            .get("node_snap_m")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(defaults.node_snap_m),
+        node_precision_decimals: args
+            .get("node_precision_decimals")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32)
+            .unwrap_or(defaults.node_precision_decimals),
+        merge_node_positions: args
+            .get("merge_node_positions")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(defaults.merge_node_positions),
+        dedupe_edges: args
+            .get("dedupe_edges")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(defaults.dedupe_edges),
+        remove_isolates: args
+            .get("remove_isolates")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(defaults.remove_isolates),
+        max_components: args
+            .get("max_components")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize)
+            .unwrap_or(defaults.max_components),
+        required_attrs: args
+            .get("required_attrs")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            }),
+        merge_parallel_edges: args
+            .get("merge_parallel_edges")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(defaults.merge_parallel_edges),
+        merge_parallel_edge_properties: args
+            .get("merge_parallel_edge_properties")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(defaults.merge_parallel_edge_properties),
+        property_merge_strategy: args
+            .get("property_merge_strategy")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .unwrap_or(defaults.property_merge_strategy),
+        simplify_tolerance_m: args
+            .get("simplify_tolerance_m")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(defaults.simplify_tolerance_m),
+        include_polygons: args
+            .get("include_polygons")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(defaults.include_polygons),
+        include_points: args
+            .get("include_points")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(defaults.include_points),
     };
 
-    tracing::info!("clean: {} -> {} (min_length={}, node_snap={}, max_components={})",
-        input, output, options.min_length_m, options.node_snap_m, options.max_components);
+    tracing::info!(
+        "clean: {} -> {} (min_length={}, node_snap={}, max_components={})",
+        input,
+        output,
+        options.min_length_m,
+        options.node_snap_m,
+        options.max_components
+    );
 
     // Read input GeoJSON
     let input_str = std::fs::read_to_string(&input)
@@ -1002,29 +1069,56 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
         .iter()
         .enumerate()
         .map(|(i, s)| {
-            let lat = s.get("lat").and_then(|v| v.as_f64())
+            let lat = s
+                .get("lat")
+                .and_then(|v| v.as_f64())
                 .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
-            let lon = s.get("lon").and_then(|v| v.as_f64())
+            let lon = s
+                .get("lon")
+                .and_then(|v| v.as_f64())
                 .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
-            let label = s.get("label").and_then(|v| v.as_str())
-                .unwrap_or_else(|| "")
+            let label = s
+                .get("label")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
                 .to_string();
             let demand = s.get("demand").and_then(|v| v.as_f64());
             Ok(VRPSolverStop {
                 lat,
                 lon,
-                label: if label.is_empty() { format!("Stop {}", i) } else { label },
+                label: if label.is_empty() {
+                    format!("Stop {}", i)
+                } else {
+                    label
+                },
                 demand,
                 arrival_time: None,
             })
         })
         .collect::<Result<Vec<_>>>()?;
 
-    let num_vehicles = args.get("num_vehicles").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
-    let vehicle_capacity = args.get("vehicle_capacity").and_then(|v| v.as_f64()).unwrap_or(100.0);
-    let solver_id = args.get("solver_id").and_then(|v| v.as_str()).unwrap_or("default").to_string();
-    let avg_speed_kmh = args.get("avg_speed_kmh").and_then(|v| v.as_f64()).unwrap_or(40.0);
-    let objective = match args.get("objective").and_then(|v| v.as_str()).unwrap_or("min_distance") {
+    let num_vehicles = args
+        .get("num_vehicles")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1) as usize;
+    let vehicle_capacity = args
+        .get("vehicle_capacity")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(100.0);
+    let solver_id = args
+        .get("solver_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default")
+        .to_string();
+    let avg_speed_kmh = args
+        .get("avg_speed_kmh")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(40.0);
+    let objective = match args
+        .get("objective")
+        .and_then(|v| v.as_str())
+        .unwrap_or("min_distance")
+    {
         "min_time" => VrpObjective::MinTime,
         "balance_load" => VrpObjective::BalanceLoad,
         "min_vehicles" => VrpObjective::MinVehicles,
@@ -1046,27 +1140,41 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
         window_close: None,
     };
 
-    tracing::info!("vrp_solve: {} stops, {} vehicles, solver={}", 
-        input.locations.len(), num_vehicles, solver_id);
+    tracing::info!(
+        "vrp_solve: {} stops, {} vehicles, solver={}",
+        input.locations.len(),
+        num_vehicles,
+        solver_id
+    );
 
-    let output = solve_with(&solver_id, &input).await
+    let output = solve_with(&solver_id, &input)
+        .await
         .map_err(|e| anyhow::anyhow!("VRP solver failed: {}", e))?;
 
     // Convert routes to JSON
-    let routes_json: Vec<Value> = output.routes.iter().flatten().enumerate().map(|(vi, route)| {
-        let stops_json: Vec<Value> = route.iter().map(|s| {
+    let routes_json: Vec<Value> = output
+        .routes
+        .iter()
+        .flatten()
+        .enumerate()
+        .map(|(vi, route)| {
+            let stops_json: Vec<Value> = route
+                .iter()
+                .map(|s| {
+                    json!({
+                        "lat": s.lat,
+                        "lon": s.lon,
+                        "label": s.label,
+                        "demand": s.demand,
+                    })
+                })
+                .collect();
             json!({
-                "lat": s.lat,
-                "lon": s.lon,
-                "label": s.label,
-                "demand": s.demand,
+                "vehicle": vi,
+                "stops": stops_json,
             })
-        }).collect();
-        json!({
-            "vehicle": vi,
-            "stops": stops_json,
         })
-    }).collect();
+        .collect();
 
     Ok(json!({
         "total_distance_km": output.total_distance_km,
@@ -1095,25 +1203,35 @@ fn handle_elevation_query(args: &Value) -> Result<Value> {
         .iter()
         .enumerate()
         .map(|(i, p)| {
-            let lon = p.get("lon").and_then(|v| v.as_f64())
+            let lon = p
+                .get("lon")
+                .and_then(|v| v.as_f64())
                 .ok_or_else(|| anyhow::anyhow!("Point {} missing 'lon'", i))?;
-            let lat = p.get("lat").and_then(|v| v.as_f64())
+            let lat = p
+                .get("lat")
+                .and_then(|v| v.as_f64())
                 .ok_or_else(|| anyhow::anyhow!("Point {} missing 'lat'", i))?;
             Ok((lon, lat))
         })
         .collect::<Result<Vec<_>>>()?;
 
-    let elevations = dem.get_elevations(&points)
+    let elevations = dem
+        .get_elevations(&points)
         .map_err(|e| anyhow::anyhow!("Elevation query failed: {}", e))?;
 
-    let results: Vec<Value> = points.iter().zip(elevations.iter()).enumerate().map(|(i, ((lon, lat), elev))| {
-        json!({
-            "index": i,
-            "lon": *lon,
-            "lat": *lat,
-            "elevation_m": elev,
+    let results: Vec<Value> = points
+        .iter()
+        .zip(elevations.iter())
+        .enumerate()
+        .map(|(i, ((lon, lat), elev))| {
+            json!({
+                "index": i,
+                "lon": *lon,
+                "lat": *lat,
+                "elevation_m": elev,
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(json!({
         "dem_path": dem_path,
@@ -1132,7 +1250,10 @@ fn handle_elevation_profile(args: &Value) -> Result<Value> {
         .get("route")
         .and_then(|v| v.as_array())
         .ok_or_else(|| anyhow::anyhow!("Missing 'route' parameter"))?;
-    let sample_interval_m = args.get("sample_interval_m").and_then(|v| v.as_f64()).unwrap_or(100.0);
+    let sample_interval_m = args
+        .get("sample_interval_m")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(100.0);
 
     let dem = LocalDem::open(Path::new(dem_path))
         .map_err(|e| anyhow::anyhow!("Failed to open DEM file '{}': {}", dem_path, e))?;
@@ -1141,9 +1262,13 @@ fn handle_elevation_profile(args: &Value) -> Result<Value> {
         .iter()
         .enumerate()
         .map(|(i, p)| {
-            let lon = p.get("lon").and_then(|v| v.as_f64())
+            let lon = p
+                .get("lon")
+                .and_then(|v| v.as_f64())
                 .ok_or_else(|| anyhow::anyhow!("Route point {} missing 'lon'", i))?;
-            let lat = p.get("lat").and_then(|v| v.as_f64())
+            let lat = p
+                .get("lat")
+                .and_then(|v| v.as_f64())
                 .ok_or_else(|| anyhow::anyhow!("Route point {} missing 'lat'", i))?;
             Ok((lon, lat))
         })
@@ -1153,17 +1278,22 @@ fn handle_elevation_profile(args: &Value) -> Result<Value> {
         anyhow::bail!("Route must have at least 2 waypoints");
     }
 
-    let profile = dem.route_profile(&route, sample_interval_m)
+    let profile = dem
+        .route_profile(&route, sample_interval_m)
         .map_err(|e| anyhow::anyhow!("Elevation profile failed: {}", e))?;
 
-    let points_json: Vec<Value> = profile.points.iter().map(|p| {
-        json!({
-            "distance_m": p.distance_m,
-            "elevation_m": p.elevation_m,
-            "lon": p.point.lon,
-            "lat": p.point.lat,
+    let points_json: Vec<Value> = profile
+        .points
+        .iter()
+        .map(|p| {
+            json!({
+                "distance_m": p.distance_m,
+                "elevation_m": p.elevation_m,
+                "lon": p.point.lon,
+                "lat": p.point.lat,
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(json!({
         "total_ascent_m": profile.total_ascent,
@@ -1182,12 +1312,15 @@ fn handle_elevation_profile(args: &Value) -> Result<Value> {
 
 fn handle_list_solvers(_args: &Value) -> Result<Value> {
     let options = v2rmp::core::vrp::registry::get_algorithm_options();
-    let results: Vec<Value> = options.into_iter().map(|(id, label)| {
-        json!({
-            "id": id,
-            "label": label
+    let results: Vec<Value> = options
+        .into_iter()
+        .map(|(id, label)| {
+            json!({
+                "id": id,
+                "label": label
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(json!({
         "solvers": results
@@ -1204,13 +1337,21 @@ fn handle_haversine_distance(args: &Value) -> Result<Value> {
         .get("to")
         .ok_or_else(|| anyhow::anyhow!("Missing 'to' parameter"))?;
 
-    let lat1 = from.get("lat").and_then(|v| v.as_f64())
+    let lat1 = from
+        .get("lat")
+        .and_then(|v| v.as_f64())
         .ok_or_else(|| anyhow::anyhow!("from.lat required"))?;
-    let lon1 = from.get("lon").and_then(|v| v.as_f64())
+    let lon1 = from
+        .get("lon")
+        .and_then(|v| v.as_f64())
         .ok_or_else(|| anyhow::anyhow!("from.lon required"))?;
-    let lat2 = to.get("lat").and_then(|v| v.as_f64())
+    let lat2 = to
+        .get("lat")
+        .and_then(|v| v.as_f64())
         .ok_or_else(|| anyhow::anyhow!("to.lat required"))?;
-    let lon2 = to.get("lon").and_then(|v| v.as_f64())
+    let lon2 = to
+        .get("lon")
+        .and_then(|v| v.as_f64())
         .ok_or_else(|| anyhow::anyhow!("to.lon required"))?;
 
     let dist_m = v2rmp::core::haversine_m(lat1, lon1, lat2, lon2);
@@ -1235,13 +1376,21 @@ fn handle_elevation_stats(args: &Value) -> Result<Value> {
         .get("bbox")
         .ok_or_else(|| anyhow::anyhow!("Missing 'bbox' parameter"))?;
     let bbox = v2rmp::core::geo_types::BBox {
-        min_lon: bbox_val.get("min_lon").and_then(|v| v.as_f64())
+        min_lon: bbox_val
+            .get("min_lon")
+            .and_then(|v| v.as_f64())
             .ok_or_else(|| anyhow::anyhow!("bbox.min_lon required"))?,
-        min_lat: bbox_val.get("min_lat").and_then(|v| v.as_f64())
+        min_lat: bbox_val
+            .get("min_lat")
+            .and_then(|v| v.as_f64())
             .ok_or_else(|| anyhow::anyhow!("bbox.min_lat required"))?,
-        max_lon: bbox_val.get("max_lon").and_then(|v| v.as_f64())
+        max_lon: bbox_val
+            .get("max_lon")
+            .and_then(|v| v.as_f64())
             .ok_or_else(|| anyhow::anyhow!("bbox.max_lon required"))?,
-        max_lat: bbox_val.get("max_lat").and_then(|v| v.as_f64())
+        max_lat: bbox_val
+            .get("max_lat")
+            .and_then(|v| v.as_f64())
             .ok_or_else(|| anyhow::anyhow!("bbox.max_lat required"))?,
     };
 
@@ -1250,7 +1399,8 @@ fn handle_elevation_stats(args: &Value) -> Result<Value> {
     let dem = LocalDem::open(Path::new(dem_path))
         .map_err(|e| anyhow::anyhow!("Failed to open DEM file '{}': {}", dem_path, e))?;
 
-    let stats = dem.bbox_stats(bbox, grid_step)
+    let stats = dem
+        .bbox_stats(bbox, grid_step)
         .map_err(|e| anyhow::anyhow!("Elevation stats failed: {}", e))?;
 
     Ok(json!({
@@ -1312,9 +1462,13 @@ fn handle_fuel_estimate(args: &Value) -> Result<Value> {
         .iter()
         .enumerate()
         .map(|(i, s)| {
-            let distance_m = s.get("distance_m").and_then(|v| v.as_f64())
+            let distance_m = s
+                .get("distance_m")
+                .and_then(|v| v.as_f64())
                 .ok_or_else(|| anyhow::anyhow!("Sample {} missing 'distance_m'", i))?;
-            let elevation_m = s.get("elevation_m").and_then(|v| v.as_f64())
+            let elevation_m = s
+                .get("elevation_m")
+                .and_then(|v| v.as_f64())
                 .ok_or_else(|| anyhow::anyhow!("Sample {} missing 'elevation_m'", i))?;
             Ok(v2rmp::core::elevation::RouteElevationPoint {
                 distance_m,
@@ -1356,8 +1510,8 @@ fn handle_inspect_rmp(args: &Value) -> Result<Value> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing 'input' parameter"))?;
 
-    let file_data = std::fs::read(input)
-        .map_err(|e| anyhow::anyhow!("Failed to read .rmp file: {}", e))?;
+    let file_data =
+        std::fs::read(input).map_err(|e| anyhow::anyhow!("Failed to read .rmp file: {}", e))?;
 
     let (nodes, edges) = v2rmp::core::optimize::read_rmp_file(&file_data)?;
 
@@ -1368,7 +1522,12 @@ fn handle_inspect_rmp(args: &Value) -> Result<Value> {
         nodes.iter().fold(
             (f64::MAX, f64::MIN, f64::MAX, f64::MIN),
             |(mn_lat, mx_lat, mn_lon, mx_lon), n| {
-                (mn_lat.min(n.lat), mx_lat.max(n.lat), mn_lon.min(n.lon), mx_lon.max(n.lon))
+                (
+                    mn_lat.min(n.lat),
+                    mx_lat.max(n.lat),
+                    mn_lon.min(n.lon),
+                    mx_lon.max(n.lon),
+                )
             },
         )
     };
@@ -1398,18 +1557,28 @@ async fn handle_pipeline(args: &Value) -> Result<Value> {
         .and_then(|v| v.as_str())
         .unwrap_or("./pipeline-output")
         .to_string();
-    let source = match args.get("source").and_then(|v| v.as_str()).unwrap_or("overture") {
+    let source = match args
+        .get("source")
+        .and_then(|v| v.as_str())
+        .unwrap_or("overture")
+    {
         "osm" => ExtractSource::Osm,
         _ => ExtractSource::Overture,
     };
-    let pbf_path = args.get("pbf_path").and_then(|v| v.as_str()).map(String::from);
+    let pbf_path = args
+        .get("pbf_path")
+        .and_then(|v| v.as_str())
+        .map(String::from);
     let depot = args.get("depot").and_then(|d| {
         let lat = d.get("lat")?.as_f64()?;
         let lon = d.get("lon")?.as_f64()?;
         Some((lat, lon))
     });
     let mode = parse_solver_mode(args);
-    let prune_disconnected = args.get("prune_disconnected").and_then(|v| v.as_bool()).unwrap_or(false);
+    let prune_disconnected = args
+        .get("prune_disconnected")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     // Ensure output directory exists
     std::fs::create_dir_all(&output_dir)?;
@@ -1507,9 +1676,13 @@ async fn handle_get_valhalla_matrix(args: &Value) -> Result<Value> {
         .iter()
         .enumerate()
         .map(|(i, l)| {
-            let lat = l.get("lat").and_then(|v| v.as_f64())
+            let lat = l
+                .get("lat")
+                .and_then(|v| v.as_f64())
                 .ok_or_else(|| anyhow::anyhow!("Location {} missing 'lat'", i))?;
-            let lon = l.get("lon").and_then(|v| v.as_f64())
+            let lon = l
+                .get("lon")
+                .and_then(|v| v.as_f64())
                 .ok_or_else(|| anyhow::anyhow!("Location {} missing 'lon'", i))?;
             Ok(VRPSolverStop {
                 lat,
@@ -1523,17 +1696,23 @@ async fn handle_get_valhalla_matrix(args: &Value) -> Result<Value> {
 
     tracing::info!("get_valhalla_matrix: {} locations", locations.len());
 
-    let matrix = get_valhalla_matrix(&locations).await
+    let matrix = get_valhalla_matrix(&locations)
+        .await
         .map_err(|e| anyhow::anyhow!("Valhalla matrix fetch failed: {}", e))?;
 
-    let matrix_json: Vec<Vec<Value>> = matrix.iter().map(|row| {
-        row.iter().map(|cell| {
-            json!({
-                "distance_km": cell.distance,
-                "time_seconds": cell.time,
-            })
-        }).collect()
-    }).collect();
+    let matrix_json: Vec<Vec<Value>> = matrix
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|cell| {
+                    json!({
+                        "distance_km": cell.distance,
+                        "time_seconds": cell.time,
+                    })
+                })
+                .collect()
+        })
+        .collect();
 
     Ok(json!({
         "size": locations.len(),
@@ -1545,10 +1724,7 @@ async fn handle_get_valhalla_matrix(args: &Value) -> Result<Value> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    eprintln!(
-        "rmpca-mcp-server starting (v{})",
-        env!("CARGO_PKG_VERSION")
-    );
+    eprintln!("rmpca-mcp-server starting (v{})", env!("CARGO_PKG_VERSION"));
 
     let tools = tool_definitions();
     let tool_list_json: Vec<Value> = tools
@@ -1607,47 +1783,35 @@ async fn main() -> Result<()> {
                     .get("name")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let args = req
-                    .params
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or(Value::Null);
+                let args = req.params.get("arguments").cloned().unwrap_or(Value::Null);
 
                 let result = match name {
                     "extract_overture" => handle_extract_overture(&args).await,
                     "extract_osm" => handle_extract_osm(&args).await,
-                    "compile" => handle_compile(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                    "compile" => handle_compile(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     "optimize" => handle_optimize(&args).await,
-                    "clean" => handle_clean(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                    "clean" => handle_clean(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     "vrp_solve" => handle_vrp_solve(&args).await,
-                    "elevation_query" => handle_elevation_query(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    "elevation_profile" => handle_elevation_profile(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    "list_solvers" => handle_list_solvers(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    "haversine_distance" => handle_haversine_distance(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    "elevation_stats" => handle_elevation_stats(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    "dem_info" => handle_dem_info(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    "fuel_estimate" => handle_fuel_estimate(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    "inspect_rmp" => handle_inspect_rmp(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                    "elevation_query" => {
+                        handle_elevation_query(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "elevation_profile" => {
+                        handle_elevation_profile(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "list_solvers" => {
+                        handle_list_solvers(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "haversine_distance" => {
+                        handle_haversine_distance(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "elevation_stats" => {
+                        handle_elevation_stats(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "dem_info" => handle_dem_info(&args).map_err(|e| anyhow::anyhow!("{e}")),
+                    "fuel_estimate" => {
+                        handle_fuel_estimate(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "inspect_rmp" => handle_inspect_rmp(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     "pipeline" => handle_pipeline(&args).await,
                     "get_valhalla_matrix" => handle_get_valhalla_matrix(&args).await,
                     other => {
@@ -1668,4 +1832,107 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_parse_bbox_success() {
+        let args = json!({
+            "bbox": {
+                "min_lon": -74.0,
+                "min_lat": 40.0,
+                "max_lon": -73.0,
+                "max_lat": 41.0
+            }
+        });
+
+        let result = parse_bbox(&args);
+        assert!(result.is_ok());
+
+        let bbox = result.unwrap();
+        // Since BBoxRequest doesn't derive PartialEq, we test fields individually
+        assert_eq!(bbox.min_lon, -74.0);
+        assert_eq!(bbox.min_lat, 40.0);
+        assert_eq!(bbox.max_lon, -73.0);
+        assert_eq!(bbox.max_lat, 41.0);
+    }
+
+    #[test]
+    fn test_parse_bbox_missing_bbox() {
+        let args = json!({});
+        let result = parse_bbox(&args);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Missing 'bbox' parameter");
+    }
+
+    #[test]
+    fn test_parse_bbox_missing_fields() {
+        // Missing min_lon
+        let args1 = json!({
+            "bbox": {
+                "min_lat": 40.0,
+                "max_lon": -73.0,
+                "max_lat": 41.0
+            }
+        });
+        let result1 = parse_bbox(&args1);
+        assert!(result1.is_err());
+        assert_eq!(result1.unwrap_err().to_string(), "bbox.min_lon required");
+
+        // Missing min_lat
+        let args2 = json!({
+            "bbox": {
+                "min_lon": -74.0,
+                "max_lon": -73.0,
+                "max_lat": 41.0
+            }
+        });
+        let result2 = parse_bbox(&args2);
+        assert!(result2.is_err());
+        assert_eq!(result2.unwrap_err().to_string(), "bbox.min_lat required");
+
+        // Missing max_lon
+        let args3 = json!({
+            "bbox": {
+                "min_lon": -74.0,
+                "min_lat": 40.0,
+                "max_lat": 41.0
+            }
+        });
+        let result3 = parse_bbox(&args3);
+        assert!(result3.is_err());
+        assert_eq!(result3.unwrap_err().to_string(), "bbox.max_lon required");
+
+        // Missing max_lat
+        let args4 = json!({
+            "bbox": {
+                "min_lon": -74.0,
+                "min_lat": 40.0,
+                "max_lon": -73.0
+            }
+        });
+        let result4 = parse_bbox(&args4);
+        assert!(result4.is_err());
+        assert_eq!(result4.unwrap_err().to_string(), "bbox.max_lat required");
+    }
+
+    #[test]
+    fn test_parse_bbox_invalid_types() {
+        let args = json!({
+            "bbox": {
+                "min_lon": "not_a_number",
+                "min_lat": 40.0,
+                "max_lon": -73.0,
+                "max_lat": 41.0
+            }
+        });
+
+        let result = parse_bbox(&args);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "bbox.min_lon required");
+    }
 }
