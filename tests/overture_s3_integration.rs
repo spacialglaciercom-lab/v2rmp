@@ -1,18 +1,18 @@
 #[cfg(test)]
 mod overture_s3_integration {
-    use std::sync::Arc;
+    use futures_util::StreamExt;
     use object_store::aws::AmazonS3Builder;
     use object_store::path::Path;
     use object_store::ObjectStore;
-    use futures_util::StreamExt;
+    use std::sync::Arc;
 
     const BUCKET: &str = "overturemaps-us-west-2";
     const REGION: &str = "us-west-2";
     const RELEASE: &str = "2026-04-15.0";
 
     fn build_store() -> Arc<dyn ObjectStore> {
-        let opts = object_store::ClientOptions::new()
-            .with_timeout(std::time::Duration::from_secs(30));
+        let opts =
+            object_store::ClientOptions::new().with_timeout(std::time::Duration::from_secs(30));
         let store = AmazonS3Builder::new()
             .with_bucket_name(BUCKET)
             .with_region(REGION)
@@ -62,7 +62,9 @@ mod overture_s3_integration {
         // Get first parquet file
         let mut stream = store.list(Some(&prefix));
         let first_parquet = loop {
-            let meta = stream.next().await
+            let meta = stream
+                .next()
+                .await
                 .expect("Stream ended")
                 .expect("Failed to list");
             if meta.location.to_string().ends_with(".parquet") {
@@ -73,13 +75,25 @@ mod overture_s3_integration {
         eprintln!("Downloading: {first_parquet}");
 
         let result = store.get(&first_parquet).await;
-        assert!(result.is_ok(), "Failed to GET parquet file: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to GET parquet file: {:?}",
+            result.err()
+        );
 
         let bytes = result.unwrap().bytes().await;
-        assert!(bytes.is_ok(), "Failed to read parquet file bytes: {:?}", bytes.err());
+        assert!(
+            bytes.is_ok(),
+            "Failed to read parquet file bytes: {:?}",
+            bytes.err()
+        );
 
         let data = bytes.unwrap();
-        assert!(data.len() > 1024, "Parquet file too small: {} bytes", data.len());
+        assert!(
+            data.len() > 1024,
+            "Parquet file too small: {} bytes",
+            data.len()
+        );
         eprintln!("Downloaded {} bytes from {first_parquet}", data.len());
 
         // Verify it's a valid parquet file (magic bytes)
@@ -109,6 +123,10 @@ mod overture_s3_integration {
         }
 
         eprintln!("Found {} unique partition files", unique_files.len());
-        assert!(unique_files.len() >= 3, "Expected at least 3 partitions, got {}", unique_files.len());
+        assert!(
+            unique_files.len() >= 3,
+            "Expected at least 3 partitions, got {}",
+            unique_files.len()
+        );
     }
 }

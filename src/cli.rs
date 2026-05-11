@@ -892,7 +892,8 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
         window_close: None,
     };
 
-    let output = crate::core::vrp::registry::solve_with(solver_id, &vrp_input).await
+    let output = crate::core::vrp::registry::solve_with(solver_id, &vrp_input)
+        .await
         .map_err(|e| anyhow::anyhow!("VRP Solver error: {}", e))?;
 
     std::fs::create_dir_all(&args.output_dir)?;
@@ -1115,7 +1116,12 @@ async fn run_embed_cmd(args: EmbedArgs, json: bool) -> Result<()> {
         output_json(&embeddings)?;
     } else {
         for (i, emb) in embeddings.iter().enumerate() {
-            tracing::info!("Embedding {}: dimension {}, first few values: {:?}", i, emb.len(), &emb[..5.min(emb.len())]);
+            tracing::info!(
+                "Embedding {}: dimension {}, first few values: {:?}",
+                i,
+                emb.len(),
+                &emb[..5.min(emb.len())]
+            );
         }
     }
 
@@ -1218,21 +1224,35 @@ fn run_elevation_cmd(args: ElevationArgs, json: bool) -> Result<()> {
             } else {
                 println!("Route Elevation Profile:");
                 println!("  Distance: {:.2} km", profile.distance_km);
-                println!("  Elevation: {:.1} - {:.1} m (avg {:.1} m)", profile.min_elevation, profile.max_elevation, profile.avg_elevation);
-                println!("  Ascent: {:.1} m, Descent: {:.1} m", profile.total_ascent, profile.total_descent);
+                println!(
+                    "  Elevation: {:.1} - {:.1} m (avg {:.1} m)",
+                    profile.min_elevation, profile.max_elevation, profile.avg_elevation
+                );
+                println!(
+                    "  Ascent: {:.1} m, Descent: {:.1} m",
+                    profile.total_ascent, profile.total_descent
+                );
                 println!("  Sample points: {}", profile.points.len());
             }
         }
 
         ElevationCommand::Stats(s) => {
             let (min_lon, min_lat, max_lon, max_lat) = parse_bbox(&s.bbox)?;
-            let bbox = crate::core::elevation::BBox { min_lon, min_lat, max_lon, max_lat };
+            let bbox = crate::core::elevation::BBox {
+                min_lon,
+                min_lat,
+                max_lon,
+                max_lat,
+            };
             let stats = dem.bbox_stats(bbox, s.step)?;
             if json {
                 output_json(&stats)?;
             } else {
                 println!("Elevation Stats:");
-                println!("  Range: {:.1} - {:.1} m (avg {:.1} m)", stats.min_elevation, stats.max_elevation, stats.avg_elevation);
+                println!(
+                    "  Range: {:.1} - {:.1} m (avg {:.1} m)",
+                    stats.min_elevation, stats.max_elevation, stats.avg_elevation
+                );
                 println!("  Coverage: {:.1}%", stats.coverage_percent);
                 println!("  Valid pixels: {}", stats.pixel_count);
             }
@@ -1245,8 +1265,14 @@ fn run_elevation_cmd(args: ElevationArgs, json: bool) -> Result<()> {
             } else {
                 println!("DEM Info:");
                 println!("  Size: {} x {} pixels", info.width, info.height);
-                println!("  BBox: [{:.4}, {:.4}, {:.4}, {:.4}]", info.bbox.min_lon, info.bbox.min_lat, info.bbox.max_lon, info.bbox.max_lat);
-                println!("  Pixel size: {:.6} x {:.6}", info.pixel_size_x, info.pixel_size_y);
+                println!(
+                    "  BBox: [{:.4}, {:.4}, {:.4}, {:.4}]",
+                    info.bbox.min_lon, info.bbox.min_lat, info.bbox.max_lon, info.bbox.max_lat
+                );
+                println!(
+                    "  Pixel size: {:.6} x {:.6}",
+                    info.pixel_size_x, info.pixel_size_y
+                );
                 println!("  NoData: {:?}", info.nodata);
             }
         }
