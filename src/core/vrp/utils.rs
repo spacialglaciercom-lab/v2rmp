@@ -303,7 +303,9 @@ pub fn build_sweep_routes(
         let lb = &locations[b];
         let angle_a = (la.lat - depot.lat).atan2(la.lon - depot.lon);
         let angle_b = (lb.lat - depot.lat).atan2(lb.lon - depot.lon);
-        angle_a.partial_cmp(&angle_b).unwrap_or(std::cmp::Ordering::Equal)
+        angle_a
+            .partial_cmp(&angle_b)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     let per_route = (indices.len() as f64 / num_vehicles as f64).ceil() as usize;
@@ -312,9 +314,13 @@ pub fn build_sweep_routes(
     for v in 0..num_vehicles {
         let start = v * per_route;
         let end = std::cmp::min(start + per_route, indices.len());
-        if start >= indices.len() { break; }
+        if start >= indices.len() {
+            break;
+        }
         let segment = &indices[start..end];
-        if segment.is_empty() { continue; }
+        if segment.is_empty() {
+            continue;
+        }
 
         let mut route = vec![0];
         let mut remaining: std::collections::HashSet<usize> = segment.iter().copied().collect();
@@ -339,8 +345,6 @@ pub fn build_sweep_routes(
     route_indices
 }
 
-
-
 /// Parse a CSV file of coordinates into VRP solver stops.
 ///
 /// Supported column sets:
@@ -350,7 +354,9 @@ pub fn build_sweep_routes(
 /// The `type` column accepts "depot" or "stop" (default: "stop").
 /// If no depot is present, the first row becomes the depot.
 /// The `demand` column is optional; defaults to 1.0 for stops, 0.0 for depots.
-pub fn parse_csv_stops(csv_path: &str) -> Result<(Vec<crate::core::vrp::types::VRPSolverStop>, Vec<usize>), String> {
+pub fn parse_csv_stops(
+    csv_path: &str,
+) -> Result<(Vec<crate::core::vrp::types::VRPSolverStop>, Vec<usize>), String> {
     use std::io::Read;
     let mut file = std::fs::File::open(csv_path)
         .map_err(|e| format!("Cannot open CSV '{}': {}", csv_path, e))?;
@@ -363,29 +369,49 @@ pub fn parse_csv_stops(csv_path: &str) -> Result<(Vec<crate::core::vrp::types::V
         .trim(csv::Trim::All)
         .from_reader(content.as_bytes());
 
-    let headers = reader.headers()
+    let headers = reader
+        .headers()
         .map_err(|e| format!("Failed to read CSV headers: {}", e))?
         .clone();
 
-    let lat_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("lat") || h.eq_ignore_ascii_case("latitude"))
+    let lat_idx = headers
+        .iter()
+        .position(|h| h.eq_ignore_ascii_case("lat") || h.eq_ignore_ascii_case("latitude"))
         .ok_or("CSV must have a 'lat' column")?;
-    let lon_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("lon") || h.eq_ignore_ascii_case("lng") || h.eq_ignore_ascii_case("longitude"))
+    let lon_idx = headers
+        .iter()
+        .position(|h| {
+            h.eq_ignore_ascii_case("lon")
+                || h.eq_ignore_ascii_case("lng")
+                || h.eq_ignore_ascii_case("longitude")
+        })
         .ok_or("CSV must have a 'lon' column")?;
-    let label_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("label") || h.eq_ignore_ascii_case("name") || h.eq_ignore_ascii_case("id"));
-    let demand_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("demand"));
-    let type_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("type") || h.eq_ignore_ascii_case("role"));
+    let label_idx = headers.iter().position(|h| {
+        h.eq_ignore_ascii_case("label")
+            || h.eq_ignore_ascii_case("name")
+            || h.eq_ignore_ascii_case("id")
+    });
+    let demand_idx = headers
+        .iter()
+        .position(|h| h.eq_ignore_ascii_case("demand"));
+    let type_idx = headers
+        .iter()
+        .position(|h| h.eq_ignore_ascii_case("type") || h.eq_ignore_ascii_case("role"));
 
     let mut stops = Vec::new();
     let mut depot_indices = Vec::new();
 
     for (row_num, result) in reader.records().enumerate() {
-        let record = result.map_err(|e| format!("CSV parse error at row {}: {}", row_num + 2, e))?;
+        let record =
+            result.map_err(|e| format!("CSV parse error at row {}: {}", row_num + 2, e))?;
 
-        let lat: f64 = record.get(lat_idx)
+        let lat: f64 = record
+            .get(lat_idx)
             .ok_or_else(|| format!("Missing lat at row {}", row_num + 2))?
             .parse()
             .map_err(|e| format!("Invalid lat at row {}: {}", row_num + 2, e))?;
-        let lon: f64 = record.get(lon_idx)
+        let lon: f64 = record
+            .get(lon_idx)
             .ok_or_else(|| format!("Missing lon at row {}", row_num + 2))?
             .parse()
             .map_err(|e| format!("Invalid lon at row {}: {}", row_num + 2, e))?;

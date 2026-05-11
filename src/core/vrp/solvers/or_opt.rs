@@ -4,7 +4,12 @@
 use super::super::types::*;
 use super::super::utils::{matrix_get_dist, matrix_get_time};
 
-fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize, balance_load: bool) -> SolveResult {
+fn solve(
+    matrix: &DistMatrix,
+    locations: &[VRPSolverStop],
+    num_vehicles: usize,
+    balance_load: bool,
+) -> SolveResult {
     let n = matrix.len();
     if n <= 1 {
         return SolveResult {
@@ -216,8 +221,8 @@ impl VRPSolver for OrOptSolver {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::vrp::test_utils::{make_input, make_stop, build_haversine_matrix};
     use super::*;
+    use crate::core::vrp::test_utils::{build_haversine_matrix, make_input, make_stop};
 
     #[tokio::test]
     async fn test_or_opt_single_depot() {

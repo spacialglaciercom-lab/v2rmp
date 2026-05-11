@@ -12,6 +12,12 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             "Run route optimization to create a saved route",
         );
     } else {
-        super::draw_selectable_list(f, area, "Saved Routes", &app.saved_routes, app.browse_selection);
+        super::draw_selectable_list(
+            f,
+            area,
+            "Saved Routes",
+            &app.saved_routes,
+            app.browse_selection,
+        );
     }
 }
