@@ -1,0 +1,27 @@
+--- src/core/compile.rs
++++ src/core/compile.rs
+@@ -259,3 +259,20 @@
+         assert!(result.is_err());
+         assert!(result.unwrap_err().to_string().contains("Failed to open input GeoJSON"));
+     }
++
++    #[test]
++    fn test_is_rmp_file() {
++        // Happy path: exact match
++        assert!(is_rmp_file(b"RMP1"));
++
++        // Happy path: with extra data
++        assert!(is_rmp_file(b"RMP1someextradata"));
++
++        // Error path: wrong magic bytes
++        assert!(!is_rmp_file(b"RMP2"));
++        assert!(!is_rmp_file(b"rmp1"));
++        assert!(!is_rmp_file(b"ABCD"));
++
++        // Edge cases: too short or empty
++        assert!(!is_rmp_file(b"RMP"));
++        assert!(!is_rmp_file(b"RM"));
++        assert!(!is_rmp_file(b"R"));
++        assert!(!is_rmp_file(b""));
++    }
+ }
