@@ -1306,3 +1306,32 @@ pub async fn run() -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_road_classes() {
+        // empty should return all vehicle classes
+        let empty: Vec<String> = vec![];
+        let res = parse_road_classes(&empty).unwrap();
+        assert_eq!(res, RoadClass::all_vehicle());
+
+        // single valid
+        let single = vec!["residential".to_string()];
+        let res = parse_road_classes(&single).unwrap();
+        assert_eq!(res, vec![RoadClass::Residential]);
+
+        // multiple valid
+        let multiple = vec!["primary".to_string(), "secondary".to_string()];
+        let res = parse_road_classes(&multiple).unwrap();
+        assert_eq!(res, vec![RoadClass::Primary, RoadClass::Secondary]);
+
+        // invalid should error
+        let invalid = vec!["primary".to_string(), "invalid_class".to_string()];
+        let res = parse_road_classes(&invalid);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err().to_string(), "Unknown road class: invalid_class");
+    }
+}

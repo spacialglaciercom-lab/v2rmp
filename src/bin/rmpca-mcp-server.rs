@@ -1007,7 +1007,7 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
             let lon = s.get("lon").and_then(|v| v.as_f64())
                 .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
             let label = s.get("label").and_then(|v| v.as_str())
-                .unwrap_or_else(|| "")
+                .unwrap_or("")
                 .to_string();
             let demand = s.get("demand").and_then(|v| v.as_f64());
             Ok(VRPSolverStop {
@@ -1618,36 +1618,36 @@ async fn main() -> Result<()> {
                     "extract_osm" => handle_extract_osm(&args).await,
                     "compile" => handle_compile(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "optimize" => handle_optimize(&args).await,
                     "clean" => handle_clean(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "vrp_solve" => handle_vrp_solve(&args).await,
                     "elevation_query" => handle_elevation_query(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "elevation_profile" => handle_elevation_profile(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "list_solvers" => handle_list_solvers(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "haversine_distance" => handle_haversine_distance(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "elevation_stats" => handle_elevation_stats(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "dem_info" => handle_dem_info(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "fuel_estimate" => handle_fuel_estimate(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "inspect_rmp" => handle_inspect_rmp(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "pipeline" => handle_pipeline(&args).await,
                     "get_valhalla_matrix" => handle_get_valhalla_matrix(&args).await,
                     other => {
