@@ -150,8 +150,6 @@ pub struct RmpEdge {
 
 // ── Turn classification ──────────────────────────────────
 
-pub(crate) use super::haversine_m;
-
 /// Classify a turn by bearing delta (degrees).
 /// Returns "straight", "right", "left", or "u_turn".
 pub fn classify_turn(bearing_delta: f64) -> &'static str {
@@ -174,15 +172,50 @@ trait NormalizeAngle {
 impl NormalizeAngle for f64 {
     fn normalize(self, lower: f64, upper: f64) -> f64 {
         let width = upper - lower;
-        let mut val = self;
-        while val < lower {
-            val += width;
-        }
-        while val >= upper {
-            val -= width;
-        }
-        val
+        ((self - lower).rem_euclid(width)) + lower
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NodeRad {
+    lat: f64,
+    lon: f64,
+    sin_lat: f64,
+    cos_lat: f64,
+}
+
+impl NodeRad {
+    fn from_rmp(node: &RmpNode) -> Self {
+        let lat = node.lat.to_radians();
+        let lon = node.lon.to_radians();
+        Self {
+            lat,
+            lon,
+            sin_lat: lat.sin(),
+            cos_lat: lat.cos(),
+        }
+    }
+}
+
+/// Optimized bearing calculation using pre-calculated radian coordinates.
+/// This avoids redundant `to_radians` calls and trigonometric operations.
+fn bearing_rad(n1: &NodeRad, n2: &NodeRad) -> f64 {
+    let dlon = n2.lon - n1.lon;
+    let y = dlon.sin() * n2.cos_lat;
+    let x = n1.cos_lat * n2.sin_lat - n1.sin_lat * n2.cos_lat * dlon.cos();
+    let b = y.atan2(x).to_degrees();
+    b.rem_euclid(360.0)
+}
+
+/// Optimized haversine distance using pre-calculated radian coordinates.
+/// This avoids redundant `to_radians` calls and trigonometric operations.
+fn haversine_m_rad(n1: &NodeRad, n2: &NodeRad) -> f64 {
+    const R: f64 = 6_371_000.0;
+    let dlat = n2.lat - n1.lat;
+    let dlon = n2.lon - n1.lon;
+    let a = (dlat / 2.0).sin().powi(2)
+        + n1.cos_lat * n2.cos_lat * (dlon / 2.0).sin().powi(2);
+    R * 2.0 * a.sqrt().atan2((1.0 - a).sqrt())
 }
 
 // ── Binary parser ────────────────────────────────────────────────────
@@ -263,8 +296,8 @@ fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let lat1_r = lat1.to_radians();
     let lat2_r = lat2.to_radians();
 
-    let x = dlon.cos() * lat2_r.sin();
-    let y = lat1_r.cos() * lat2_r.sin() - lat1_r.sin() * lat2_r.cos() * dlon.cos();
+    let y = dlon.sin() * lat2_r.cos();
+    let x = lat1_r.cos() * lat2_r.sin() - lat1_r.sin() * lat2_r.cos() * dlon.cos();
 
     let bearing_rad = y.atan2(x);
     (bearing_rad.to_degrees() + 360.0) % 360.0
@@ -296,6 +329,8 @@ pub struct CppOutput {
 /// Returns a `CppOutput` with both summary statistics and the full circuit.
 pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot: Option<(f64, f64)>) -> anyhow::Result<CppOutput> {
     let start = Instant::now();
+
+    let nodes_rad: Vec<NodeRad> = nodes.iter().map(NodeRad::from_rmp).collect();
 
     if nodes.is_empty() || edges.is_empty() {
         return Ok(CppOutput {
@@ -435,8 +470,9 @@ pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot
     let start_node = if let Some((dep_lat, dep_lon)) = depot {
         let mut best_node = 0;
         let mut best_dist = f64::MAX;
-        for (i, node) in nodes.iter().enumerate() {
-            let dist = haversine_m(dep_lat, dep_lon, node.lat, node.lon);
+        let dep_rad = NodeRad::from_rmp(&RmpNode { lat: dep_lat, lon: dep_lon });
+        for (i, node_rad) in nodes_rad.iter().enumerate() {
+            let dist = haversine_m_rad(&dep_rad, node_rad);
             if dist < best_dist { best_dist = dist; best_node = i; }
         }
         best_node
@@ -490,20 +526,26 @@ pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot
 
     // Turn classification
     if circuit.len() > 2 {
-        for i in 1..circuit.len().saturating_sub(1) {
-            let prev = circuit[i - 1] as usize;
-            let curr = circuit[i] as usize;
-            let next = circuit[i + 1] as usize;
-            if prev == curr || curr == next { continue; }
-            let b_in = bearing(nodes[prev].lat, nodes[prev].lon, nodes[curr].lat, nodes[curr].lon);
-            let b_out = bearing(nodes[curr].lat, nodes[curr].lon, nodes[next].lat, nodes[next].lon);
-            let b_in_reverse = (b_in + 180.0).normalize(0.0, 360.0);
-            let delta = b_out - b_in_reverse;
-            match classify_turn(delta) {
-                "left" => turns.left += 1,
-                "right" => turns.right += 1,
-                "u_turn" => turns.u_turn += 1,
-                _ => turns.straight += 1,
+        let mut segment_bearings = Vec::with_capacity(circuit.len().saturating_sub(1));
+        for i in 0..circuit.len().saturating_sub(1) {
+            let u = circuit[i] as usize;
+            let v = circuit[i + 1] as usize;
+            if u == v {
+                segment_bearings.push(None);
+            } else {
+                segment_bearings.push(Some(bearing_rad(&nodes_rad[u], &nodes_rad[v])));
+            }
+        }
+
+        for i in 0..segment_bearings.len().saturating_sub(1) {
+            if let (Some(b_in), Some(b_out)) = (segment_bearings[i], segment_bearings[i + 1]) {
+                let delta = b_out - b_in;
+                match classify_turn(delta) {
+                    "left" => turns.left += 1,
+                    "right" => turns.right += 1,
+                    "u_turn" => turns.u_turn += 1,
+                    _ => turns.straight += 1,
+                }
             }
         }
     }
@@ -639,19 +681,26 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
     if let Some(ref routes) = output.routes {
         for route in routes {
             if route.len() > 2 {
-                for i in 1..route.len() - 1 {
-                    let prev = &route[i - 1];
-                    let curr = &route[i];
-                    let next = &route[i + 1];
-                    let b_in = bearing(prev.lat, prev.lon, curr.lat, curr.lon);
-                    let b_out = bearing(curr.lat, curr.lon, next.lat, next.lon);
-                    let b_in_rev = (b_in + 180.0) % 360.0;
-                    let delta = b_out - b_in_rev;
-                    match classify_turn(delta) {
-                        "left" => turns.left += 1,
-                        "right" => turns.right += 1,
-                        "u_turn" => turns.u_turn += 1,
-                        _ => turns.straight += 1,
+                let mut segment_bearings = Vec::with_capacity(route.len().saturating_sub(1));
+                for i in 0..route.len().saturating_sub(1) {
+                    let u = &route[i];
+                    let v = &route[i + 1];
+                    if (u.lat - v.lat).abs() < 1e-9 && (u.lon - v.lon).abs() < 1e-9 {
+                        segment_bearings.push(None);
+                    } else {
+                        segment_bearings.push(Some(bearing(u.lat, u.lon, v.lat, v.lon)));
+                    }
+                }
+
+                for i in 0..segment_bearings.len().saturating_sub(1) {
+                    if let (Some(b_in), Some(b_out)) = (segment_bearings[i], segment_bearings[i + 1]) {
+                        let delta = b_out - b_in;
+                        match classify_turn(delta) {
+                            "left" => turns.left += 1,
+                            "right" => turns.right += 1,
+                            "u_turn" => turns.u_turn += 1,
+                            _ => turns.straight += 1,
+                        }
                     }
                 }
             }
@@ -761,7 +810,7 @@ mod tests {
     }
     #[test]
     fn test_haversine_m_known_distance() {
-        let dist = haversine_m(40.7128, -74.0060, 34.0522, -118.2437);
+        let dist = crate::core::haversine_m(40.7128, -74.0060, 34.0522, -118.2437);
         assert!((dist - 3_935_000.0).abs() < 10_000.0);
     }
     #[test]

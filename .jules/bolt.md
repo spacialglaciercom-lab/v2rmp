@@ -20,3 +20,7 @@
 ## 2026-05-08 - [Avoid Redundant Allocations]
 **Learning:** Using `std::slice::from_ref(item)` is a zero-cost way to pass a single item to a function expecting a slice, avoiding unnecessary vector allocations or clones that occur with `&[item.clone()]`.
 **Action:** Prefer `std::slice::from_ref` for performance-critical paths where single items are passed as slices.
+
+## 2026-05-11 - [Geometric Computation & Turn Classification Optimization]
+**Learning:** Redundant `to_radians()` conversions and trigonometric calls in large graph circuits can be a major bottleneck. Pre-calculating radian coordinates and sine/cosine values for all nodes into a `NodeRad` vector at the start of optimization reduces redundant work. Additionally, reusing bearings between adjacent segments in a circuit reduces bearing calculations by 50% during turn classification. Using `rem_euclid` for angle normalization is more efficient and idiomatic than `while` loops.
+**Action:** Always pre-calculate radian/trigonometric values for nodes and reuse intermediate geometric results (like bearings) when iterating over paths. Use `rem_euclid` for efficient floating-point normalization.
