@@ -50,8 +50,7 @@ pub fn run_compile(req: &CompileRequest) -> anyhow::Result<CompileResult> {
         geojson = cleaned_fc;
     }
 
-    let (buf, node_count, edge_count) =
-        build_rmp_buffer(&geojson, req.prune_disconnected)?;
+    let (buf, node_count, edge_count) = build_rmp_buffer(&geojson, req.prune_disconnected)?;
 
     // Write output file
     std::fs::write(&req.output_rmp, &buf)
@@ -91,7 +90,13 @@ fn build_rmp_buffer(
             .as_ref()
             .and_then(|props| props.get("oneway"))
             .and_then(|v| v.as_str())
-            .map(|s| if matches!(s, "yes" | "1" | "true") { 1u8 } else { 0u8 })
+            .map(|s| {
+                if matches!(s, "yes" | "1" | "true") {
+                    1u8
+                } else {
+                    0u8
+                }
+            })
             .unwrap_or(0);
 
         let line_strings: Vec<&Vec<Vec<f64>>> = match &geometry.value {
@@ -101,7 +106,9 @@ fn build_rmp_buffer(
         };
 
         for coords in line_strings {
-            if coords.len() < 2 { continue; }
+            if coords.len() < 2 {
+                continue;
+            }
 
             let coord_points: Vec<(f64, f64)> = coords
                 .iter()
@@ -109,7 +116,9 @@ fn build_rmp_buffer(
                 .map(|p| (p[1], p[0]))
                 .collect();
 
-            if coord_points.len() < 2 { continue; }
+            if coord_points.len() < 2 {
+                continue;
+            }
 
             let mut last_node_id = None;
             for i in 0..coord_points.len() - 1 {
@@ -193,7 +202,9 @@ fn prune_disconnected_components(
         }
     }
 
-    if components.len() <= 1 { return; }
+    if components.len() <= 1 {
+        return;
+    }
 
     components.sort_by_key(|c| std::cmp::Reverse(c.len()));
     let largest = &components[0];
@@ -256,6 +267,31 @@ mod tests {
         };
         let result = run_compile(&req);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Failed to open input GeoJSON"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Failed to open input GeoJSON"));
+    }
+
+    #[test]
+    fn test_is_rmp_file_valid() {
+        assert!(is_rmp_file(b"RMP1_some_data_here"));
+        assert!(is_rmp_file(b"RMP1"));
+    }
+
+    #[test]
+    fn test_is_rmp_file_invalid_magic() {
+        assert!(!is_rmp_file(b"RMP2_data"));
+        assert!(!is_rmp_file(b"abcd"));
+        assert!(!is_rmp_file(b"RMP "));
+        assert!(!is_rmp_file(b"rmp1"));
+    }
+
+    #[test]
+    fn test_is_rmp_file_too_short() {
+        assert!(!is_rmp_file(b"RMP"));
+        assert!(!is_rmp_file(b"RM"));
+        assert!(!is_rmp_file(b"R"));
+        assert!(!is_rmp_file(b""));
     }
 }
