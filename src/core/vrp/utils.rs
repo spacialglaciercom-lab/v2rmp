@@ -303,7 +303,9 @@ pub fn build_sweep_routes(
         let lb = &locations[b];
         let angle_a = (la.lat - depot.lat).atan2(la.lon - depot.lon);
         let angle_b = (lb.lat - depot.lat).atan2(lb.lon - depot.lon);
-        angle_a.partial_cmp(&angle_b).unwrap_or(std::cmp::Ordering::Equal)
+        angle_a
+            .partial_cmp(&angle_b)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     let per_route = (indices.len() as f64 / num_vehicles as f64).ceil() as usize;
@@ -312,9 +314,13 @@ pub fn build_sweep_routes(
     for v in 0..num_vehicles {
         let start = v * per_route;
         let end = std::cmp::min(start + per_route, indices.len());
-        if start >= indices.len() { break; }
+        if start >= indices.len() {
+            break;
+        }
         let segment = &indices[start..end];
-        if segment.is_empty() { continue; }
+        if segment.is_empty() {
+            continue;
+        }
 
         let mut route = vec![0];
         let mut remaining: std::collections::HashSet<usize> = segment.iter().copied().collect();
@@ -339,8 +345,6 @@ pub fn build_sweep_routes(
     route_indices
 }
 
-
-
 /// Parse a CSV file of coordinates into VRP solver stops.
 ///
 /// Supported column sets:
@@ -350,7 +354,9 @@ pub fn build_sweep_routes(
 /// The `type` column accepts "depot" or "stop" (default: "stop").
 /// If no depot is present, the first row becomes the depot.
 /// The `demand` column is optional; defaults to 1.0 for stops, 0.0 for depots.
-pub fn parse_csv_stops(csv_path: &str) -> Result<(Vec<crate::core::vrp::types::VRPSolverStop>, Vec<usize>), String> {
+pub fn parse_csv_stops(
+    csv_path: &str,
+) -> Result<(Vec<crate::core::vrp::types::VRPSolverStop>, Vec<usize>), String> {
     use std::io::Read;
     let mut file = std::fs::File::open(csv_path)
         .map_err(|e| format!("Cannot open CSV '{}': {}", csv_path, e))?;
@@ -363,29 +369,49 @@ pub fn parse_csv_stops(csv_path: &str) -> Result<(Vec<crate::core::vrp::types::V
         .trim(csv::Trim::All)
         .from_reader(content.as_bytes());
 
-    let headers = reader.headers()
+    let headers = reader
+        .headers()
         .map_err(|e| format!("Failed to read CSV headers: {}", e))?
         .clone();
 
-    let lat_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("lat") || h.eq_ignore_ascii_case("latitude"))
+    let lat_idx = headers
+        .iter()
+        .position(|h| h.eq_ignore_ascii_case("lat") || h.eq_ignore_ascii_case("latitude"))
         .ok_or("CSV must have a 'lat' column")?;
-    let lon_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("lon") || h.eq_ignore_ascii_case("lng") || h.eq_ignore_ascii_case("longitude"))
+    let lon_idx = headers
+        .iter()
+        .position(|h| {
+            h.eq_ignore_ascii_case("lon")
+                || h.eq_ignore_ascii_case("lng")
+                || h.eq_ignore_ascii_case("longitude")
+        })
         .ok_or("CSV must have a 'lon' column")?;
-    let label_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("label") || h.eq_ignore_ascii_case("name") || h.eq_ignore_ascii_case("id"));
-    let demand_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("demand"));
-    let type_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("type") || h.eq_ignore_ascii_case("role"));
+    let label_idx = headers.iter().position(|h| {
+        h.eq_ignore_ascii_case("label")
+            || h.eq_ignore_ascii_case("name")
+            || h.eq_ignore_ascii_case("id")
+    });
+    let demand_idx = headers
+        .iter()
+        .position(|h| h.eq_ignore_ascii_case("demand"));
+    let type_idx = headers
+        .iter()
+        .position(|h| h.eq_ignore_ascii_case("type") || h.eq_ignore_ascii_case("role"));
 
     let mut stops = Vec::new();
     let mut depot_indices = Vec::new();
 
     for (row_num, result) in reader.records().enumerate() {
-        let record = result.map_err(|e| format!("CSV parse error at row {}: {}", row_num + 2, e))?;
+        let record =
+            result.map_err(|e| format!("CSV parse error at row {}: {}", row_num + 2, e))?;
 
-        let lat: f64 = record.get(lat_idx)
+        let lat: f64 = record
+            .get(lat_idx)
             .ok_or_else(|| format!("Missing lat at row {}", row_num + 2))?
             .parse()
             .map_err(|e| format!("Invalid lat at row {}: {}", row_num + 2, e))?;
-        let lon: f64 = record.get(lon_idx)
+        let lon: f64 = record
+            .get(lon_idx)
             .ok_or_else(|| format!("Missing lon at row {}", row_num + 2))?
             .parse()
             .map_err(|e| format!("Invalid lon at row {}: {}", row_num + 2, e))?;
@@ -872,5 +898,119 @@ mod tests {
         // Out of bounds returns 0.0
         assert_eq!(matrix_get_dist(&m, 5, 5), 0.0);
         assert_eq!(matrix_get_time(&m, 5, 5), 0.0);
+    }
+
+    fn with_temp_csv<F>(content: &str, test_name: &str, f: F)
+    where
+        F: FnOnce(&str),
+    {
+        use std::fs;
+        let mut temp_dir = std::env::temp_dir();
+        temp_dir.push(format!("{}.csv", test_name));
+        fs::write(&temp_dir, content).unwrap();
+
+        f(temp_dir.to_str().unwrap());
+
+        let _ = fs::remove_file(temp_dir);
+    }
+
+    #[test]
+    fn test_parse_csv_stops_valid_with_depot() {
+        let content = "lat,lon,label,demand,type\n1.0,2.0,A,10,depot\n3.0,4.0,B,20,client";
+        with_temp_csv(content, "valid_with_depot", |path| {
+            let res = parse_csv_stops(path);
+            assert!(res.is_ok());
+            let (stops, depot_indices) = res.unwrap();
+            assert_eq!(stops.len(), 2);
+            assert_eq!(depot_indices, vec![0]);
+            assert_eq!(stops[0].label, "A");
+            assert_eq!(stops[0].demand, Some(10.0));
+            assert_eq!(stops[1].demand, Some(20.0));
+        });
+    }
+
+    #[test]
+    fn test_parse_csv_stops_valid_without_depot() {
+        let content = "lat,lon,label,demand\n1.0,2.0,A,10\n3.0,4.0,B,20";
+        with_temp_csv(content, "valid_without_depot", |path| {
+            let res = parse_csv_stops(path);
+            assert!(res.is_ok());
+            let (stops, depot_indices) = res.unwrap();
+            assert_eq!(stops.len(), 2);
+            assert_eq!(depot_indices, vec![0]);
+            // First stop should be assigned as depot, with demand 0.0
+            assert_eq!(stops[0].demand, Some(0.0));
+        });
+    }
+
+    #[test]
+    fn test_parse_csv_stops_missing_file() {
+        let res = parse_csv_stops("this_file_definitely_does_not_exist_12345.csv");
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("Cannot open CSV"));
+    }
+
+    #[test]
+    fn test_parse_csv_stops_missing_lat_column() {
+        let content = "lon,label,demand\n2.0,A,10";
+        with_temp_csv(content, "missing_lat", |path| {
+            let res = parse_csv_stops(path);
+            assert!(res.is_err());
+            assert!(res.unwrap_err().contains("CSV must have a 'lat' column"));
+        });
+    }
+
+    #[test]
+    fn test_parse_csv_stops_missing_lon_column() {
+        let content = "lat,label,demand\n1.0,A,10";
+        with_temp_csv(content, "missing_lon", |path| {
+            let res = parse_csv_stops(path);
+            assert!(res.is_err());
+            assert!(res.unwrap_err().contains("CSV must have a 'lon' column"));
+        });
+    }
+
+    #[test]
+    fn test_parse_csv_stops_invalid_lat_format() {
+        let content = "lat,lon,label\nbad,2.0,A";
+        with_temp_csv(content, "invalid_lat", |path| {
+            let res = parse_csv_stops(path);
+            assert!(res.is_err());
+            assert!(res.unwrap_err().contains("Invalid lat at row 2"));
+        });
+    }
+
+    #[test]
+    fn test_parse_csv_stops_invalid_lon_format() {
+        let content = "lat,lon,label\n1.0,bad,A";
+        with_temp_csv(content, "invalid_lon", |path| {
+            let res = parse_csv_stops(path);
+            assert!(res.is_err());
+            assert!(res.unwrap_err().contains("Invalid lon at row 2"));
+        });
+    }
+
+    #[test]
+    fn test_parse_csv_stops_empty_file() {
+        let content = "";
+        with_temp_csv(content, "empty_file", |path| {
+            let res = parse_csv_stops(path);
+            assert!(res.is_err());
+            let err = res.unwrap_err();
+            assert!(
+                err.contains("CSV must have a 'lat' column")
+                    || err.contains("Failed to read CSV headers")
+            );
+        });
+    }
+
+    #[test]
+    fn test_parse_csv_stops_only_headers() {
+        let content = "lat,lon,label,demand";
+        with_temp_csv(content, "only_headers", |path| {
+            let res = parse_csv_stops(path);
+            assert!(res.is_err());
+            assert!(res.unwrap_err().contains("CSV file contains no data rows"));
+        });
     }
 }
