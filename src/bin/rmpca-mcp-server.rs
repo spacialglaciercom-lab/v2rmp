@@ -35,11 +35,16 @@ use v2rmp::core::optimize::{
 };
 use v2rmp::core::vrp::registry::solve_with;
 use v2rmp::core::vrp::types::{
-    VRPSolverInput, VRPSolverStop, VrpObjective,
+    VRPSolverInput, VRPSolverOutput, VRPSolverStop, VrpObjective,
 };
 use v2rmp::core::vrp::utils::{build_haversine_matrix, get_valhalla_matrix};
 use v2rmp::core::elevation::{FuelCalculator};
-use v2rmp::core::ml::{RouteFeatures, predict_solver, score_route, route_feature_vector};
+use v2rmp::core::ml::features::InstanceFeatures;
+use v2rmp::core::ml::selector::{predict_solver, NeuralPrediction, default_model_path};
+use v2rmp::core::ml::quality_predictor::{predict_quality, QualityPrediction};
+use v2rmp::core::ml::automl::{predict_hyperparams, SolverHyperparams};
+use v2rmp::core::ml_legacy::{RouteFeatures, score_route, route_feature_vector};
+use v2rmp::core::nlp::{parse_query, to_vrp_json};
 
 // ── JSON-RPC / MCP types ───────────────────────────────────────────────────
 
@@ -805,6 +810,88 @@ fn tool_definitions() -> Vec<ToolDef> {
                 "required": ["locations"]
             }),
         },
+        ToolDef {
+            name: "predict_quality",
+            description: "Predict the expected route quality (gap to optimal and estimated tour length) \
+                before actually solving the VRP instance. Uses a learned model (or heuristic fallback) \
+                on 28-dimensional instance features.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "stops": {
+                        "type": "array",
+                        "description": "Array of stops. The first stop is the depot.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "lat": { "type": "number" },
+                                "lon": { "type": "number" },
+                                "label": { "type": "string" },
+                                "demand": { "type": "number" }
+                            },
+                            "required": ["lat", "lon"]
+                        }
+                    },
+                    "num_vehicles": { "type": "integer", "default": 1 },
+                    "vehicle_capacity": { "type": "number", "default": 100.0 },
+                    "objective": {
+                        "type": "string",
+                        "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"],
+                        "default": "min_distance"
+                    }
+                },
+                "required": ["stops"]
+            }),
+        },
+        ToolDef {
+            name: "tune_hyperparams",
+            description: "Predict instance-aware solver hyperparameters (max iterations, temperature, \
+                cooling rate, tabu tenure, neighbourhood radius) from geometric and graph features. \
+                Falls back to sensible defaults if no learned model is available.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "stops": {
+                        "type": "array",
+                        "description": "Array of stops. The first stop is the depot.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "lat": { "type": "number" },
+                                "lon": { "type": "number" },
+                                "label": { "type": "string" },
+                                "demand": { "type": "number" }
+                            },
+                            "required": ["lat", "lon"]
+                        }
+                    },
+                    "num_vehicles": { "type": "integer", "default": 1 },
+                    "vehicle_capacity": { "type": "number", "default": 100.0 },
+                    "objective": {
+                        "type": "string",
+                        "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"],
+                        "default": "min_distance"
+                    }
+                },
+                "required": ["stops"]
+            }),
+        },
+        ToolDef {
+            name: "parse_routing_query",
+            description: "Convert a natural-language routing request into a structured VRP JSON config. \
+                Extracts entities such as number of packages, vehicles, depot coordinates, deadlines, \
+                capacity, speed, and optimization objective. Returns a JSON object ready for the vrp_solve tool.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Natural language routing request, e.g. 'Route 50 packages with 5 vans starting at 45.5,-73.6 by 5pm'"
+                    }
+                },
+                "required": ["query"]
+            }),
+        },
     ]
 }
 
@@ -1565,28 +1652,27 @@ fn handle_predict_solver(args: &Value) -> Result<Value> {
         window_close: None,
     };
 
-    let features = RouteFeatures::from_input(&input);
-    let pred = predict_solver(&features);
+    let model_path = default_model_path();
+    let pred = predict_solver(&input, Some(&model_path))?;
 
-    let all_scores_json: Vec<Value> = pred.all_scores.into_iter().map(|(id, score)| {
+    let all_scores_json: Vec<Value> = pred.all_scores.iter().map(|(id, score)| {
         json!({"solver_id": id, "score": score})
     }).collect();
+
+    let inst_features = InstanceFeatures::from_input(&input);
 
     Ok(json!({
         "recommended": pred.recommended,
         "confidence": pred.confidence,
-        "runner_up": pred.runner_up.map(|(id, score)| json!({"solver_id": id, "score": score})),
+        "runner_up": pred.runner_up.as_ref().map(|(id, score)| json!({"solver_id": id, "score": score})),
         "all_scores": all_scores_json,
         "features": {
-            "num_stops": features.num_stops,
-            "num_vehicles": features.num_vehicles,
-            "avg_pairwise_km": features.avg_pairwise_km,
-            "lat_spread": features.lat_spread,
-            "lon_spread": features.lon_spread,
-            "density": features.density,
-            "tight_capacity": features.tight_capacity,
-            "objective": format!("{:?}", features.objective),
-        }
+            "num_stops": input.locations.len().saturating_sub(1),
+            "num_vehicles": input.num_vehicles,
+            "objective": format!("{:?}", input.objective),
+        },
+        "instance_feature_vector": inst_features.to_vector(),
+        "model_loaded": model_path.exists(),
     }))
 }
 
@@ -1845,6 +1931,134 @@ async fn handle_pipeline(args: &Value) -> Result<Value> {
     }))
 }
 
+// ── Predict Quality handler ────────────────────────────────────────────
+
+fn handle_predict_quality(args: &Value) -> Result<Value> {
+    let stops_val = args
+        .get("stops")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
+
+    let stops: Vec<VRPSolverStop> = stops_val
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let lat = s.get("lat").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+            let lon = s.get("lon").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+            let label = s.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let demand = s.get("demand").and_then(|v| v.as_f64());
+            Ok(VRPSolverStop { lat, lon, label, demand, arrival_time: None })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let num_vehicles = args.get("num_vehicles").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+    let vehicle_capacity = args.get("vehicle_capacity").and_then(|v| v.as_f64()).unwrap_or(100.0);
+    let objective = match args.get("objective").and_then(|v| v.as_str()).unwrap_or("min_distance") {
+        "min_time" => VrpObjective::MinTime,
+        "balance_load" => VrpObjective::BalanceLoad,
+        "min_vehicles" => VrpObjective::MinVehicles,
+        _ => VrpObjective::MinDistance,
+    };
+
+    let input = VRPSolverInput {
+        locations: stops,
+        num_vehicles,
+        vehicle_capacity,
+        objective,
+        matrix: None,
+        service_time_secs: None,
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+    };
+
+    let features = InstanceFeatures::from_input(&input);
+    let pred = predict_quality(&features);
+
+    Ok(json!({
+        "predicted_gap_pct": pred.predicted_gap_pct,
+        "predicted_tour_length_km": pred.predicted_tour_length_km,
+        "confidence": pred.confidence,
+        "feature_vector": features.to_vector(),
+    }))
+}
+
+// ── Tune Hyperparams handler ─────────────────────────────────────────────
+
+fn handle_tune_hyperparams(args: &Value) -> Result<Value> {
+    let stops_val = args
+        .get("stops")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
+
+    let stops: Vec<VRPSolverStop> = stops_val
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let lat = s.get("lat").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+            let lon = s.get("lon").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+            let label = s.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let demand = s.get("demand").and_then(|v| v.as_f64());
+            Ok(VRPSolverStop { lat, lon, label, demand, arrival_time: None })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let num_vehicles = args.get("num_vehicles").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+    let vehicle_capacity = args.get("vehicle_capacity").and_then(|v| v.as_f64()).unwrap_or(100.0);
+    let objective = match args.get("objective").and_then(|v| v.as_str()).unwrap_or("min_distance") {
+        "min_time" => VrpObjective::MinTime,
+        "balance_load" => VrpObjective::BalanceLoad,
+        "min_vehicles" => VrpObjective::MinVehicles,
+        _ => VrpObjective::MinDistance,
+    };
+
+    let input = VRPSolverInput {
+        locations: stops,
+        num_vehicles,
+        vehicle_capacity,
+        objective,
+        matrix: None,
+        service_time_secs: None,
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+    };
+
+    let features = InstanceFeatures::from_input(&input);
+    let params = predict_hyperparams(&features);
+
+    Ok(json!({
+        "max_iterations": params.max_iterations,
+        "temperature": params.temperature,
+        "tabu_tenure": params.tabu_tenure,
+        "cooling_rate": params.cooling_rate,
+        "neighbourhood_radius": params.neighbourhood_radius,
+        "feature_vector": features.to_vector(),
+    }))
+}
+
+// ── Parse Routing Query handler ──────────────────────────────────────────
+
+fn handle_parse_routing_query(args: &Value) -> Result<Value> {
+    let query = args
+        .get("query")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'query' parameter"))?;
+
+    let parsed = parse_query(query);
+    let json = to_vrp_json(&parsed);
+
+    Ok(json!({
+        "variant": parsed.variant,
+        "config": json,
+        "entities": parsed.entities,
+    }))
+}
+
 // ── Get Valhalla Matrix handler ──────────────────────────────────────────
 
 async fn handle_get_valhalla_matrix(args: &Value) -> Result<Value> {
@@ -2011,6 +2225,15 @@ async fn main() -> Result<()> {
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
                     "route_embedding" => handle_route_embedding(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .map(|v| v),
+                    "predict_quality" => handle_predict_quality(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .map(|v| v),
+                    "tune_hyperparams" => handle_tune_hyperparams(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .map(|v| v),
+                    "parse_routing_query" => handle_parse_routing_query(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
                     other => {

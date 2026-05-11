@@ -45,6 +45,14 @@ enum Commands {
     Embed(EmbedArgs),
     /// DEM elevation queries from local GeoTIFF
     Elevation(ElevationArgs),
+    /// Predict the best VRP solver for a set of stops
+    PredictSolver(PredictSolverArgs),
+    /// Predict expected route quality before solving
+    PredictQuality(PredictQualityArgs),
+    /// Tune solver hyperparameters for an instance
+    TuneHyperparams(TuneHyperparamsArgs),
+    /// Parse a natural-language routing query into JSON
+    ParseQuery(ParseQueryArgs),
 }
 
 #[derive(clap::Args, Serialize, Deserialize)]
@@ -133,6 +141,54 @@ struct FuelElevationArgs {
     /// Base fuel consumption in L/km
     #[arg(long, default_value_t = 0.35)]
     base_consumption: f64,
+}
+
+// ── Predict Solver ─────────────────────────────────────────────────────
+
+#[derive(clap::Args, Serialize, Deserialize)]
+struct PredictSolverArgs {
+    /// Path to JSON file with stops array (first = depot) or '-' for stdin
+    #[arg(short, long, default_value = "-")]
+    input: String,
+    /// Output results as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+// ── Predict Quality ────────────────────────────────────────────────────
+
+#[derive(clap::Args, Serialize, Deserialize)]
+struct PredictQualityArgs {
+    /// Path to JSON file with stops array (first = depot) or '-' for stdin
+    #[arg(short, long, default_value = "-")]
+    input: String,
+    /// Output results as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+// ── Tune Hyperparams ─────────────────────────────────────────────────
+
+#[derive(clap::Args, Serialize, Deserialize)]
+struct TuneHyperparamsArgs {
+    /// Path to JSON file with stops array (first = depot) or '-' for stdin
+    #[arg(short, long, default_value = "-")]
+    input: String,
+    /// Output results as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+// ── Parse Query ────────────────────────────────────────────────────────
+
+#[derive(clap::Args, Serialize, Deserialize)]
+struct ParseQueryArgs {
+    /// Natural language routing query
+    #[arg(short, long)]
+    query: String,
+    /// Output results as JSON
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(clap::Args)]
@@ -1270,6 +1326,124 @@ fn run_elevation_cmd(args: ElevationArgs, json: bool) -> Result<()> {
     Ok(())
 }
 
+// ── New ML command handlers ────────────────────────────────────────────
+
+use crate::core::ml::features::InstanceFeatures;
+use crate::core::ml::selector::{predict_solver, default_model_path};
+use crate::core::ml::quality_predictor::predict_quality;
+use crate::core::ml::automl::predict_hyperparams;
+use crate::core::nlp::{parse_query, to_vrp_json};
+use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
+
+fn parse_stops_json(path: &str) -> Result<Vec<VRPSolverStop>> {
+    let stops: Vec<VRPSolverStop> = if path == "-" {
+        serde_json::from_reader(std::io::stdin())?
+    } else {
+        let f = std::fs::File::open(path)?;
+        serde_json::from_reader(f)?
+    };
+    Ok(stops)
+}
+
+async fn run_predict_solver_cmd(args: PredictSolverArgs) -> Result<()> {
+    let stops = parse_stops_json(&args.input)?;
+    let input = VRPSolverInput {
+        locations: stops,
+        num_vehicles: 1,
+        vehicle_capacity: 100.0,
+        objective: VrpObjective::MinDistance,
+        matrix: None,
+        service_time_secs: None,
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+    };
+    let pred = predict_solver(&input, Some(&default_model_path()))?;
+    if args.json {
+        output_json(&pred)?;
+    } else {
+        println!("Recommended solver: {} (confidence: {:.2}%)", pred.recommended, pred.confidence * 100.0);
+        if let Some((ref id, score)) = pred.runner_up {
+            println!("Runner-up: {} ({:.2}%)", id, score as f64 * 100.0);
+        }
+        for (id, score) in &pred.all_scores {
+            println!("  {:20} {:.2}%", id, score * 100.0);
+        }
+    }
+    Ok(())
+}
+
+async fn run_predict_quality_cmd(args: PredictQualityArgs) -> Result<()> {
+    let stops = parse_stops_json(&args.input)?;
+    let input = VRPSolverInput {
+        locations: stops,
+        num_vehicles: 1,
+        vehicle_capacity: 100.0,
+        objective: VrpObjective::MinDistance,
+        matrix: None,
+        service_time_secs: None,
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+    };
+    let features = InstanceFeatures::from_input(&input);
+    let pred = predict_quality(&features);
+    if args.json {
+        output_json(&pred)?;
+    } else {
+        println!("Predicted gap to optimal: {:.1}%", pred.predicted_gap_pct);
+        println!("Predicted tour length:    {:.1} km", pred.predicted_tour_length_km);
+        println!("Confidence:               {:.2}", pred.confidence);
+    }
+    Ok(())
+}
+
+async fn run_tune_hyperparams_cmd(args: TuneHyperparamsArgs) -> Result<()> {
+    let stops = parse_stops_json(&args.input)?;
+    let input = VRPSolverInput {
+        locations: stops,
+        num_vehicles: 1,
+        vehicle_capacity: 100.0,
+        objective: VrpObjective::MinDistance,
+        matrix: None,
+        service_time_secs: None,
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+    };
+    let features = InstanceFeatures::from_input(&input);
+    let params = predict_hyperparams(&features);
+    if args.json {
+        output_json(&params)?;
+    } else {
+        println!("Suggested hyperparameters:");
+        println!("  max_iterations:      {}", params.max_iterations);
+        println!("  temperature:         {:.1}", params.temperature);
+        println!("  tabu_tenure:         {}", params.tabu_tenure);
+        println!("  cooling_rate:        {:.4}", params.cooling_rate);
+        println!("  neighbourhood_radius: {}", params.neighbourhood_radius);
+    }
+    Ok(())
+}
+
+fn run_parse_query_cmd(args: ParseQueryArgs) -> Result<()> {
+    let parsed = parse_query(&args.query);
+    let json = to_vrp_json(&parsed);
+    if args.json {
+        output_json(&json)?;
+    } else {
+        println!("Variant: {}", parsed.variant);
+        println!("Config: {}", serde_json::to_string_pretty(&json)?);
+        if !parsed.entities.is_empty() {
+            println!("Entities:");
+            for (k, v) in &parsed.entities {
+                println!("  {} = {}", k, v);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn read_json_input<T: serde::de::DeserializeOwned>(path: &str) -> Result<T> {
     let input: Box<dyn std::io::Read> = if path == "-" {
         Box::new(std::io::stdin())
@@ -1297,6 +1471,10 @@ pub async fn run() -> Result<()> {
         Commands::Serve(args) => run_serve_cmd(args).await,
         Commands::Embed(args) => run_embed_cmd(args, cli.json).await,
         Commands::Elevation(args) => run_elevation_cmd(args, cli.json),
+        Commands::PredictSolver(args) => run_predict_solver_cmd(args).await,
+        Commands::PredictQuality(args) => run_predict_quality_cmd(args).await,
+        Commands::TuneHyperparams(args) => run_tune_hyperparams_cmd(args).await,
+        Commands::ParseQuery(args) => run_parse_query_cmd(args),
     };
 
     if let Err(e) = result {

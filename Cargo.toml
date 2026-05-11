@@ -88,6 +88,7 @@ petgraph = "0.6"
 rstar = "0.12"
 ordered-float = "4.2"
 gdal = { version = "0.18", features = ["bindgen"], optional = true }
+regex = "1"
 
 # Web UI (eframe/egui) — feature-gated
 eframe = { version = "0.34.2", features = ["glow", "persistence"], optional = true }

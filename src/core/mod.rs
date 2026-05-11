@@ -7,6 +7,8 @@ pub mod extract;
 pub mod geo_types;
 pub mod optimize;
 pub mod ml;
+pub mod ml_legacy;
+pub mod nlp;
 #[cfg(feature = "extract")]
 pub mod osm;
 #[cfg(feature = "extract")]
