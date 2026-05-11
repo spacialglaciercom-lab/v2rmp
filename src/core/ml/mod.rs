@@ -16,4 +16,3 @@ pub mod selector;
 
 // Re-export the legacy rule-based module for backwards compatibility.
 // New code should prefer `selector::predict_solver`.
-pub use crate::core::ml_legacy as legacy;

@@ -9,10 +9,12 @@ use crate::core::optimize::{RmpEdge, RmpNode};
 use serde::{Deserialize, Serialize};
 
 /// Embedding dimension for road segments.
+#[allow(dead_code)]
 pub const EMBED_DIM: usize = 64;
 
 /// Learned embedding for a road segment (edge in the original graph).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct RoadEmbedding {
     pub edge_idx: usize,
     pub vector: Vec<f32>,
@@ -23,6 +25,7 @@ pub struct RoadEmbedding {
 /// Currently returns random-normal embeddings as a placeholder.
 /// A real implementation would load a pre-trained GraphSAGE model
 /// (PyTorch → ONNX → Candle) or train directly in Rust.
+#[allow(dead_code)]
 pub fn embed_network(_nodes: &[RmpNode], _edges: &[RmpEdge]) -> Vec<RoadEmbedding> {
     // TODO: load GraphSAGE/Graph Attention model and run inference.
     Vec::new()

@@ -11,6 +11,7 @@ use super::haversine_m;
 
 /// Geometric and topological features of a VRP instance.
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct RouteFeatures {
     /// Number of stops (excluding depot).
     pub num_stops: usize,
@@ -135,10 +136,10 @@ pub fn predict_solver(features: &RouteFeatures) -> SolverPrediction {
                 if features.tight_capacity {
                     *score += 0.2;
                 }
-                if n >= 20 && n <= 200 {
+                if (20..=200).contains(&n) {
                     *score += 0.1;
                 }
-                if v >= 2 && v <= 10 {
+                if (2..=10).contains(&v) {
                     *score += 0.1;
                 }
                 if features.objective == VrpObjective::MinDistance {
@@ -159,7 +160,7 @@ pub fn predict_solver(features: &RouteFeatures) -> SolverPrediction {
             }
             "two_opt" => {
                 // 2-Opt untangling: good for post-processing or medium routes
-                if n >= 30 && n <= 300 {
+                if (30..=300).contains(&n) {
                     *score += 0.1;
                 }
             }
@@ -196,6 +197,7 @@ pub fn predict_solver(features: &RouteFeatures) -> SolverPrediction {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SolverPrediction {
     pub recommended: String,
     pub confidence: f64,
@@ -209,6 +211,7 @@ pub struct SolverPrediction {
 /// Score a solved route on multiple dimensions.  Each sub-score is 0–100.
 /// Higher is better (more efficient, more balanced, fewer bad turns).
 #[derive(Debug, Clone, Default, serde::Serialize)]
+#[allow(dead_code)]
 pub struct RouteQualityScore {
     pub distance_efficiency: f64,
     pub load_balance: f64,
@@ -223,6 +226,7 @@ pub struct RouteQualityScore {
 /// * `load_balance` — 100 when all routes have equal stop counts, 0 when max imbalance.
 /// * `turn_quality` — penalizes U-turns and left turns relative to straights.
 /// * `coverage` — what fraction of requested stops were assigned.
+#[allow(dead_code)]
 pub fn score_route(input: &VRPSolverInput, output: &VRPSolverOutput) -> RouteQualityScore {
     let n_stops = input.locations.len().saturating_sub(1).max(1);
 
@@ -321,14 +325,16 @@ pub fn score_route(input: &VRPSolverInput, output: &VRPSolverOutput) -> RouteQua
     }
 }
 
+#[allow(dead_code)]
 fn bearing_delta(a: &VRPSolverStop, b: &VRPSolverStop, c: &VRPSolverStop) -> f64 {
     let b1 = bearing(a.lat, a.lon, b.lat, b.lon);
     let b2 = bearing(b.lat, b.lon, c.lat, c.lon);
     let d = b2 - b1;
-    let d = ((d + 180.0) % 360.0) - 180.0;
-    d
+
+    ((d + 180.0) % 360.0) - 180.0
 }
 
+#[allow(dead_code)]
 fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let dlon = (lon2 - lon1).to_radians();
     let lat1_r = lat1.to_radians();
@@ -339,6 +345,7 @@ fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     (br.to_degrees() + 360.0) % 360.0
 }
 
+#[allow(dead_code)]
 fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
 }
@@ -347,6 +354,7 @@ fn round2(v: f64) -> f64 {
 
 /// Produce a dense feature vector that can be used for similarity search
 /// or as input to a learned model.  12 dimensions, normalized to ~[0,1].
+#[allow(dead_code)]
 pub fn route_feature_vector(features: &RouteFeatures) -> Vec<f32> {
     let n = features.num_stops as f64;
     vec![

@@ -9,8 +9,8 @@
 //! If the model file is missing, falls back to the rule-based selector.
 
 use crate::core::ml::features::InstanceFeatures;
-use crate::core::ml_legacy::{predict_solver as rule_predict_solver, SolverPrediction};
-use crate::core::vrp::types::{VRPSolverInput, VrpObjective};
+use crate::core::ml_legacy::predict_solver as rule_predict_solver;
+use crate::core::vrp::types::VRPSolverInput;
 use anyhow::{Context, Result};
 use candle_core::{Device, Tensor, DType};
 use candle_nn::{linear, Module, VarBuilder, Linear};

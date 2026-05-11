@@ -40,9 +40,9 @@ use v2rmp::core::vrp::types::{
 use v2rmp::core::vrp::utils::{build_haversine_matrix, get_valhalla_matrix};
 use v2rmp::core::elevation::{FuelCalculator};
 use v2rmp::core::ml::features::InstanceFeatures;
-use v2rmp::core::ml::selector::{predict_solver, NeuralPrediction, default_model_path};
-use v2rmp::core::ml::quality_predictor::{predict_quality, QualityPrediction};
-use v2rmp::core::ml::automl::{predict_hyperparams, SolverHyperparams};
+use v2rmp::core::ml::selector::{predict_solver, default_model_path};
+use v2rmp::core::ml::quality_predictor::predict_quality;
+use v2rmp::core::ml::automl::predict_hyperparams;
 use v2rmp::core::ml_legacy::{RouteFeatures, score_route, route_feature_vector};
 use v2rmp::core::nlp::{parse_query, to_vrp_json};
 
@@ -1219,7 +1219,7 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
             let lon = s.get("lon").and_then(|v| v.as_f64())
                 .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
             let label = s.get("label").and_then(|v| v.as_str())
-                .unwrap_or_else(|| "")
+                .unwrap_or("")
                 .to_string();
             let demand = s.get("demand").and_then(|v| v.as_f64());
             Ok(VRPSolverStop {
@@ -1618,7 +1618,7 @@ fn handle_predict_solver(args: &Value) -> Result<Value> {
             let lon = s.get("lon").and_then(|v| v.as_f64())
                 .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
             let label = s.get("label").and_then(|v| v.as_str())
-                .unwrap_or_else(|| "")
+                .unwrap_or("")
                 .to_string();
             let demand = s.get("demand").and_then(|v| v.as_f64());
             Ok(VRPSolverStop {
@@ -2185,57 +2185,41 @@ async fn main() -> Result<()> {
                     "extract_overture" => handle_extract_overture(&args).await,
                     "extract_osm" => handle_extract_osm(&args).await,
                     "compile" => handle_compile(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "optimize" => handle_optimize(&args).await,
                     "clean" => handle_clean(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "vrp_solve" => handle_vrp_solve(&args).await,
                     "elevation_query" => handle_elevation_query(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "elevation_profile" => handle_elevation_profile(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "list_solvers" => handle_list_solvers(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "haversine_distance" => handle_haversine_distance(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "elevation_stats" => handle_elevation_stats(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "dem_info" => handle_dem_info(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "fuel_estimate" => handle_fuel_estimate(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "inspect_rmp" => handle_inspect_rmp(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "pipeline" => handle_pipeline(&args).await,
                     "get_valhalla_matrix" => handle_get_valhalla_matrix(&args).await,
                     "predict_solver" => handle_predict_solver(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "score_route" => handle_score_route(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "route_embedding" => handle_route_embedding(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "predict_quality" => handle_predict_quality(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "tune_hyperparams" => handle_tune_hyperparams(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "parse_routing_query" => handle_parse_routing_query(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     other => {
                         send_err(&req.id, -32602, &format!("Unknown tool: {other}"));
                         continue;

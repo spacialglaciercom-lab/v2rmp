@@ -17,21 +17,21 @@ To verify correctness in Lean 4, the following properties must hold:
 *   **Edge Conservation:** The sum of all edges initially in `adj` must equal the total number of edges traversed in the circuit. Each edge must be visited exactly once.
 *   **Hierholzer Loop Invariant:** At any point during the while loop execution:
     *   `edges_remaining_in(adj) + edges_in(stack) + edges_in(circuit_with_edges) = total_edges`
-    *   The elements in `stack` form a continuous path.
-    *   The sequence in `circuit_with_edges` forms a sequence of closed cycles correctly attached to the nodes currently in `stack`.
-*   **Termination:** The algorithm is guaranteed to terminate because in each iteration exactly one of two things happens:
-    *   An edge is removed from `adj` and added to `stack`.
-    *   An element is popped from `stack` and added to `circuit_with_edges`.
-    *   Since the number of edges is finite and strictly decreases in `adj`, and elements in `stack` are bounded by the number of edges + 1, the loop must terminate.
+    *   The `stack` maintains a valid path sequence of vertices extending from `start_node`.
+    *   The sequence in `circuit_with_edges` collects closed Eulerian cycles correctly attached to the nodes currently in `stack` as backtracking occurs.
+*   **Termination:** The Lean 4 formal verification models termination using a well-founded lexicographically decreasing measure based on `(total remaining edges in the adjacency list, stack length)`. In each iteration, exactly one of two things happens:
+    *   An edge is popped from `adj` (total remaining edges decreases).
+    *   Or, if `adj` for the current vertex is empty, an element is popped from `stack` (stack length decreases while remaining edges stays constant).
+    *   This strictly decreasing measure guarantees termination.
 
 ## 3. Boundary Conditions
 
 The Lean 4 proofs must account for the following edge cases:
 
-*   **Empty Graph:** If the graph has 0 nodes or edges, the optimization correctly returns an empty path.
+*   **Empty Graph:** If the graph has 0 nodes or 0 edges (`nodes.is_empty() || edges.is_empty()`), the optimization correctly short-circuits and returns an empty circuit with zero distance, without panicking or creating invalid states.
 *   **Disconnected Graphs:** The algorithm runs Hierholzer's on the connected component containing `start_node`. If the graph has multiple disconnected components, edges in unreachable components remain in `adj` indefinitely, and only the connected component of `start_node` is traversed.
 *   **Zero Odd Vertices:** If all vertices already have even degrees initially, the graph is inherently Eulerian. The duplicate edge list will be empty, and Hierholzer's algorithm begins immediately without modifications.
-*   **Parallel Edges (Multigraph):** Multiple edges can exist between the exact same pair of nodes. The reverse-edge removal logic (`iter().position(...)`) relies on the tuple `(to, edge_idx, weight_m)` to uniquely identify and remove the correct reverse edge, avoiding the accidental removal of a parallel edge.
+*   **Parallel Edges (Multigraph):** Multiple edges can exist between the exact same pair of nodes. The reverse-edge removal logic relies on an exact `position` search (`iter().position(...)`) checking the exact tuple `(to, edge_idx, weight_m)` to uniquely identify and remove the correct reverse edge, preventing the accidental deletion of distinct parallel edges.
 
 ## 4. State Mutations
 
@@ -39,11 +39,11 @@ The algorithm mutates state primarily in four ways during the execution of Hierh
 
 1.  `adj[v].pop()`: Mutates the adjacency list of vertex `v` by removing the last outgoing edge.
     *   *Complexity:* `O(1)`
-2.  `adj[edge.to as usize].swap_remove(pos)`: Mutates the adjacency list of the destination vertex to remove the corresponding reverse edge. The position `pos` is found via linear search.
+2.  `adj[edge.to as usize].swap_remove(pos)`: Mutates the adjacency list of the destination vertex to remove the corresponding reverse edge. The position `pos` is found via linear search (`iter().position(...)`).
     *   *Complexity:* `O(degree(edge.to))` for search, `O(1)` for removal.
-3.  `stack.push(...)` / `stack.pop()`: Modifies the path stack.
+3.  `stack.push(...)` / `stack.pop()`: Modifies the path stack to keep track of the current path and backtracking edges.
     *   *Complexity:* `O(1)`
-4.  `circuit_with_edges.push(...)`: Appends to the final reversed Eulerian circuit.
+4.  `circuit_with_edges.push(...)`: Appends to the final reversed Eulerian circuit when `adj` for a given node becomes empty.
     *   *Complexity:* `O(1)` amortized
 
 ## 5. Algorithmic Complexity Bounds
