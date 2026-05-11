@@ -55,7 +55,7 @@ impl VRPSolver for DefaultSolver {
             total_distance: total_dist,
             total_time,
         };
-        
+
         Ok(result.into_output(input))
     }
     fn clone_box(&self) -> Box<dyn VRPSolver> {
@@ -65,8 +65,8 @@ impl VRPSolver for DefaultSolver {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::vrp::test_utils::{make_input, make_stop};
     use super::*;
+    use crate::core::vrp::test_utils::{make_input, make_stop};
 
     #[tokio::test]
     async fn test_default_single_depot() {
