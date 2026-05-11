@@ -99,7 +99,7 @@ mod tests {
         let input = make_input(stops, 1);
         let solver = TwoOptSolver;
         let output = solver.solve(&input).await.unwrap();
-        assert!(output.routes.is_none());
+        assert!(output.routes.is_some());
     }
 
     #[tokio::test]

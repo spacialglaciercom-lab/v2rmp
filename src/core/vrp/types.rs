@@ -38,7 +38,7 @@ impl SolveResult {
             .collect();
         VRPSolverOutput {
             stops: routes.iter().flatten().cloned().collect(),
-            routes: if routes.len() > 1 { Some(routes) } else { None },
+            routes: Some(routes),
             total_distance_km: format!("{:.2}", self.total_distance),
             total_time_min: (self.total_time / 60.0).round() as u32,
             route_stats: None,

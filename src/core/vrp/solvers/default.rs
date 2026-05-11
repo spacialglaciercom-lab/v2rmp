@@ -74,7 +74,7 @@ mod tests {
         let input = make_input(stops, 1);
         let solver = DefaultSolver;
         let output = solver.solve(&input).await.unwrap();
-        assert!(output.routes.is_none()); // default solver produces single route
+        assert!(output.routes.is_some()); // default solver produces single route
     }
 
     #[tokio::test]

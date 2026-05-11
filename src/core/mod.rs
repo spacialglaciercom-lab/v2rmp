@@ -6,6 +6,7 @@ pub mod elevation;
 pub mod extract;
 pub mod geo_types;
 pub mod optimize;
+pub mod ml;
 #[cfg(feature = "extract")]
 pub mod osm;
 #[cfg(feature = "extract")]

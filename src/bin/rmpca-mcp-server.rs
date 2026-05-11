@@ -1,7 +1,10 @@
 //! rmpca-mcp-server — MCP server exposing the route optimization pipeline.
 //!
 //! Tools: extract_overture, extract_osm, compile, optimize,
-//!        clean, vrp_solve, elevation_query, elevation_profile
+//!        clean, vrp_solve, elevation_query, elevation_profile,
+//!        predict_solver, score_route, route_embedding, pipeline,
+//!        haversine_distance, get_valhalla_matrix, inspect_rmp,
+//!        list_solvers, elevation_stats, dem_info, fuel_estimate
 //!
 //! Runs over stdio with JSON-RPC 2.0 framing (one line per message).
 //!
@@ -36,6 +39,7 @@ use v2rmp::core::vrp::types::{
 };
 use v2rmp::core::vrp::utils::{build_haversine_matrix, get_valhalla_matrix};
 use v2rmp::core::elevation::{FuelCalculator};
+use v2rmp::core::ml::{RouteFeatures, predict_solver, score_route, route_feature_vector};
 
 // ── JSON-RPC / MCP types ───────────────────────────────────────────────────
 
@@ -571,6 +575,127 @@ fn tool_definitions() -> Vec<ToolDef> {
                     }
                 },
                 "required": ["input"]
+            }),
+        },
+        ToolDef {
+            name: "predict_solver",
+            description: "Recommend the best VRP solver algorithm for a given instance based on \
+                geometric and capacity features. Returns the recommended solver id, confidence \
+                score, runner-up, and per-solver fit scores.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "stops": {
+                        "type": "array",
+                        "description": "Array of stops. The first stop is the depot.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "lat": { "type": "number", "description": "Latitude" },
+                                "lon": { "type": "number", "description": "Longitude" },
+                                "label": { "type": "string", "description": "Label for this stop (optional)" },
+                                "demand": { "type": "number", "description": "Demand at this stop (default: 1.0)" }
+                            },
+                            "required": ["lat", "lon"]
+                        }
+                    },
+                    "num_vehicles": {
+                        "type": "integer",
+                        "description": "Number of vehicles (default: 1)"
+                    },
+                    "vehicle_capacity": {
+                        "type": "number",
+                        "description": "Vehicle capacity (default: 100.0)"
+                    },
+                    "objective": {
+                        "type": "string",
+                        "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"],
+                        "description": "Optimization objective (default: min_distance)"
+                    }
+                },
+                "required": ["stops"]
+            }),
+        },
+        ToolDef {
+            name: "score_route",
+            description: "Score a solved VRP route on multiple quality dimensions: \
+                distance efficiency, load balance, turn quality, and coverage. \
+                Returns an overall composite score (0-100) plus per-dimension breakdown.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "stops": {
+                        "type": "array",
+                        "description": "Array of stops. The first stop is the depot.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "lat": { "type": "number" },
+                                "lon": { "type": "number" },
+                                "label": { "type": "string" },
+                                "demand": { "type": "number" }
+                            },
+                            "required": ["lat", "lon"]
+                        }
+                    },
+                    "routes": {
+                        "type": "array",
+                        "description": "Per-vehicle routes as arrays of stop indices",
+                        "items": {
+                            "type": "array",
+                            "items": { "type": "integer" }
+                        }
+                    },
+                    "total_distance_km": {
+                        "type": "string",
+                        "description": "Total distance string, e.g. '42.50'"
+                    },
+                    "num_vehicles": {
+                        "type": "integer",
+                        "description": "Number of vehicles used in the input"
+                    },
+                    "vehicle_capacity": {
+                        "type": "number",
+                        "description": "Vehicle capacity"
+                    },
+                    "objective": {
+                        "type": "string",
+                        "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"]
+                    }
+                },
+                "required": ["stops", "routes", "total_distance_km"]
+            }),
+        },
+        ToolDef {
+            name: "route_embedding",
+            description: "Generate a 12-dimensional feature vector for a VRP instance \
+                suitable for similarity search, clustering, or learned-model input. \
+                Values are normalized to [0,1].",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "stops": {
+                        "type": "array",
+                        "description": "Array of stops. The first stop is the depot.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "lat": { "type": "number" },
+                                "lon": { "type": "number" },
+                                "label": { "type": "string" },
+                                "demand": { "type": "number" }
+                            },
+                            "required": ["lat", "lon"]
+                        }
+                    },
+                    "num_vehicles": { "type": "integer" },
+                    "vehicle_capacity": { "type": "number" },
+                    "objective": {
+                        "type": "string",
+                        "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"]
+                    }
+                },
+                "required": ["stops"]
             }),
         },
         ToolDef {
@@ -1389,6 +1514,232 @@ fn handle_inspect_rmp(args: &Value) -> Result<Value> {
     }))
 }
 
+// ── Predict Solver handler ───────────────────────────────────────────────
+
+fn handle_predict_solver(args: &Value) -> Result<Value> {
+    let stops_val = args
+        .get("stops")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
+
+    let stops: Vec<VRPSolverStop> = stops_val
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let lat = s.get("lat").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+            let lon = s.get("lon").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+            let label = s.get("label").and_then(|v| v.as_str())
+                .unwrap_or_else(|| "")
+                .to_string();
+            let demand = s.get("demand").and_then(|v| v.as_f64());
+            Ok(VRPSolverStop {
+                lat,
+                lon,
+                label: if label.is_empty() { format!("Stop {}", i) } else { label },
+                demand,
+                arrival_time: None,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let num_vehicles = args.get("num_vehicles").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+    let vehicle_capacity = args.get("vehicle_capacity").and_then(|v| v.as_f64()).unwrap_or(100.0);
+    let objective = match args.get("objective").and_then(|v| v.as_str()).unwrap_or("min_distance") {
+        "min_time" => VrpObjective::MinTime,
+        "balance_load" => VrpObjective::BalanceLoad,
+        "min_vehicles" => VrpObjective::MinVehicles,
+        _ => VrpObjective::MinDistance,
+    };
+
+    let input = VRPSolverInput {
+        locations: stops,
+        num_vehicles,
+        vehicle_capacity,
+        objective,
+        matrix: None,
+        service_time_secs: None,
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+    };
+
+    let features = RouteFeatures::from_input(&input);
+    let pred = predict_solver(&features);
+
+    let all_scores_json: Vec<Value> = pred.all_scores.into_iter().map(|(id, score)| {
+        json!({"solver_id": id, "score": score})
+    }).collect();
+
+    Ok(json!({
+        "recommended": pred.recommended,
+        "confidence": pred.confidence,
+        "runner_up": pred.runner_up.map(|(id, score)| json!({"solver_id": id, "score": score})),
+        "all_scores": all_scores_json,
+        "features": {
+            "num_stops": features.num_stops,
+            "num_vehicles": features.num_vehicles,
+            "avg_pairwise_km": features.avg_pairwise_km,
+            "lat_spread": features.lat_spread,
+            "lon_spread": features.lon_spread,
+            "density": features.density,
+            "tight_capacity": features.tight_capacity,
+            "objective": format!("{:?}", features.objective),
+        }
+    }))
+}
+
+// ── Score Route handler ──────────────────────────────────────────────────
+
+fn handle_score_route(args: &Value) -> Result<Value> {
+    let stops_val = args
+        .get("stops")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
+
+    let stops: Vec<VRPSolverStop> = stops_val
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let lat = s.get("lat").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+            let lon = s.get("lon").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+            let label = s.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let demand = s.get("demand").and_then(|v| v.as_f64());
+            Ok(VRPSolverStop { lat, lon, label, demand, arrival_time: None })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let num_vehicles = args.get("num_vehicles").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+    let vehicle_capacity = args.get("vehicle_capacity").and_then(|v| v.as_f64()).unwrap_or(100.0);
+    let objective = match args.get("objective").and_then(|v| v.as_str()).unwrap_or("min_distance") {
+        "min_time" => VrpObjective::MinTime,
+        "balance_load" => VrpObjective::BalanceLoad,
+        "min_vehicles" => VrpObjective::MinVehicles,
+        _ => VrpObjective::MinDistance,
+    };
+
+    let input = VRPSolverInput {
+        locations: stops.clone(),
+        num_vehicles,
+        vehicle_capacity,
+        objective,
+        matrix: None,
+        service_time_secs: None,
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+    };
+
+    let routes_indices = args
+        .get("routes")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'routes' parameter"))?;
+
+    let routes: Vec<Vec<VRPSolverStop>> = routes_indices
+        .iter()
+        .map(|route_val| {
+            let indices = route_val.as_array()
+                .ok_or_else(|| anyhow::anyhow!("Each route must be an array of indices"))?;
+            let route_stops: Vec<VRPSolverStop> = indices
+                .iter()
+                .filter_map(|iv| iv.as_u64().and_then(|idx| stops.get(idx as usize).cloned()))
+                .collect();
+            Ok(route_stops)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let total_distance_km = args
+        .get("total_distance_km")
+        .and_then(|v| v.as_str())
+        .unwrap_or("0.0")
+        .to_string();
+
+    let output = VRPSolverOutput {
+        stops: routes.iter().flatten().cloned().collect(),
+        routes: Some(routes),
+        total_distance_km,
+        total_time_min: 0,
+        route_stats: None,
+        route_metrics: None,
+        unassigned: None,
+    };
+
+    let score = score_route(&input, &output);
+
+    Ok(json!({
+        "overall": score.overall,
+        "distance_efficiency": score.distance_efficiency,
+        "load_balance": score.load_balance,
+        "turn_quality": score.turn_quality,
+        "coverage": score.coverage,
+    }))
+}
+
+// ── Route Embedding handler ──────────────────────────────────────────────
+
+fn handle_route_embedding(args: &Value) -> Result<Value> {
+    let stops_val = args
+        .get("stops")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
+
+    let stops: Vec<VRPSolverStop> = stops_val
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let lat = s.get("lat").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+            let lon = s.get("lon").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+            let label = s.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let demand = s.get("demand").and_then(|v| v.as_f64());
+            Ok(VRPSolverStop { lat, lon, label, demand, arrival_time: None })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let num_vehicles = args.get("num_vehicles").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+    let vehicle_capacity = args.get("vehicle_capacity").and_then(|v| v.as_f64()).unwrap_or(100.0);
+    let objective = match args.get("objective").and_then(|v| v.as_str()).unwrap_or("min_distance") {
+        "min_time" => VrpObjective::MinTime,
+        "balance_load" => VrpObjective::BalanceLoad,
+        "min_vehicles" => VrpObjective::MinVehicles,
+        _ => VrpObjective::MinDistance,
+    };
+
+    let input = VRPSolverInput {
+        locations: stops,
+        num_vehicles,
+        vehicle_capacity,
+        objective,
+        matrix: None,
+        service_time_secs: None,
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+    };
+
+    let features = RouteFeatures::from_input(&input);
+    let vector = route_feature_vector(&features);
+
+    Ok(json!({
+        "vector": vector,
+        "dimension": vector.len(),
+        "features": {
+            "num_stops": features.num_stops,
+            "num_vehicles": features.num_vehicles,
+            "avg_pairwise_km": features.avg_pairwise_km,
+            "lat_spread": features.lat_spread,
+            "lon_spread": features.lon_spread,
+            "density": features.density,
+            "tight_capacity": features.tight_capacity,
+            "objective": format!("{:?}", features.objective),
+        }
+    }))
+}
+
 // ── Pipeline handler ─────────────────────────────────────────────────────
 
 async fn handle_pipeline(args: &Value) -> Result<Value> {
@@ -1452,6 +1803,9 @@ async fn handle_pipeline(args: &Value) -> Result<Value> {
 
     // Stage 4: Optimize
     tracing::info!("pipeline stage 4: optimize");
+    let num_vehicles = args.get("num_vehicles").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+    let solver_id = args.get("solver_id").and_then(|v| v.as_str()).unwrap_or("clarke_wright").to_string();
+
     let optimize_req = OptimizeRequest {
         cache_file: rmp_path.clone(),
         route_file: Some(route_path.clone()),
@@ -1459,8 +1813,8 @@ async fn handle_pipeline(args: &Value) -> Result<Value> {
         depot,
         oneway_mode: OnewayMode::default(),
         mode,
-        num_vehicles: 1,
-        solver_id: "clarke_wright".to_string(),
+        num_vehicles,
+        solver_id,
     };
     let optimize_result = v2rmp::core::optimize::run_optimize(&optimize_req).await?;
 
@@ -1650,6 +2004,15 @@ async fn main() -> Result<()> {
                         .map(|v| v),
                     "pipeline" => handle_pipeline(&args).await,
                     "get_valhalla_matrix" => handle_get_valhalla_matrix(&args).await,
+                    "predict_solver" => handle_predict_solver(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .map(|v| v),
+                    "score_route" => handle_score_route(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .map(|v| v),
+                    "route_embedding" => handle_route_embedding(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .map(|v| v),
                     other => {
                         send_err(&req.id, -32602, &format!("Unknown tool: {other}"));
                         continue;
