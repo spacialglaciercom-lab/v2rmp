@@ -4,7 +4,13 @@
 use super::super::types::*;
 use super::super::utils::{matrix_get_dist, matrix_get_time};
 
-fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize, balance_load: bool) -> SolveResult {
+fn solve(
+    matrix: &DistMatrix,
+    locations: &[VRPSolverStop],
+    num_vehicles: usize,
+    balance_load: bool,
+    hyperparams: Option<&SolverHyperparams>,
+) -> SolveResult {
     let n = matrix.len();
     if n <= 1 {
         return SolveResult {
@@ -25,7 +31,7 @@ fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize, 
     };
 
     let mut improved = true;
-    let max_passes = 100;
+    let max_passes = hyperparams.map(|p| p.max_iterations / 4).unwrap_or(100).max(1);
     let mut passes = 0;
 
     while improved && passes < max_passes {
@@ -206,7 +212,13 @@ impl VRPSolver for OrOptSolver {
             .as_ref()
             .ok_or("Or-Opt solver requires a distance matrix")?;
         let balance_load = input.objective == VrpObjective::BalanceLoad;
-        let result = solve(matrix, &input.locations, input.num_vehicles, balance_load);
+        let result = solve(
+            matrix,
+            &input.locations,
+            input.num_vehicles,
+            balance_load,
+            input.hyperparams.as_ref(),
+        );
         Ok(result.into_output(input))
     }
     fn clone_box(&self) -> Box<dyn VRPSolver> {
@@ -247,7 +259,7 @@ mod tests {
             service_time_secs: None,
             use_time_windows: false,
             window_open: None,
-            window_close: None,
+            window_close: None, hyperparams: None,
         };
         let solver = OrOptSolver;
         let err = solver.solve(&input).await.unwrap_err();
@@ -290,7 +302,7 @@ mod tests {
             service_time_secs: None,
             use_time_windows: false,
             window_open: None,
-            window_close: None,
+            window_close: None, hyperparams: None,
         };
         let solver = OrOptSolver;
         let output = solver.solve(&input).await.unwrap();

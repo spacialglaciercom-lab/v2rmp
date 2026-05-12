@@ -9,8 +9,8 @@
 //! If the model file is missing, falls back to the rule-based selector.
 
 use crate::core::ml::features::InstanceFeatures;
-use crate::core::ml_legacy::{predict_solver as rule_predict_solver, SolverPrediction};
-use crate::core::vrp::types::{VRPSolverInput, VrpObjective};
+use crate::core::ml_legacy::predict_solver as rule_predict_solver;
+use crate::core::vrp::types::VRPSolverInput;
 use anyhow::{Context, Result};
 use candle_core::{Device, Tensor, DType};
 use candle_nn::{linear, Module, VarBuilder, Linear};
@@ -20,14 +20,15 @@ use std::path::Path;
 const NUM_FEATURES: usize = 28;
 const HIDDEN1: usize = 128;
 const HIDDEN2: usize = 64;
-const NUM_SOLVERS: usize = 5;
+const NUM_SOLVERS: usize = 6;
 
 const SOLVER_IDS: [&str; NUM_SOLVERS] = [
     "default",
     "clarke_wright",
     "sweep",
-    "two_opt",
     "or_opt",
+    "two_opt",
+    "neural_guided",
 ];
 
 /// Learned MLP solver selector.
@@ -41,7 +42,7 @@ pub struct NeuralSelector {
 impl NeuralSelector {
     /// Load from a safetensors file.
     pub fn from_file(path: &Path) -> Result<Self> {
-        let device = Device::Cpu;
+        let device = crate::core::ml::best_device()?;
         let tensors = candle_core::safetensors::load(path, &device)
             .with_context(|| format!("Failed to load safetensors from {}", path.display()))?;
         let vb = VarBuilder::from_tensors(tensors, DType::F32, &device);
@@ -51,7 +52,7 @@ impl NeuralSelector {
         Ok(Self { lin1, lin2, lin3, device })
     }
 
-    /// Predict solver probabilities from instance features.
+    /// Predict best solver using classification (argmax probability).
     pub fn predict(&self,
         features: &InstanceFeatures,
     ) -> Result<NeuralPrediction> {
@@ -61,18 +62,19 @@ impl NeuralSelector {
         let h2 = self.lin2.forward(&h1)?.relu()?;
         let logits = self.lin3.forward(&h2)?;
         let probs = candle_nn::ops::softmax(&logits, 1)?;
-        let probs_vec: Vec<f32> = probs.to_vec1()?;
-
-        let mut indexed: Vec<(usize, f32)> = probs_vec.iter().enumerate().map(|(i, &p)| (i, p)).collect();
+        let vals: Vec<f32> = probs.squeeze(0)?.to_vec1()?;
+        
+        let mut indexed: Vec<(usize, f32)> = vals.iter().enumerate().map(|(i, &v)| (i, v)).collect();
+        // Sort by probability DESCENDING (higher is better)
         indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let best_idx = indexed[0].0;
         let best_prob = indexed[0].1;
-        let runner_up = indexed.get(1).map(|(i, p)| (SOLVER_IDS[*i].to_string(), *p));
+        let runner_up = indexed.get(1).map(|(i, v)| (SOLVER_IDS[*i].to_string(), *v));
 
         let all_scores: Vec<(String, f64)> = indexed
             .iter()
-            .map(|(i, p)| (SOLVER_IDS[*i].to_string(), *p as f64))
+            .map(|(i, v)| (SOLVER_IDS[*i].to_string(), *v as f64))
             .collect();
 
         Ok(NeuralPrediction {
@@ -110,12 +112,34 @@ pub fn predict_solver(
                     match selector.predict(&features) {
                         Ok(pred) => return Ok(pred),
                         Err(e) => {
+                            println!("DEBUG: Neural selector inference failed: {}", e);
                             tracing::warn!("Neural selector inference failed: {}. Falling back to rule-based.", e);
                         }
                     }
                 }
                 Err(e) => {
+                    println!("DEBUG: Failed to load neural selector from {:?}: {}", path, e);
                     tracing::warn!("Failed to load neural selector: {}. Falling back to rule-based.", e);
+                }
+            }
+        } else {
+            println!("DEBUG: model_path {:?} does not exist", path);
+        }
+    } else {
+        // If no path given, try default model path
+        let default_path = default_model_path();
+        if default_path.exists() {
+            match NeuralSelector::from_file(&default_path) {
+                Ok(selector) => {
+                    match selector.predict(&features) {
+                        Ok(pred) => return Ok(pred),
+                        Err(e) => {
+                            tracing::warn!("Neural selector inference failed (default path): {}. Falling back to rule-based.", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load neural selector from default path: {}. Falling back to rule-based.", e);
                 }
             }
         }
@@ -136,6 +160,23 @@ pub fn predict_solver(
 
 /// Default model path relative to the executable.
 pub fn default_model_path() -> std::path::PathBuf {
+    // 1. Try relative to current executable
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            let p = exe_dir.join("models").join("solver_selector.safetensors");
+            if p.exists() {
+                return p;
+            }
+        }
+    }
+
+    // 2. Try relative to current working directory
+    let p = std::path::PathBuf::from("models/solver_selector.safetensors");
+    if p.exists() {
+        return p;
+    }
+
+    // Fallback
     std::env::current_exe()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .parent()

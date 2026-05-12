@@ -79,6 +79,23 @@ pub struct DistCell {
 /// Distance/time matrix: `matrix[from][to]`.
 pub type DistMatrix = Vec<Vec<DistCell>>;
 
+/// Hyperparameters for a VRP solver.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SolverHyperparams {
+    /// Maximum iterations for metaheuristics (e.g. simulated annealing).
+    pub max_iterations: u32,
+    /// Temperature for simulated annealing.
+    pub temperature: f64,
+    /// Tabu tenure for tabu search.
+    pub tabu_tenure: usize,
+    /// Cooling rate for SA.
+    pub cooling_rate: f64,
+    /// Neighbourhood radius for local search.
+    pub neighbourhood_radius: usize,
+    /// Whether the learned model was used (true) or fallback defaults (false).
+    pub model_used: bool,
+}
+
 /// Input to a VRP solver.
 #[derive(Debug, Clone)]
 pub struct VRPSolverInput {
@@ -97,6 +114,8 @@ pub struct VRPSolverInput {
     pub window_open: Option<i64>,
     /// Shift close epoch (Unix seconds).
     pub window_close: Option<i64>,
+    /// Learned or manually tuned hyperparameters.
+    pub hyperparams: Option<SolverHyperparams>,
 }
 
 /// VRP objective type.

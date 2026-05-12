@@ -64,3 +64,10 @@ async fn run_tui() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(not(feature = "cli"))]
+fn main() {
+    eprintln!("Error: The 'cli' feature must be enabled to build the rmpca binary.");
+    eprintln!("   cargo run --bin rmpca --features cli");
+    std::process::exit(1);
+}

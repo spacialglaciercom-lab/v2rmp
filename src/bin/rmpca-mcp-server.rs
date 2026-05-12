@@ -39,12 +39,19 @@ use v2rmp::core::vrp::types::{
 };
 use v2rmp::core::vrp::utils::{build_haversine_matrix, get_valhalla_matrix};
 use v2rmp::core::elevation::{FuelCalculator};
+#[cfg(feature = "ml")]
 use v2rmp::core::ml::features::InstanceFeatures;
-use v2rmp::core::ml::selector::{predict_solver, NeuralPrediction, default_model_path};
-use v2rmp::core::ml::quality_predictor::{predict_quality, QualityPrediction};
-use v2rmp::core::ml::automl::{predict_hyperparams, SolverHyperparams};
+#[cfg(feature = "ml")]
+use v2rmp::core::ml::selector::{predict_solver, default_model_path};
+#[cfg(feature = "ml")]
+use v2rmp::core::ml::quality_predictor::{predict_quality};
+#[cfg(feature = "ml")]
+use v2rmp::core::ml::automl::{predict_hyperparams};
 use v2rmp::core::ml_legacy::{RouteFeatures, score_route, route_feature_vector};
+#[cfg(feature = "ml")]
 use v2rmp::core::nlp::{parse_query, to_vrp_json};
+#[cfg(feature = "ml")]
+use v2rmp::core::nlp::QwenNLParser;
 
 // ── JSON-RPC / MCP types ───────────────────────────────────────────────────
 
@@ -887,6 +894,11 @@ fn tool_definitions() -> Vec<ToolDef> {
                     "query": {
                         "type": "string",
                         "description": "Natural language routing request, e.g. 'Route 50 packages with 5 vans starting at 45.5,-73.6 by 5pm'"
+                    },
+                    "use_llm": {
+                        "type": "boolean",
+                        "description": "Use a local LLM (Qwen2.5-0.5B) for complex/ambiguous queries. Requires the 'ml' feature and ~1GB RAM. (default: false)",
+                        "default": false
                     }
                 },
                 "required": ["query"]
@@ -1103,20 +1115,20 @@ async fn handle_optimize(args: &Value) -> Result<Value> {
         .to_string();
 
     tracing::info!("optimize: input={}", input);
-
-    let req = OptimizeRequest {
-        cache_file: input,
-        route_file,
-        turn_penalties: TurnPenalties {
-            left,
-            right,
-            u_turn,
-        },
-        depot,
-        oneway_mode,
-        mode,
-        num_vehicles,
-        solver_id,
+let req = OptimizeRequest {
+    cache_file: input,
+    route_file,
+    turn_penalties: TurnPenalties {
+        left,
+        right,
+        u_turn,
+    },
+    depot,
+    oneway_mode,
+    mode,
+    num_vehicles,
+    solver_id,
+    coordinates: None,
     };
 
     let result: OptimizeResult = v2rmp::core::optimize::run_optimize(&req).await?;
@@ -1246,6 +1258,21 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
     // Build haversine distance matrix
     let matrix = build_haversine_matrix(&stops, avg_speed_kmh);
 
+    #[cfg(feature = "ml")]
+    let mut input = VRPSolverInput {
+        locations: stops,
+        num_vehicles,
+        vehicle_capacity,
+        objective,
+        matrix: Some(matrix),
+        service_time_secs: None,
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+        hyperparams: None,
+    };
+
+    #[cfg(not(feature = "ml"))]
     let input = VRPSolverInput {
         locations: stops,
         num_vehicles,
@@ -1256,10 +1283,23 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
         use_time_windows: false,
         window_open: None,
         window_close: None,
+        hyperparams: None,
     };
 
-    tracing::info!("vrp_solve: {} stops, {} vehicles, solver={}", 
-        input.locations.len(), num_vehicles, solver_id);
+    // AutoML: predict best hyperparameters for this instance
+    #[cfg(feature = "ml")]
+    let automl_used = {
+        let features = InstanceFeatures::from_input(&input);
+        let params = predict_hyperparams(&features);
+        let used = params.model_used;
+        input.hyperparams = Some(params);
+        used
+    };
+    #[cfg(not(feature = "ml"))]
+    let automl_used = false;
+
+    tracing::info!("vrp_solve: {} stops, {} vehicles, solver={}, AutoML={}", 
+        input.locations.len(), num_vehicles, solver_id, automl_used);
 
     let output = solve_with(&solver_id, &input).await
         .map_err(|e| anyhow::anyhow!("VRP solver failed: {}", e))?;
@@ -1574,13 +1614,13 @@ fn handle_inspect_rmp(args: &Value) -> Result<Value> {
     let (nodes, edges) = v2rmp::core::optimize::read_rmp_file(&file_data)?;
 
     // Compute bounding box from nodes
-    let (min_lat, max_lat, min_lon, max_lon) = if nodes.is_empty() {
+    let (min_lon, min_lat, max_lon, max_lat) = if nodes.is_empty() {
         (0.0, 0.0, 0.0, 0.0)
     } else {
         nodes.iter().fold(
-            (f64::MAX, f64::MIN, f64::MAX, f64::MIN),
-            |(mn_lat, mx_lat, mn_lon, mx_lon), n| {
-                (mn_lat.min(n.lat), mx_lat.max(n.lat), mn_lon.min(n.lon), mx_lon.max(n.lon))
+            (f64::MAX, f64::MAX, f64::MIN, f64::MIN),
+            |(mn_lon, mn_lat, mx_lon, mx_lat), n| {
+                (mn_lon.min(n.lon), mn_lat.min(n.lat), mx_lon.max(n.lon), mx_lat.max(n.lat))
             },
         )
     };
@@ -1604,76 +1644,85 @@ fn handle_inspect_rmp(args: &Value) -> Result<Value> {
 // ── Predict Solver handler ───────────────────────────────────────────────
 
 fn handle_predict_solver(args: &Value) -> Result<Value> {
-    let stops_val = args
-        .get("stops")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
+    #[cfg(not(feature = "ml"))]
+    {
+        let _ = args;
+        anyhow::bail!("ML feature is not enabled. Cannot use predict_solver.");
+    }
 
-    let stops: Vec<VRPSolverStop> = stops_val
-        .iter()
-        .enumerate()
-        .map(|(i, s)| {
-            let lat = s.get("lat").and_then(|v| v.as_f64())
-                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
-            let lon = s.get("lon").and_then(|v| v.as_f64())
-                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
-            let label = s.get("label").and_then(|v| v.as_str())
-                .unwrap_or_else(|| "")
-                .to_string();
-            let demand = s.get("demand").and_then(|v| v.as_f64());
-            Ok(VRPSolverStop {
-                lat,
-                lon,
-                label: if label.is_empty() { format!("Stop {}", i) } else { label },
-                demand,
-                arrival_time: None,
+    #[cfg(feature = "ml")]
+    {
+        let stops_val = args
+            .get("stops")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
+
+        let stops: Vec<VRPSolverStop> = stops_val
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let lat = s.get("lat").and_then(|v| v.as_f64())
+                    .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+                let lon = s.get("lon").and_then(|v| v.as_f64())
+                    .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+                let label = s.get("label").and_then(|v| v.as_str())
+                    .unwrap_or_else(|| "")
+                    .to_string();
+                let demand = s.get("demand").and_then(|v| v.as_f64());
+                Ok(VRPSolverStop {
+                    lat,
+                    lon,
+                    label: if label.is_empty() { format!("Stop {}", i) } else { label },
+                    demand,
+                    arrival_time: None,
+                })
             })
-        })
-        .collect::<Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>>>()?;
 
-    let num_vehicles = args.get("num_vehicles").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
-    let vehicle_capacity = args.get("vehicle_capacity").and_then(|v| v.as_f64()).unwrap_or(100.0);
-    let objective = match args.get("objective").and_then(|v| v.as_str()).unwrap_or("min_distance") {
-        "min_time" => VrpObjective::MinTime,
-        "balance_load" => VrpObjective::BalanceLoad,
-        "min_vehicles" => VrpObjective::MinVehicles,
-        _ => VrpObjective::MinDistance,
-    };
+        let num_vehicles = args.get("num_vehicles").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+        let vehicle_capacity = args.get("vehicle_capacity").and_then(|v| v.as_f64()).unwrap_or(100.0);
+        let objective = match args.get("objective").and_then(|v| v.as_str()).unwrap_or("min_distance") {
+            "min_time" => VrpObjective::MinTime,
+            "balance_load" => VrpObjective::BalanceLoad,
+            "min_vehicles" => VrpObjective::MinVehicles,
+            _ => VrpObjective::MinDistance,
+        };
 
-    let input = VRPSolverInput {
-        locations: stops,
-        num_vehicles,
-        vehicle_capacity,
-        objective,
-        matrix: None,
-        service_time_secs: None,
-        use_time_windows: false,
-        window_open: None,
-        window_close: None,
-    };
+        let input = VRPSolverInput {
+            locations: stops,
+            num_vehicles,
+            vehicle_capacity,
+            objective,
+            matrix: None,
+            service_time_secs: None,
+            use_time_windows: false,
+            window_open: None,
+            window_close: None, hyperparams: None,
+        };
 
-    let model_path = default_model_path();
-    let pred = predict_solver(&input, Some(&model_path))?;
+        let model_path = default_model_path();
+        let pred = predict_solver(&input, Some(&model_path))?;
 
-    let all_scores_json: Vec<Value> = pred.all_scores.iter().map(|(id, score)| {
-        json!({"solver_id": id, "score": score})
-    }).collect();
+        let all_scores_json: Vec<Value> = pred.all_scores.iter().map(|(id, score)| {
+            json!({"solver_id": id, "score": score})
+        }).collect();
 
-    let inst_features = InstanceFeatures::from_input(&input);
+        let inst_features = InstanceFeatures::from_input(&input);
 
-    Ok(json!({
-        "recommended": pred.recommended,
-        "confidence": pred.confidence,
-        "runner_up": pred.runner_up.as_ref().map(|(id, score)| json!({"solver_id": id, "score": score})),
-        "all_scores": all_scores_json,
-        "features": {
-            "num_stops": input.locations.len().saturating_sub(1),
-            "num_vehicles": input.num_vehicles,
-            "objective": format!("{:?}", input.objective),
-        },
-        "instance_feature_vector": inst_features.to_vector(),
-        "model_loaded": model_path.exists(),
-    }))
+        Ok(json!({
+            "recommended": pred.recommended,
+            "confidence": pred.confidence,
+            "runner_up": pred.runner_up.as_ref().map(|(id, score)| json!({"solver_id": id, "score": score})),
+            "all_scores": all_scores_json,
+            "features": {
+                "num_stops": input.locations.len().saturating_sub(1),
+                "num_vehicles": input.num_vehicles,
+                "objective": format!("{:?}", input.objective),
+            },
+            "instance_feature_vector": inst_features.to_vector(),
+            "model_loaded": model_path.exists(),
+        }))
+    }
 }
 
 // ── Score Route handler ──────────────────────────────────────────────────
@@ -1716,7 +1765,7 @@ fn handle_score_route(args: &Value) -> Result<Value> {
         service_time_secs: None,
         use_time_windows: false,
         window_open: None,
-        window_close: None,
+        window_close: None, hyperparams: None,
     };
 
     let routes_indices = args
@@ -1804,7 +1853,7 @@ fn handle_route_embedding(args: &Value) -> Result<Value> {
         service_time_secs: None,
         use_time_windows: false,
         window_open: None,
-        window_close: None,
+        window_close: None, hyperparams: None,
     };
 
     let features = RouteFeatures::from_input(&input);
@@ -1891,17 +1940,17 @@ async fn handle_pipeline(args: &Value) -> Result<Value> {
     tracing::info!("pipeline stage 4: optimize");
     let num_vehicles = args.get("num_vehicles").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
     let solver_id = args.get("solver_id").and_then(|v| v.as_str()).unwrap_or("clarke_wright").to_string();
-
-    let optimize_req = OptimizeRequest {
-        cache_file: rmp_path.clone(),
-        route_file: Some(route_path.clone()),
-        turn_penalties: TurnPenalties::default(),
-        depot,
-        oneway_mode: OnewayMode::default(),
-        mode,
-        num_vehicles,
-        solver_id,
-    };
+let optimize_req = OptimizeRequest {
+    cache_file: rmp_path.clone(),
+    route_file: Some(route_path.clone()),
+    turn_penalties: TurnPenalties::default(),
+    depot,
+    oneway_mode: OnewayMode::default(),
+    mode,
+    num_vehicles,
+    solver_id,
+    coordinates: None,
+};
     let optimize_result = v2rmp::core::optimize::run_optimize(&optimize_req).await?;
 
     Ok(json!({
@@ -1934,111 +1983,129 @@ async fn handle_pipeline(args: &Value) -> Result<Value> {
 // ── Predict Quality handler ────────────────────────────────────────────
 
 fn handle_predict_quality(args: &Value) -> Result<Value> {
-    let stops_val = args
-        .get("stops")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
+    #[cfg(not(feature = "ml"))]
+    {
+        let _ = args;
+        anyhow::bail!("ML feature is not enabled. Cannot use predict_quality.");
+    }
 
-    let stops: Vec<VRPSolverStop> = stops_val
-        .iter()
-        .enumerate()
-        .map(|(i, s)| {
-            let lat = s.get("lat").and_then(|v| v.as_f64())
-                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
-            let lon = s.get("lon").and_then(|v| v.as_f64())
-                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
-            let label = s.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let demand = s.get("demand").and_then(|v| v.as_f64());
-            Ok(VRPSolverStop { lat, lon, label, demand, arrival_time: None })
-        })
-        .collect::<Result<Vec<_>>>()?;
+    #[cfg(feature = "ml")]
+    {
+        let stops_val = args
+            .get("stops")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
 
-    let num_vehicles = args.get("num_vehicles").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
-    let vehicle_capacity = args.get("vehicle_capacity").and_then(|v| v.as_f64()).unwrap_or(100.0);
-    let objective = match args.get("objective").and_then(|v| v.as_str()).unwrap_or("min_distance") {
-        "min_time" => VrpObjective::MinTime,
-        "balance_load" => VrpObjective::BalanceLoad,
-        "min_vehicles" => VrpObjective::MinVehicles,
-        _ => VrpObjective::MinDistance,
-    };
+        let stops: Vec<VRPSolverStop> = stops_val
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let lat = s.get("lat").and_then(|v| v.as_f64())
+                    .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+                let lon = s.get("lon").and_then(|v| v.as_f64())
+                    .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+                let label = s.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let demand = s.get("demand").and_then(|v| v.as_f64());
+                Ok(VRPSolverStop { lat, lon, label, demand, arrival_time: None })
+            })
+            .collect::<Result<Vec<_>>>()?;
 
-    let input = VRPSolverInput {
-        locations: stops,
-        num_vehicles,
-        vehicle_capacity,
-        objective,
-        matrix: None,
-        service_time_secs: None,
-        use_time_windows: false,
-        window_open: None,
-        window_close: None,
-    };
+        let num_vehicles = args.get("num_vehicles").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+        let vehicle_capacity = args.get("vehicle_capacity").and_then(|v| v.as_f64()).unwrap_or(100.0);
+        let objective = match args.get("objective").and_then(|v| v.as_str()).unwrap_or("min_distance") {
+            "min_time" => VrpObjective::MinTime,
+            "balance_load" => VrpObjective::BalanceLoad,
+            "min_vehicles" => VrpObjective::MinVehicles,
+            _ => VrpObjective::MinDistance,
+        };
 
-    let features = InstanceFeatures::from_input(&input);
-    let pred = predict_quality(&features);
+        let input = VRPSolverInput {
+            locations: stops,
+            num_vehicles,
+            vehicle_capacity,
+            objective,
+            matrix: None,
+            service_time_secs: None,
+            use_time_windows: false,
+            window_open: None,
+            window_close: None, hyperparams: None,
+        };
 
-    Ok(json!({
-        "predicted_gap_pct": pred.predicted_gap_pct,
-        "predicted_tour_length_km": pred.predicted_tour_length_km,
-        "confidence": pred.confidence,
-        "feature_vector": features.to_vector(),
-    }))
+        let features = InstanceFeatures::from_input(&input);
+        let pred = predict_quality(&features);
+
+        Ok(json!({
+            "predicted_gap_pct": pred.predicted_gap_pct,
+            "predicted_tour_length_km": pred.predicted_tour_length_km,
+            "confidence": pred.confidence,
+            "feature_vector": features.to_vector(),
+        }))
+    }
 }
 
 // ── Tune Hyperparams handler ─────────────────────────────────────────────
 
 fn handle_tune_hyperparams(args: &Value) -> Result<Value> {
-    let stops_val = args
-        .get("stops")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
+    #[cfg(not(feature = "ml"))]
+    {
+        let _ = args;
+        anyhow::bail!("ML feature is not enabled. Cannot use tune_hyperparams.");
+    }
 
-    let stops: Vec<VRPSolverStop> = stops_val
-        .iter()
-        .enumerate()
-        .map(|(i, s)| {
-            let lat = s.get("lat").and_then(|v| v.as_f64())
-                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
-            let lon = s.get("lon").and_then(|v| v.as_f64())
-                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
-            let label = s.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let demand = s.get("demand").and_then(|v| v.as_f64());
-            Ok(VRPSolverStop { lat, lon, label, demand, arrival_time: None })
-        })
-        .collect::<Result<Vec<_>>>()?;
+    #[cfg(feature = "ml")]
+    {
+        let stops_val = args
+            .get("stops")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
 
-    let num_vehicles = args.get("num_vehicles").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
-    let vehicle_capacity = args.get("vehicle_capacity").and_then(|v| v.as_f64()).unwrap_or(100.0);
-    let objective = match args.get("objective").and_then(|v| v.as_str()).unwrap_or("min_distance") {
-        "min_time" => VrpObjective::MinTime,
-        "balance_load" => VrpObjective::BalanceLoad,
-        "min_vehicles" => VrpObjective::MinVehicles,
-        _ => VrpObjective::MinDistance,
-    };
+        let stops: Vec<VRPSolverStop> = stops_val
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let lat = s.get("lat").and_then(|v| v.as_f64())
+                    .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+                let lon = s.get("lon").and_then(|v| v.as_f64())
+                    .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+                let label = s.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let demand = s.get("demand").and_then(|v| v.as_f64());
+                Ok(VRPSolverStop { lat, lon, label, demand, arrival_time: None })
+            })
+            .collect::<Result<Vec<_>>>()?;
 
-    let input = VRPSolverInput {
-        locations: stops,
-        num_vehicles,
-        vehicle_capacity,
-        objective,
-        matrix: None,
-        service_time_secs: None,
-        use_time_windows: false,
-        window_open: None,
-        window_close: None,
-    };
+        let num_vehicles = args.get("num_vehicles").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+        let vehicle_capacity = args.get("vehicle_capacity").and_then(|v| v.as_f64()).unwrap_or(100.0);
+        let objective = match args.get("objective").and_then(|v| v.as_str()).unwrap_or("min_distance") {
+            "min_time" => VrpObjective::MinTime,
+            "balance_load" => VrpObjective::BalanceLoad,
+            "min_vehicles" => VrpObjective::MinVehicles,
+            _ => VrpObjective::MinDistance,
+        };
 
-    let features = InstanceFeatures::from_input(&input);
-    let params = predict_hyperparams(&features);
+        let input = VRPSolverInput {
+            locations: stops,
+            num_vehicles,
+            vehicle_capacity,
+            objective,
+            matrix: None,
+            service_time_secs: None,
+            use_time_windows: false,
+            window_open: None,
+            window_close: None, hyperparams: None,
+        };
 
-    Ok(json!({
-        "max_iterations": params.max_iterations,
-        "temperature": params.temperature,
-        "tabu_tenure": params.tabu_tenure,
-        "cooling_rate": params.cooling_rate,
-        "neighbourhood_radius": params.neighbourhood_radius,
-        "feature_vector": features.to_vector(),
-    }))
+        let features = InstanceFeatures::from_input(&input);
+        let params = predict_hyperparams(&features);
+
+        Ok(json!({
+            "max_iterations": params.max_iterations,
+            "temperature": params.temperature,
+            "tabu_tenure": params.tabu_tenure,
+            "cooling_rate": params.cooling_rate,
+            "neighbourhood_radius": params.neighbourhood_radius,
+            "feature_vector": features.to_vector(),
+        }))
+    }
 }
 
 // ── Parse Routing Query handler ──────────────────────────────────────────
@@ -2049,14 +2116,48 @@ fn handle_parse_routing_query(args: &Value) -> Result<Value> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing 'query' parameter"))?;
 
-    let parsed = parse_query(query);
-    let json = to_vrp_json(&parsed);
+    let use_llm = args.get("use_llm").and_then(|v| v.as_bool()).unwrap_or(false);
 
-    Ok(json!({
-        "variant": parsed.variant,
-        "config": json,
-        "entities": parsed.entities,
-    }))
+    #[cfg(feature = "ml")]
+    {
+        if use_llm {
+            tracing::info!("parse_routing_query: using LLM for query='{}'", query);
+            let mut parser = QwenNLParser::new()?;
+            let json_str = parser.parse_llm(query)?;
+            
+            // Try to parse the LLM output as JSON. If it fails, fallback to regex.
+            match serde_json::from_str::<Value>(&json_str) {
+                Ok(json) => {
+                    return Ok(json!({
+                        "variant": json.get("variant").and_then(|v| v.as_str()).unwrap_or("cvrp"),
+                        "config": json,
+                        "method": "llm",
+                    }));
+                }
+                Err(e) => {
+                    tracing::warn!("LLM output was not valid JSON: {}. Falling back to regex.", e);
+                }
+            }
+        }
+
+        let parsed = parse_query(query);
+        let json = to_vrp_json(&parsed);
+
+        return Ok(json!({
+            "variant": parsed.variant,
+            "config": json,
+            "entities": parsed.entities,
+            "method": "regex",
+        }));
+    }
+
+    #[cfg(not(feature = "ml"))]
+    {
+        if use_llm {
+            anyhow::bail!("ML feature is not enabled. Cannot use LLM parser.");
+        }
+        anyhow::bail!("ML feature is not enabled. NLP requires the 'ml' feature.");
+    }
 }
 
 // ── Get Valhalla Matrix handler ──────────────────────────────────────────

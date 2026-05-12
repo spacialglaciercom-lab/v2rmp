@@ -6,6 +6,7 @@ pub mod elevation;
 pub mod extract;
 pub mod geo_types;
 pub mod optimize;
+#[cfg(feature = "ml")]
 pub mod ml;
 pub mod ml_legacy;
 pub mod nlp;

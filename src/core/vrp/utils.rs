@@ -56,6 +56,123 @@ pub fn build_haversine_matrix(locations: &[VRPSolverStop], avg_speed_kmh: f64) -
     matrix
 }
 
+#[cfg(feature = "ml")]
+type EmbeddingsSlice<'a> = &'a [crate::core::ml::graph_embed::RoadEmbedding];
+#[cfg(not(feature = "ml"))]
+type EmbeddingsSlice<'a> = &'a [()];
+
+/// Build a distance matrix using shortest paths on the road network graph.
+pub fn build_graph_matrix(
+    stops: &[VRPSolverStop],
+    nodes: &[RmpNode],
+    edges: &[RmpEdge],
+    embeddings: Option<EmbeddingsSlice>,
+    avg_speed_kmh: f64,
+) -> DistMatrix {
+    let n_stops = stops.len();
+    let n_nodes = nodes.len();
+    if n_stops == 0 || n_nodes == 0 {
+        return vec![vec![DistCell { distance: 0.0, time: 0.0 }; n_stops]; n_stops];
+    }
+
+    // 1. Build adjacency list
+    let mut adj = vec![Vec::new(); n_nodes];
+    for (i, edge) in edges.iter().enumerate() {
+        let mut weight = edge.weight_m;
+        
+        // Apply learned embedding if available
+        #[cfg(feature = "ml")]
+        if let Some(embs) = embeddings {
+            if let Some(emb) = embs.get(i) {
+                // Use first dimension as a learned bias for now
+                // Research basis: GAIN (2107.07791)
+                let bias = emb.vector.get(0).copied().unwrap_or(0.0);
+                weight *= (1.0 + bias as f64).max(0.1_f64);
+            }
+        }
+
+        adj[edge.from as usize].push((edge.to as usize, weight));
+        if edge.oneway == 0 {
+            adj[edge.to as usize].push((edge.from as usize, weight));
+        }
+    }
+
+    // 2. Map stops to nearest nodes
+    let stop_nodes: Vec<usize> = stops.iter().map(|stop| {
+        let mut best_node = 0;
+        let mut best_dist = f64::MAX;
+        for (i, node) in nodes.iter().enumerate() {
+            let d = haversine_m(stop.lat, stop.lon, node.lat, node.lon);
+            if d < best_dist {
+                best_dist = d;
+                best_node = i;
+            }
+        }
+        best_node
+    }).collect();
+
+    // 3. Dijkstra from each stop node
+    let mut matrix = vec![vec![DistCell { distance: 0.0, time: 0.0 }; n_stops]; n_stops];
+    
+    for i in 0..n_stops {
+        let start_node = stop_nodes[i];
+        let dists = dijkstra(start_node, &adj, n_nodes);
+        
+        for j in 0..n_stops {
+            let target_node = stop_nodes[j];
+            let d_m = dists[target_node];
+            let d_km = d_m / 1000.0;
+            let time_sec = (d_km / avg_speed_kmh) * 3600.0;
+            matrix[i][j] = DistCell { distance: d_km, time: time_sec };
+        }
+    }
+
+    matrix
+}
+
+fn dijkstra(start: usize, adj: &[Vec<(usize, f64)>], n: usize) -> Vec<f64> {
+    use std::collections::BinaryHeap;
+    use std::cmp::Ordering;
+
+    #[derive(Copy, Clone, PartialEq)]
+    struct State {
+        cost: f64,
+        position: usize,
+    }
+    impl Eq for State {}
+    impl Ord for State {
+        fn cmp(&self, other: &Self) -> Ordering {
+            other.cost.partial_cmp(&self.cost).unwrap_or(Ordering::Equal)
+        }
+    }
+    impl PartialOrd for State {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    let mut dists = vec![f64::MAX; n];
+    let mut heap = BinaryHeap::new();
+
+    dists[start] = 0.0;
+    heap.push(State { cost: 0.0, position: start });
+
+    while let Some(State { cost, position }) = heap.pop() {
+        if cost > dists[position] { continue; }
+
+        for (next, weight) in &adj[position] {
+            let next_cost = cost + weight;
+            if next_cost < dists[*next] {
+                dists[*next] = next_cost;
+                heap.push(State { cost: next_cost, position: *next });
+            }
+        }
+    }
+    dists
+}
+
+use super::super::optimize::{RmpEdge, RmpNode};
+
 /// Fetch a real-road distance/time matrix from Valhalla.
 pub async fn get_valhalla_matrix(locations: &[VRPSolverStop]) -> Result<DistMatrix, String> {
     let url = "https://valhalla1.openstreetmap.de/sources_to_targets";
@@ -235,7 +352,11 @@ pub fn nearest_neighbor_route(
 }
 
 /// 2-opt improvement: iteratively reverse segments to reduce total distance.
-pub fn two_opt_improve(matrix: &DistMatrix, route_indices: &[usize]) -> Vec<usize> {
+pub fn two_opt_improve(
+    matrix: &DistMatrix,
+    route_indices: &[usize],
+    max_iter: u32,
+) -> Vec<usize> {
     let n = route_indices.len();
     if n <= 3 {
         return route_indices.to_vec();
@@ -243,7 +364,6 @@ pub fn two_opt_improve(matrix: &DistMatrix, route_indices: &[usize]) -> Vec<usiz
     let mut route = route_indices.to_vec();
     let mut improved = true;
     let mut iterations = 0;
-    let max_iter = 300;
     while improved && iterations < max_iter {
         improved = false;
         iterations += 1;
@@ -662,7 +782,7 @@ mod tests {
         ];
         let m = build_haversine_matrix(&stops, 40.0);
         let route = vec![0, 1, 2, 3];
-        let improved = two_opt_improve(&m, &route);
+        let improved = two_opt_improve(&m, &route, 300);
         assert_eq!(improved.len(), 4);
     }
 
@@ -701,7 +821,7 @@ mod tests {
         ];
         let m = build_haversine_matrix(&stops, 40.0);
         let route = vec![0, 2, 1, 3]; // crossing
-        let improved = two_opt_improve(&m, &route);
+        let improved = two_opt_improve(&m, &route, 300);
         // Calculate total distance of improved route
         let improved_dist: f64 = (0..improved.len() - 1)
             .map(|i| m[improved[i]][improved[i + 1]].distance)
@@ -721,7 +841,7 @@ mod tests {
             distance: 0.0,
             time: 0.0,
         }]];
-        let improved = two_opt_improve(&m, &[0]);
+        let improved = two_opt_improve(&m, &[0], 300);
         assert_eq!(improved, vec![0]);
     }
 
@@ -749,7 +869,7 @@ mod tests {
                 },
             ],
         ];
-        let improved = two_opt_improve(&m, &[0, 1]);
+        let improved = two_opt_improve(&m, &[0, 1], 300);
         assert_eq!(improved.len(), 2);
     }
 

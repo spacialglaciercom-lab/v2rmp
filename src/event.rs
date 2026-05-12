@@ -358,6 +358,7 @@ async fn handle_optimize_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers)
                     mode: SolverMode::Vrp,
                     num_vehicles,
                     solver_id,
+                    coordinates: None,
                 };
 
                 // Execute optimization
@@ -559,6 +560,7 @@ async fn handle_vrp_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                             use_time_windows: false,
                             window_open: None,
                             window_close: None,
+                            hyperparams: None,
                         };
 
                         match crate::core::vrp::registry::solve_with(solver_id, &vrp_input).await {

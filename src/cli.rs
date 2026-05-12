@@ -42,14 +42,18 @@ enum Commands {
     /// Start a headless, long-running JSON-RPC/STDIO server for frontend integrations
     Serve(ServeArgs),
     /// Generate embeddings for text using fastembed
+    #[cfg(feature = "ml")]
     Embed(EmbedArgs),
     /// DEM elevation queries from local GeoTIFF
     Elevation(ElevationArgs),
     /// Predict the best VRP solver for a set of stops
+    #[cfg(feature = "ml")]
     PredictSolver(PredictSolverArgs),
     /// Predict expected route quality before solving
+    #[cfg(feature = "ml")]
     PredictQuality(PredictQualityArgs),
     /// Tune solver hyperparameters for an instance
+    #[cfg(feature = "ml")]
     TuneHyperparams(TuneHyperparamsArgs),
     /// Parse a natural-language routing query into JSON
     ParseQuery(ParseQueryArgs),
@@ -146,6 +150,7 @@ struct FuelElevationArgs {
 // ── Predict Solver ─────────────────────────────────────────────────────
 
 #[derive(clap::Args, Serialize, Deserialize)]
+#[cfg(feature = "ml")]
 struct PredictSolverArgs {
     /// Path to JSON file with stops array (first = depot) or '-' for stdin
     #[arg(short, long, default_value = "-")]
@@ -158,6 +163,7 @@ struct PredictSolverArgs {
 // ── Predict Quality ────────────────────────────────────────────────────
 
 #[derive(clap::Args, Serialize, Deserialize)]
+#[cfg(feature = "ml")]
 struct PredictQualityArgs {
     /// Path to JSON file with stops array (first = depot) or '-' for stdin
     #[arg(short, long, default_value = "-")]
@@ -170,6 +176,7 @@ struct PredictQualityArgs {
 // ── Tune Hyperparams ─────────────────────────────────────────────────
 
 #[derive(clap::Args, Serialize, Deserialize)]
+#[cfg(feature = "ml")]
 struct TuneHyperparamsArgs {
     /// Path to JSON file with stops array (first = depot) or '-' for stdin
     #[arg(short, long, default_value = "-")]
@@ -224,6 +231,7 @@ enum AgentTask {
     Optimize(OptimizeArgs),
     Vrp(VrpArgs),
     Pipeline(PipelineArgs),
+    #[cfg(feature = "ml")]
     Embed(EmbedArgs),
     Elevation(ElevationArgs),
 }
@@ -838,20 +846,20 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
             }
         );
     }
-
-    let req = OptimizeRequest {
-        cache_file: args.input.clone(),
-        route_file: args.output.clone(),
-        turn_penalties: TurnPenalties {
-            left: args.left_penalty,
-            right: args.right_penalty,
-            u_turn: args.uturn_penalty,
-        },
-        depot,
-        oneway_mode,
-        mode,
-        num_vehicles: args.vehicles,
-        solver_id: args.solver,
+let req = OptimizeRequest {
+    cache_file: args.input.clone(),
+    route_file: args.output.clone(),
+    turn_penalties: TurnPenalties {
+        left: args.left_penalty,
+        right: args.right_penalty,
+        u_turn: args.uturn_penalty,
+    },
+    depot,
+    oneway_mode,
+    mode,
+    num_vehicles: args.vehicles,
+    solver_id: args.solver,
+    coordinates: None,
     };
 
     let result = crate::core::optimize::run_optimize(&req).await?;
@@ -914,7 +922,7 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
     let mut stops = Vec::new();
 
     // 1. Add depot
-    stops.push(crate::core::vrp::types::VRPSolverStop {
+    stops.push(VRPSolverStop {
         lat: depots[0].0,
         lon: depots[0].1,
         label: "Depot".into(),
@@ -936,17 +944,40 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
 
     let matrix = crate::core::vrp::utils::build_haversine_matrix(&stops, 40.0);
 
-    let vrp_input = crate::core::vrp::types::VRPSolverInput {
+    #[cfg(feature = "ml")]
+    let mut vrp_input = VRPSolverInput {
         locations: stops,
         num_vehicles: args.vehicles,
         vehicle_capacity: capacity,
-        objective: crate::core::vrp::types::VrpObjective::MinDistance,
+        objective: VrpObjective::MinDistance,
         matrix: Some(matrix),
         service_time_secs: Some(30.0),
         use_time_windows: false,
         window_open: None,
         window_close: None,
+        hyperparams: None,
     };
+
+    #[cfg(not(feature = "ml"))]
+    let vrp_input = VRPSolverInput {
+        locations: stops,
+        num_vehicles: args.vehicles,
+        vehicle_capacity: capacity,
+        objective: VrpObjective::MinDistance,
+        matrix: Some(matrix),
+        service_time_secs: Some(30.0),
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+        hyperparams: None,
+    };
+
+    // AutoML: predict best hyperparameters
+    #[cfg(feature = "ml")]
+    {
+        let features = InstanceFeatures::from_input(&vrp_input);
+        vrp_input.hyperparams = Some(predict_hyperparams(&features));
+    }
 
     let output = crate::core::vrp::registry::solve_with(solver_id, &vrp_input).await
         .map_err(|e| anyhow::anyhow!("VRP Solver error: {}", e))?;
@@ -1041,6 +1072,7 @@ async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         mode: SolverMode::Cpp,
         num_vehicles: 1,
         solver_id: "clarke_wright".to_string(),
+        coordinates: None,
     };
     let optimize_result = crate::core::optimize::run_optimize(&optimize_req)
         .await
@@ -1103,6 +1135,7 @@ async fn run_agent_cmd(args: AgentArgs, json: bool) -> Result<()> {
         AgentTask::Optimize(a) => run_optimize_cmd(a, json).await,
         AgentTask::Vrp(a) => run_vrp_cmd(a, json).await,
         AgentTask::Pipeline(a) => run_pipeline_cmd(a, json).await,
+        #[cfg(feature = "ml")]
         AgentTask::Embed(a) => run_embed_cmd(a, json).await,
         AgentTask::Elevation(a) => run_elevation_cmd(a, json),
     }
@@ -1140,6 +1173,7 @@ async fn run_serve_cmd(_args: ServeArgs) -> Result<()> {
                     AgentTask::Optimize(a) => run_optimize_cmd(a, true).await,
                     AgentTask::Vrp(a) => run_vrp_cmd(a, true).await,
                     AgentTask::Pipeline(a) => run_pipeline_cmd(a, true).await,
+                    #[cfg(feature = "ml")]
                     AgentTask::Embed(a) => run_embed_cmd(a, true).await,
                     AgentTask::Elevation(a) => run_elevation_cmd(a, true),
                 };
@@ -1160,6 +1194,7 @@ async fn run_serve_cmd(_args: ServeArgs) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "ml")]
 async fn run_embed_cmd(args: EmbedArgs, json: bool) -> Result<()> {
     if !json {
         tracing::info!("Generating embeddings for {} texts...", args.text.len());
@@ -1176,6 +1211,11 @@ async fn run_embed_cmd(args: EmbedArgs, json: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(not(feature = "ml"))]
+async fn run_embed_cmd(_args: EmbedArgs, _json: bool) -> Result<()> {
+    anyhow::bail!("ML feature is not enabled. Cannot generate embeddings.");
 }
 
 fn run_list_cmd(args: ListArgs, json: bool) -> Result<()> {
@@ -1328,13 +1368,18 @@ fn run_elevation_cmd(args: ElevationArgs, json: bool) -> Result<()> {
 
 // ── New ML command handlers ────────────────────────────────────────────
 
+#[cfg(feature = "ml")]
 use crate::core::ml::features::InstanceFeatures;
+#[cfg(feature = "ml")]
 use crate::core::ml::selector::{predict_solver, default_model_path};
+#[cfg(feature = "ml")]
 use crate::core::ml::quality_predictor::predict_quality;
+#[cfg(feature = "ml")]
 use crate::core::ml::automl::predict_hyperparams;
 use crate::core::nlp::{parse_query, to_vrp_json};
 use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
 
+#[cfg(feature = "ml")]
 fn parse_stops_json(path: &str) -> Result<Vec<VRPSolverStop>> {
     let stops: Vec<VRPSolverStop> = if path == "-" {
         serde_json::from_reader(std::io::stdin())?
@@ -1345,6 +1390,7 @@ fn parse_stops_json(path: &str) -> Result<Vec<VRPSolverStop>> {
     Ok(stops)
 }
 
+#[cfg(feature = "ml")]
 async fn run_predict_solver_cmd(args: PredictSolverArgs) -> Result<()> {
     let stops = parse_stops_json(&args.input)?;
     let input = VRPSolverInput {
@@ -1356,7 +1402,7 @@ async fn run_predict_solver_cmd(args: PredictSolverArgs) -> Result<()> {
         service_time_secs: None,
         use_time_windows: false,
         window_open: None,
-        window_close: None,
+        window_close: None, hyperparams: None,
     };
     let pred = predict_solver(&input, Some(&default_model_path()))?;
     if args.json {
@@ -1373,6 +1419,7 @@ async fn run_predict_solver_cmd(args: PredictSolverArgs) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "ml")]
 async fn run_predict_quality_cmd(args: PredictQualityArgs) -> Result<()> {
     let stops = parse_stops_json(&args.input)?;
     let input = VRPSolverInput {
@@ -1384,7 +1431,7 @@ async fn run_predict_quality_cmd(args: PredictQualityArgs) -> Result<()> {
         service_time_secs: None,
         use_time_windows: false,
         window_open: None,
-        window_close: None,
+        window_close: None, hyperparams: None,
     };
     let features = InstanceFeatures::from_input(&input);
     let pred = predict_quality(&features);
@@ -1398,6 +1445,7 @@ async fn run_predict_quality_cmd(args: PredictQualityArgs) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "ml")]
 async fn run_tune_hyperparams_cmd(args: TuneHyperparamsArgs) -> Result<()> {
     let stops = parse_stops_json(&args.input)?;
     let input = VRPSolverInput {
@@ -1409,7 +1457,7 @@ async fn run_tune_hyperparams_cmd(args: TuneHyperparamsArgs) -> Result<()> {
         service_time_secs: None,
         use_time_windows: false,
         window_open: None,
-        window_close: None,
+        window_close: None, hyperparams: None,
     };
     let features = InstanceFeatures::from_input(&input);
     let params = predict_hyperparams(&features);
@@ -1469,10 +1517,14 @@ pub async fn run() -> Result<()> {
         Commands::List(args) => run_list_cmd(args, cli.json),
         Commands::Agent(args) => run_agent_cmd(args, cli.json).await,
         Commands::Serve(args) => run_serve_cmd(args).await,
+        #[cfg(feature = "ml")]
         Commands::Embed(args) => run_embed_cmd(args, cli.json).await,
         Commands::Elevation(args) => run_elevation_cmd(args, cli.json),
+        #[cfg(feature = "ml")]
         Commands::PredictSolver(args) => run_predict_solver_cmd(args).await,
+        #[cfg(feature = "ml")]
         Commands::PredictQuality(args) => run_predict_quality_cmd(args).await,
+        #[cfg(feature = "ml")]
         Commands::TuneHyperparams(args) => run_tune_hyperparams_cmd(args).await,
         Commands::ParseQuery(args) => run_parse_query_cmd(args),
     };

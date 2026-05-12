@@ -17,6 +17,21 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[cfg(feature = "ml")]
+use candle_core::{Device, Tensor, DType};
+#[cfg(feature = "ml")]
+use candle_nn::VarBuilder;
+#[cfg(feature = "ml")]
+use candle_transformers::models::qwen2::{ModelForCausalLM, Config};
+#[cfg(feature = "ml")]
+use candle_transformers::generation::LogitsProcessor;
+#[cfg(feature = "ml")]
+use hf_hub::{api::sync::Api, Repo, RepoType};
+#[cfg(feature = "ml")]
+use tokenizers::Tokenizer;
+#[cfg(feature = "ml")]
+use anyhow::{Context, Result};
+
 /// Parsed VRP configuration from natural language.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ParsedRoutingQuery {
@@ -195,6 +210,108 @@ pub fn to_vrp_json(parsed: &ParsedRoutingQuery) -> serde_json::Value {
     }
 
     obj
+}
+
+#[cfg(feature = "ml")]
+pub struct QwenNLParser {
+    model: ModelForCausalLM,
+    tokenizer: Tokenizer,
+    device: Device,
+}
+
+#[cfg(feature = "ml")]
+impl QwenNLParser {
+    /// Loads the Qwen2.5-0.5B-Instruct model from Hugging Face hub (cached locally).
+    /// Uses 0.5B by default as 1.5B is too heavy for CPU-only MCP tools.
+    pub fn new() -> Result<Self> {
+        let device = crate::core::ml::best_device()?;
+        let api = Api::new().context("Failed to create HF API client")?;
+        let repo = api.repo(Repo::with_revision(
+            "Qwen/Qwen2.5-0.5B-Instruct".to_string(),
+            RepoType::Model,
+            "main".to_string(),
+        ));
+
+        tracing::info!("Using device: {:?}", device);
+        tracing::info!("Fetching Qwen2.5-0.5B tokenizer and config...");
+        let tokenizer_path = repo.get("tokenizer.json")?;
+        let config_path = repo.get("config.json")?;
+
+        let tokenizer = Tokenizer::from_file(&tokenizer_path)
+            .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?;
+            
+        let config: Config = serde_json::from_reader(std::fs::File::open(config_path)?)?;
+
+        // Download safetensors.
+        tracing::info!("Fetching Qwen2.5-0.5B safetensors...");
+        let model_path = repo.get("model.safetensors")?;
+
+        // Use F16 on GPU, F32 on CPU for best compatibility/performance
+        let dtype = if device.is_cuda() || device.is_metal() {
+            DType::F16
+        } else {
+            DType::F32
+        };
+
+        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_path], dtype, &device)? };
+        
+        tracing::info!("Loading Qwen2.5 model into Candle ({:?})...", dtype);
+        let model = ModelForCausalLM::new(&config, vb)?;
+
+        Ok(Self {
+            model,
+            tokenizer,
+            device,
+        })
+    }
+
+    /// Translates a natural language query into a VRP JSON string using the LLM.
+    pub fn parse_llm(&mut self, query: &str) -> Result<String> {
+        let system_prompt = "You are an expert route optimization assistant. Convert the user's natural language routing query into a valid JSON object describing the Vehicle Routing Problem (VRP) configuration. Extract: 'num_stops', 'num_vehicles', 'depot' (as {\"lat\": .., \"lon\": ..}), 'deadline' (HH:MM), 'capacity', 'variant' (e.g., 'cvrp', 'cvrptw'). ONLY output valid JSON and nothing else.";
+        
+        let prompt = format!("<|im_start|>system\n{}<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n", system_prompt, query);
+
+        let tokens = self.tokenizer.encode(prompt, true)
+            .map_err(|e| anyhow::anyhow!("Tokenization error: {}", e))?;
+        let mut tokens = tokens.get_ids().to_vec();
+
+        let mut logits_processor = LogitsProcessor::new(1337, None, None);
+        let mut output_text = String::new();
+
+        let mut pos = 0;
+        let max_tokens = 256;
+        let start_time = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(30);
+
+        for index in 0..max_tokens {
+            if start_time.elapsed() > timeout {
+                tracing::warn!("LLM inference timed out after 30s");
+                break;
+            }
+
+            let context_size = if index == 0 { tokens.len() } else { 1 };
+            let start_pos = tokens.len().saturating_sub(context_size);
+            let input = Tensor::new(&tokens[start_pos..], &self.device)?.unsqueeze(0)?;
+            
+            let logits = self.model.forward(&input, pos)?;
+            let logits = logits.squeeze(0)?;
+            let logits = logits.get(logits.dim(0)? - 1)?;
+
+            let next_token = logits_processor.sample(&logits)?;
+            tokens.push(next_token);
+            pos += context_size;
+
+            if let Some(text) = self.tokenizer.decode(&[next_token], true).ok() {
+                output_text.push_str(&text);
+                if output_text.contains("<|im_end|>") {
+                    break;
+                }
+            }
+        }
+
+        let clean_json = output_text.replace("<|im_end|>", "").trim().to_string();
+        Ok(clean_json)
+    }
 }
 
 #[cfg(test)]

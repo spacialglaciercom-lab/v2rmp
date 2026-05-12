@@ -1,3 +1,4 @@
+use crate::core::geo_types::BBox;
 use crate::core::vrp::registry::solve_with;
 use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
 use serde::{Deserialize, Serialize};
@@ -11,16 +12,16 @@ use std::time::Instant;
 pub fn filter_bbox(
     nodes: &[RmpNode],
     edges: &[RmpEdge],
-    bbox: Option<(f64, f64, f64, f64)>, // (min_lat, max_lat, min_lon, max_lon)
+    bbox: Option<BBox>,
 ) -> (Vec<RmpNode>, Vec<RmpEdge>) {
-    let Some((min_lat, max_lat, min_lon, max_lon)) = bbox else {
+    let Some(bbox) = bbox else {
         return (nodes.to_vec(), edges.to_vec());
     };
 
     // Mark which old-node indices are inside the bbox
     let inside: Vec<bool> = nodes
         .iter()
-        .map(|n| n.lat >= min_lat && n.lat <= max_lat && n.lon >= min_lon && n.lon <= max_lon)
+        .map(|n| bbox.contains(n.lon, n.lat))
         .collect();
 
     // Build old->new index map
@@ -94,6 +95,8 @@ pub struct OptimizeRequest {
     /// VRP-only: solver algorithm id (clarke_wright, sweep, two_opt, or_opt, default).
     #[serde(default = "default_solver_id")]
     pub solver_id: String,
+    /// VRP-only: path to CSV file containing stops.
+    pub coordinates: Option<String>,
 }
 
 fn default_num_vehicles() -> usize {
@@ -263,8 +266,8 @@ fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let lat1_r = lat1.to_radians();
     let lat2_r = lat2.to_radians();
 
-    let x = dlon.cos() * lat2_r.sin();
-    let y = lat1_r.cos() * lat2_r.sin() - lat1_r.sin() * lat2_r.cos() * dlon.cos();
+    let y = dlon.sin() * lat2_r.cos();
+    let x = lat1_r.cos() * lat2_r.sin() - lat1_r.sin() * lat2_r.cos() * dlon.cos();
 
     let bearing_rad = y.atan2(x);
     (bearing_rad.to_degrees() + 360.0) % 360.0
@@ -294,7 +297,13 @@ pub struct CppOutput {
 /// - `depot` is an optional (lat, lon) — the solver snaps to the nearest node.
 ///
 /// Returns a `CppOutput` with both summary statistics and the full circuit.
-pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot: Option<(f64, f64)>) -> anyhow::Result<CppOutput> {
+pub fn solve_cpp(
+    nodes: &[RmpNode],
+    edges: &[RmpEdge],
+    oneway: OnewayMode,
+    depot: Option<(f64, f64)>,
+    penalties: TurnPenalties,
+) -> anyhow::Result<CppOutput> {
     let start = Instant::now();
 
     if nodes.is_empty() || edges.is_empty() {
@@ -349,86 +358,210 @@ pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot
     }
     let odd_vertices: Vec<usize> = (0..n).filter(|&i| !degrees[i].is_multiple_of(2)).collect();
 
-    // Minimum weight perfect matching (greedy nearest-neighbor using Dijkstra)
+    // Exact Minimum-Weight Perfect Matching (MWPM) using Dynamic Programming.
+    // For graphs with a large number of odd vertices (> 24), we fall back to a greedy heuristic
+    // to prevent exponential time complexity (O(2^N)).
     let mut duplicate_edges: Vec<(usize, usize, f64, usize)> = Vec::new();
-    let mut matched = vec![false; n];
-    for i in 0..n {
-        if degrees[i].is_multiple_of(2) {
-            matched[i] = true;
+    let num_odd = odd_vertices.len();
+
+    if num_odd > 0 {
+        use std::collections::BinaryHeap;
+        use std::cmp::Ordering;
+
+        #[derive(Copy, Clone, PartialEq)]
+        struct State {
+            cost: f64,
+            position: usize,
+            incoming_edge_idx: Option<usize>,
         }
-    }
-
-    use std::collections::BinaryHeap;
-    use std::cmp::Ordering;
-
-    #[derive(Copy, Clone, PartialEq)]
-    struct State {
-        cost: f64,
-        position: usize,
-    }
-    impl Eq for State {}
-    impl Ord for State {
-        fn cmp(&self, other: &Self) -> Ordering {
-            other.cost.partial_cmp(&self.cost).unwrap_or(Ordering::Equal)
+        impl Eq for State {}
+        impl Ord for State {
+            fn cmp(&self, other: &Self) -> Ordering {
+                other.cost.partial_cmp(&self.cost).unwrap_or(Ordering::Equal)
+            }
         }
-    }
-    impl PartialOrd for State {
-        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-            Some(self.cmp(other))
+        impl PartialOrd for State {
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                Some(self.cmp(other))
+            }
         }
-    }
 
-    for &u in &odd_vertices {
-        if matched[u] { continue; }
+        // 1. All-Pairs Shortest Paths between odd vertices
+        let mut dist_matrix = vec![vec![f64::MAX; num_odd]; num_odd];
+        let mut path_matrix = vec![vec![Vec::new(); num_odd]; num_odd];
 
-        let mut dists = vec![f64::MAX; n];
-        let mut prev = vec![None; n];
-        let mut heap = BinaryHeap::new();
+        for i in 0..num_odd {
+            let u = odd_vertices[i];
+            let mut dists = vec![f64::MAX; n];
+            let mut prev = vec![None; n];
+            let mut heap = BinaryHeap::new();
 
-        dists[u] = 0.0;
-        heap.push(State { cost: 0.0, position: u });
+            dists[u] = 0.0;
+            heap.push(State {
+                cost: 0.0,
+                position: u,
+                incoming_edge_idx: None,
+            });
 
-        let mut best_v = None;
+            while let Some(State {
+                cost,
+                position,
+                incoming_edge_idx,
+            }) = heap.pop()
+            {
+                if cost > dists[position] {
+                    continue;
+                }
 
-        while let Some(State { cost, position }) = heap.pop() {
-            if cost > dists[position] { continue; }
+                for edge in &adj[position] {
+                    let mut penalty = 0.0;
+                    if let Some(prev_idx) = incoming_edge_idx {
+                        let prev_edge = &edges[prev_idx];
+                        let (p_from, p_to) = if prev_edge.to as usize == position {
+                            (prev_edge.from as usize, position)
+                        } else {
+                            (prev_edge.to as usize, position)
+                        };
 
-            if position != u && !matched[position] {
-                best_v = Some(position);
-                break;
+                        let b_in = bearing(
+                            nodes[p_from].lat,
+                            nodes[p_from].lon,
+                            nodes[p_to].lat,
+                            nodes[p_to].lon,
+                        );
+                        let b_out = bearing(
+                            nodes[position].lat,
+                            nodes[position].lon,
+                            nodes[edge.to as usize].lat,
+                            nodes[edge.to as usize].lon,
+                        );
+                        let delta = b_out - b_in;
+
+                        match classify_turn(delta) {
+                            "left" => penalty = penalties.left,
+                            "right" => penalty = penalties.right,
+                            "u_turn" => penalty = penalties.u_turn,
+                            _ => {}
+                        }
+                    }
+
+                    let next_cost = cost + edge.weight_m + penalty;
+                    if next_cost < dists[edge.to as usize] {
+                        dists[edge.to as usize] = next_cost;
+                        prev[edge.to as usize] = Some((position, edge.weight_m, edge.edge_idx));
+                        heap.push(State {
+                            cost: next_cost,
+                            position: edge.to as usize,
+                            incoming_edge_idx: Some(edge.edge_idx),
+                        });
+                    }
+                }
             }
 
-            for edge in &adj[position] {
-                let next = State { cost: cost + edge.weight_m, position: edge.to as usize };
-                if next.cost < dists[next.position] {
-                    dists[next.position] = next.cost;
-                    prev[next.position] = Some((position, edge.weight_m, edge.edge_idx));
-                    heap.push(next);
+            for j in (i + 1)..num_odd {
+                let v = odd_vertices[j];
+                if dists[v] < f64::MAX {
+                    dist_matrix[i][j] = dists[v];
+                    dist_matrix[j][i] = dists[v];
+                    
+                    let mut path = Vec::new();
+                    let mut curr = v;
+                    while let Some((p, weight, eidx)) = prev[curr] {
+                        path.push((p, curr, weight, eidx));
+                        curr = p;
+                    }
+                    path_matrix[i][j] = path;
                 }
             }
         }
 
-        if let Some(v) = best_v {
-            matched[u] = true;
-            matched[v] = true;
+        // 2. Minimum Weight Perfect Matching
+        let mut pairs = Vec::new();
+        
+        if num_odd <= 24 {
+            // Exact DP (Bitmask DP)
+            let mut memo = vec![f64::MAX; 1 << num_odd];
+            let mut parent = vec![usize::MAX; 1 << num_odd];
+            memo[0] = 0.0;
 
-            // Trace path back from v to u
-            let mut curr = v;
-            while let Some((p, weight, eidx)) = prev[curr] {
-                duplicate_edges.push((p, curr, weight, eidx));
-                curr = p;
+            for mask in 0..(1 << num_odd) {
+                if memo[mask] == f64::MAX { continue; }
+                
+                // Find first unmatched vertex
+                let mut i = 0;
+                while i < num_odd {
+                    if (mask & (1 << i)) == 0 { break; }
+                    i += 1;
+                }
+                if i == num_odd { continue; }
+
+                for j in (i + 1)..num_odd {
+                    if (mask & (1 << j)) == 0 && dist_matrix[i][j] < f64::MAX {
+                        let next_mask = mask | (1 << i) | (1 << j);
+                        let new_cost = memo[mask] + dist_matrix[i][j];
+                        if new_cost < memo[next_mask] {
+                            memo[next_mask] = new_cost;
+                            parent[next_mask] = mask;
+                        }
+                    }
+                }
+            }
+
+            // Backtrack
+            let mut curr = (1 << num_odd) - 1;
+            while curr > 0 {
+                let prev_mask = parent[curr];
+                if prev_mask == usize::MAX { break; } // Safety against disconnected components
+                let diff = curr ^ prev_mask;
+                
+                let mut u = usize::MAX;
+                let mut v = usize::MAX;
+                for i in 0..num_odd {
+                    if (diff & (1 << i)) != 0 {
+                        if u == usize::MAX { u = i; }
+                        else { v = i; }
+                    }
+                }
+                pairs.push((u, v));
+                curr = prev_mask;
             }
         } else {
-            // Fallback: If disconnected, just skip (graph must be disconnected)
-            matched[u] = true;
+            // Greedy fallback for very large odd-vertex counts
+            let mut matched = vec![false; num_odd];
+            for i in 0..num_odd {
+                if matched[i] { continue; }
+                let mut best_j = None;
+                let mut best_dist = f64::MAX;
+                
+                for j in (i + 1)..num_odd {
+                    if !matched[j] && dist_matrix[i][j] < best_dist {
+                        best_dist = dist_matrix[i][j];
+                        best_j = Some(j);
+                    }
+                }
+                
+                if let Some(j) = best_j {
+                    matched[i] = true;
+                    matched[j] = true;
+                    pairs.push((i, j));
+                }
+            }
+        }
+
+        // Add the paths for all matched pairs into duplicate_edges
+        for (u_idx, v_idx) in pairs {
+            let (i, j) = if u_idx < v_idx { (u_idx, v_idx) } else { (v_idx, u_idx) };
+            for &(p, c, weight, eidx) in &path_matrix[i][j] {
+                duplicate_edges.push((p, c, weight, eidx));
+            }
         }
     }
 
     // Add duplicate edges
-    let deadhead_edge_idx = usize::MAX;
-    for &(u, v, weight, eidx) in &duplicate_edges {
-        adj[u].push(AdjEntry { to: v as u32, weight_m: weight, edge_idx: eidx });
-        adj[v].push(AdjEntry { to: u as u32, weight_m: weight, edge_idx: eidx });
+    for (i, &(u, v, weight, _eidx)) in duplicate_edges.iter().enumerate() {
+        let deadhead_edge_idx = edges.len() + i;
+        adj[u].push(AdjEntry { to: v as u32, weight_m: weight, edge_idx: deadhead_edge_idx });
+        adj[v].push(AdjEntry { to: u as u32, weight_m: weight, edge_idx: deadhead_edge_idx });
     }
 
     // Find Eulerian circuit using Hierholzer's algorithm
@@ -477,7 +610,7 @@ pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot
         if let Some(e) = &entry.1 {
             total_distance_m += e.weight_m;
             total_segments += 1;
-            if e.edge_idx == deadhead_edge_idx {
+            if e.edge_idx >= edges.len() {
                 deadhead_distance_m += e.weight_m;
             } else {
                 edge_traversal_count[e.edge_idx] += 1;
@@ -497,8 +630,7 @@ pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot
             if prev == curr || curr == next { continue; }
             let b_in = bearing(nodes[prev].lat, nodes[prev].lon, nodes[curr].lat, nodes[curr].lon);
             let b_out = bearing(nodes[curr].lat, nodes[curr].lon, nodes[next].lat, nodes[next].lon);
-            let b_in_reverse = (b_in + 180.0).normalize(0.0, 360.0);
-            let delta = b_out - b_in_reverse;
+            let delta = b_out - b_in;
             match classify_turn(delta) {
                 "left" => turns.left += 1,
                 "right" => turns.right += 1,
@@ -544,7 +676,7 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     }
     let (nodes, edges) = read_rmp_file(&file_data)?;
 
-    let output = solve_cpp(&nodes, &edges, req.oneway_mode, req.depot)?;
+    let output = solve_cpp(&nodes, &edges, req.oneway_mode, req.depot, req.turn_penalties)?;
 
     if let Some(ref route_path) = req.route_file {
         if route_path.ends_with(".json") {
@@ -575,41 +707,54 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
     // 1. Read .rmp
     let mut file_data = Vec::new();
     std::fs::File::open(&req.cache_file)?.read_to_end(&mut file_data)?;
-    let (nodes, _edges) = read_rmp_file(&file_data)?;
+    let (nodes, edges) = read_rmp_file(&file_data)?;
 
     if nodes.is_empty() {
         anyhow::bail!("No nodes found in .rmp file");
     }
 
+    // ── Graph Embeddings ─────────────────────────────────────────────
+    #[cfg(feature = "ml")]
+    let embeddings = {
+        let embs = crate::core::ml::graph_embed::embed_network(&nodes, &edges, None);
+        if !embs.is_empty() {
+            Some(embs)
+        } else {
+            None
+        }
+    };
+    #[cfg(not(feature = "ml"))]
+    let embeddings = None;
+
     // 2. Build VRP Stops
-    let mut stops: Vec<VRPSolverStop> = nodes
-        .iter()
-        .enumerate()
-        .map(|(i, n)| VRPSolverStop {
-            lat: n.lat,
-            lon: n.lon,
-            label: format!("Node {}", i),
-            demand: Some(1.0),
-            arrival_time: None,
-        })
-        .collect();
+    let mut stops: Vec<VRPSolverStop> = Vec::new();
 
     // Add depot at start if specified
     if let Some((dlat, dlon)) = req.depot {
-        stops.insert(
-            0,
-            VRPSolverStop {
-                lat: dlat,
-                lon: dlon,
-                label: "Depot".into(),
-                demand: Some(0.0),
-                arrival_time: None,
-            },
-        );
+        stops.push(VRPSolverStop {
+            lat: dlat,
+            lon: dlon,
+            label: "Depot".into(),
+            demand: Some(0.0),
+            arrival_time: None,
+        });
     }
 
-    // 3. Build Distance Matrix (Haversine for now)
-    let matrix = super::vrp::utils::build_haversine_matrix(&stops, 40.0);
+    if let Some(csv_path) = &req.coordinates {
+        let (csv_stops, _) = super::vrp::utils::parse_csv_stops(csv_path)
+            .map_err(|e| anyhow::anyhow!("CSV parse error: {}", e))?;
+        stops.extend(csv_stops);
+    } else {
+        anyhow::bail!("VRP mode requires --coordinates (a CSV file) to define delivery stops.");
+    }
+
+    // 3. Build Distance Matrix
+    // Use graph-based shortest paths if we have edges, otherwise fallback to haversine.
+    let matrix = if !edges.is_empty() {
+        super::vrp::utils::build_graph_matrix(&stops, &nodes, &edges, embeddings.as_deref(), 40.0)
+    } else {
+        super::vrp::utils::build_haversine_matrix(&stops, 40.0)
+    };
 
     // 4. Solve
     let vrp_input = VRPSolverInput {
@@ -622,11 +767,33 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         use_time_windows: false,
         window_open: None,
         window_close: None,
+        hyperparams: None,
     };
 
     let output = solve_with(&req.solver_id, &vrp_input)
         .await
         .map_err(|e| anyhow::anyhow!("VRP Solver error: {}", e))?;
+
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+    let total_dist_km: f64 = output.total_distance_km.parse().unwrap_or(0.0);
+
+    // ── Online Learning Feedback ─────────────────────────────────────
+    #[cfg(feature = "ml")]
+    {
+        use crate::core::ml::feedback::{log_solve, SolveLogEntry};
+        let features = crate::core::ml::features::InstanceFeatures::from_input(&vrp_input);
+        let entry = SolveLogEntry {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            instance_features: features.to_vector(),
+            solver_id: req.solver_id.clone(),
+            total_distance_km: total_dist_km,
+            elapsed_ms,
+            gap_to_bks: None, // We don't know the BKS for general instances
+        };
+        if let Err(e) = log_solve(entry, None) {
+            tracing::warn!("Failed to log solve for feedback: {}", e);
+        }
+    }
 
     // 5. Compute Stats
     let mut turns = TurnSummary {
@@ -657,8 +824,6 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
             }
         }
     }
-
-    let total_dist_km: f64 = output.total_distance_km.parse().unwrap_or(0.0);
 
     // 6. Write GPX
     if let Some(ref path) = req.route_file {
@@ -807,6 +972,7 @@ mod tests {
             mode: SolverMode::Cpp,
             num_vehicles: 1,
             solver_id: "default".to_string(),
+            coordinates: None,
         };
         let _result = run_optimize(&req);
         // run_optimize is async but CPP is sync, so we need to use tokio
@@ -852,7 +1018,7 @@ fn test_cpp_circuit_is_eulerian() {
             (2, 0, 1100.0, 0),
         ],
     );
-    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None).unwrap();
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None, TurnPenalties::default()).unwrap();
 
     // Property 1: circuit is non-empty
     assert!(!out.circuit.is_empty(), "circuit must not be empty");
@@ -907,7 +1073,7 @@ fn test_cpp_covers_all_edges() {
             (0, 3, 1500.0, 0),
         ],
     );
-    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None).unwrap();
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None, TurnPenalties::default()).unwrap();
 
     // Build a multiset of traversed directed edges from the circuit
     let mut traversed: std::collections::HashMap<(u32, u32), u32> = std::collections::HashMap::new();
@@ -958,7 +1124,7 @@ fn test_cpp_handshaking_lemma() {
     let odd_count = degree.iter().filter(|&&d| d % 2 == 1).count();
     assert_eq!(odd_count % 2, 0, "handshaking lemma: odd-degree count must be even");
 
-    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None).unwrap();
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None, TurnPenalties::default()).unwrap();
 
     // In an Eulerian circuit, every node must have even degree in the walk.
     // Degree = number of times a node appears as "from" endpoint + "to" endpoint.
@@ -993,7 +1159,7 @@ fn test_cpp_eulerian_graph_zero_deadhead() {
             (3, 0, 1100.0, 0),
         ],
     );
-    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None).unwrap();
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None, TurnPenalties::default()).unwrap();
 
     let sum_weights_km: f64 = edges.iter().map(|e| e.weight_m / 1000.0).sum();
     let tolerance = 0.01;
@@ -1029,7 +1195,7 @@ fn test_cpp_distance_conservation() {
             (1, 2, 1100.0, 0),
         ],
     );
-    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None).unwrap();
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None, TurnPenalties::default()).unwrap();
 
     let sum_weights_km: f64 = edges.iter().map(|e| e.weight_m / 1000.0).sum();
     let expected_total = sum_weights_km + out.summary.deadhead_distance_km;
@@ -1071,7 +1237,7 @@ fn test_cpp_circuit_is_valid_walk() {
             (4, 0, 1100.0, 0),
         ],
     );
-    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None).unwrap();
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None, TurnPenalties::default()).unwrap();
 
     let mut adj: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
     for e in &edges {
@@ -1105,7 +1271,7 @@ fn test_cpp_single_edge() {
         &[(45.0, -73.0), (45.01, -73.0)],
         &[(0, 1, 1100.0, 0)],
     );
-    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None).unwrap();
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None, TurnPenalties::default()).unwrap();
 
     assert!(out.circuit.len() >= 2, "circuit must have at least 2 nodes for 1 edge");
     assert_eq!(out.circuit.first(), out.circuit.last(), "circuit must be closed");
@@ -1128,7 +1294,7 @@ fn test_cpp_oneway_respected() {
         &[(45.0, -73.0), (45.01, -73.0)],
         &[(0, 1, 1100.0, 1)], // oneway = 1
     );
-    let out = solve_cpp(&nodes, &edges, OnewayMode::Respect, None).unwrap();
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Respect, None, TurnPenalties::default()).unwrap();
 
     for window in out.circuit.windows(2) {
         let (a, b) = (window[0], window[1]);
@@ -1146,7 +1312,7 @@ fn test_cpp_oneway_respected() {
 fn test_cpp_empty_graph() {
     let nodes: Vec<RmpNode> = vec![];
     let edges: Vec<RmpEdge> = vec![];
-    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None).unwrap();
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None, TurnPenalties::default()).unwrap();
 
     assert!(out.circuit.is_empty(), "empty graph must produce empty circuit");
     assert_eq!(out.summary.total_distance_km, 0.0);
@@ -1167,7 +1333,7 @@ fn test_cpp_depot_snapping() {
         ],
     );
 
-    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, Some((45.01, -73.0))).unwrap();
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, Some((45.01, -73.0)), TurnPenalties::default()).unwrap();
 
     assert_eq!(
         out.circuit.first().copied(),
@@ -1204,7 +1370,7 @@ fn test_cpp_completeness_large() {
     }
 
     let (nodes, edges) = make_graph(&coords, &edge_defs);
-    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None).unwrap();
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None, TurnPenalties::default()).unwrap();
 
     let mut traversed: std::collections::HashMap<(u32, u32), u32> = std::collections::HashMap::new();
     for window in out.circuit.windows(2) {

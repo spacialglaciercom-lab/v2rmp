@@ -42,9 +42,9 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
         ui.group(|ui| {
             ui.heading("Bounding Box Filter (optional)");
             ui.label("Only optimize nodes within this area. Leave empty for full map.");
-            if let Some((min_lat, max_lat, min_lon, max_lon)) = app.optimize_bbox {
+            if let Some(bbox) = app.optimize_bbox {
                 ui.colored_label(egui::Color32::from_rgb(80, 220, 80),
-                    format!("{:.4},{:.4} to {:.4},{:.4}", min_lat, min_lon, max_lat, max_lon));
+                    format!("{:.4},{:.4} to {:.4},{:.4}", bbox.min_lon, bbox.min_lat, bbox.max_lon, bbox.max_lat));
             } else {
                 ui.colored_label(egui::Color32::from_rgb(140, 140, 140), "(full map — no filter)");
             }
@@ -60,7 +60,12 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
                             parts[2].trim().parse::<f64>(),
                             parts[3].trim().parse::<f64>(),
                         ) {
-                            app.optimize_bbox = Some((mla, xla, mlo, xlo));
+                            app.optimize_bbox = Some(crate::core::geo_types::BBox {
+                                min_lon: mlo,
+                                min_lat: mla,
+                                max_lon: xlo,
+                                max_lat: xla,
+                            });
                             app.log(LogLevel::Success, format!("BBox filter set: {:.4},{:.4} to {:.4},{:.4}", mlo, mla, xlo, xla));
                         } else {
                             app.log(LogLevel::Error, "Invalid coordinates");
@@ -221,7 +226,7 @@ fn run_optimize(app: &mut GuiApp) {
     }
 
     // Solve CPP on the (possibly filtered) graph
-    match crate::core::optimize::solve_cpp(&nodes, &edges, app.oneway_mode, depot) {
+    match crate::core::optimize::solve_cpp(&nodes, &edges, app.oneway_mode, depot, app.turn_penalties) {
         Ok(cpp) => {
             app.optimize_status = Status::Done(format!(
                 "{:.2} km, {} segments, {:.1}% efficiency",

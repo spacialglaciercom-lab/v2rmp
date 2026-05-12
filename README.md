@@ -21,10 +21,15 @@ A powerful Terminal User Interface (TUI) and Command-Line Interface (CLI) for ro
   - **Sweep Algorithm**: Geometric partitioning
   - **Local Search**: 2-Opt path improvements
   - **Simulated Annealing**: Or-Opt metaheuristic
+- 🧠 **AI/ML Engine (Pure Rust)**: Learned models via `candle` for:
+  - **AutoML**: Instance-aware hyperparameter tuning (max iterations, temperature, tabu tenure)
+  - **Solver Selection**: Neural ensemble recommending the best algorithm for your instance
+  - **Route Quality**: Predicting gap-to-optimal and tour length before solving
+  - **Neural-Guided Search**: MLP-scored candidate moves for local search refinement
+  - **NLP Query Parser**: Natural language to structured VRP JSON (Regex + local LLM via Qwen2.5)
 - ⛰️ **Elevation & Terrain**: DEM GeoTIFF queries (point, profile, stats, fuel calculation)
-- 🧠 **Embedding Engine**: Generate text embeddings via fastembed for semantic search
 - 🌐 **Headless Server**: JSON-RPC/STDIO `serve` mode for frontend integrations
-- 🤝 **MCP Server**: Model Context Protocol server with 15 tools for AI agent integration (extract, compile, optimize, clean, VRP, elevation, fuel, and more)
+- 🤝 **MCP Server**: Model Context Protocol server with 20+ tools for AI agent integration (AutoML, Solver Prediction, NLP parsing, and full routing stack)
 - 📁 **Resource Discovery**: `list` command to discover maps and routes programmatically
 - ⚡ **Asynchronous Runtime**: Fully non-blocking I/O with `tokio` for high-performance extraction and processing
 
@@ -33,11 +38,11 @@ A powerful Terminal User Interface (TUI) and Command-Line Interface (CLI) for ro
 ### From crates.io
 
 ```bash
-# TUI + CLI (default — no GUI dependencies)
-cargo install v2rmp
+# TUI + CLI (Standard - no heavy ML dependencies)
+cargo install v2rmp --no-default-features --features cli
 
-# Include the egui desktop GUI
-cargo install v2rmp --features gui
+# Full TUI + CLI + AI/ML Features
+cargo install v2rmp
 
 # Everything (GUI + ML + extraction)
 cargo install v2rmp --all-features
@@ -49,11 +54,11 @@ cargo install v2rmp --all-features
 git clone https://github.com/spacialglaciercom-lab/v2rmp.git
 cd v2rmp
 
-# TUI only
-cargo build --release
+# Standard build
+cargo build --release --no-default-features --features cli
 
-# With GUI
-cargo build --release --features gui
+# Build with AI/ML support
+cargo build --release --features ml
 ```
 
 ### Feature Flags
@@ -63,7 +68,7 @@ cargo build --release --features gui
 | `cli`      | ✅      | TUI + CLI (ratatui, crossterm) |
 | `gui`      |         | Desktop GUI with map visualization (eframe, egui, rfd) |
 | `extract`  | ✅      | Road network extraction from Overture/OSM |
-| `ml`       | ✅      | Text embeddings via candle/hf-hub |
+| `ml`       |         | AI/ML stack: AutoML, Neural-Guided Solvers, LLM-based NLP (candle, tokenizers) |
 
 ## Modes of Operation
 
@@ -115,6 +120,8 @@ rmpca optimize -i map.rmp -o route.gpx --depot "40.71,-74.01"
 | `pipeline` | Run extract → clean → compile → optimize |
 | `elevation` | DEM GeoTIFF queries (point, profile, stats, fuel) |
 | `embed` | Generate text embeddings via fastembed |
+| `predict` | ML predictions: `solver`, `quality`, `hyperparams` |
+| `nlp` | Parse natural language queries to VRP JSON |
 | `serve` | Headless JSON-RPC/STDIO server |
 
 ### MCP Server
@@ -149,7 +156,7 @@ rmpca ships an MCP (Model Context Protocol) server that exposes the route optimi
 
 2. **Restart your MCP client** (or reload the server list).
 
-3. **Ask your AI agent to use the tools.** The agent will discover all four tools automatically.
+3. **Ask your AI agent to use the tools.** The agent will discover all tools automatically.
 
 #### Available Tools
 
@@ -170,6 +177,12 @@ rmpca ships an MCP (Model Context Protocol) server that exposes the route optimi
 | `pipeline` | `bbox` | End-to-end: extract → clean → compile → optimize |
 | `get_valhalla_matrix` | `locations` | Fetch real-road distance/time matrix from Valhalla/OSRM |
 | `list_solvers` | — | Return available VRP solver IDs and labels |
+| `predict_solver` | `stops` | **ML**: Recommend best solver algorithm for an instance |
+| `predict_quality` | `stops` | **ML**: Predict gap-to-optimal and tour length before solving |
+| `tune_hyperparams` | `stops` | **AutoML**: Predict instance-aware solver hyperparameters |
+| `score_route` | `stops`, `routes` | Evaluate a solved route across 4 quality dimensions |
+| `parse_routing_query`| `query` | **NLP/LLM**: Convert natural language to VRP JSON config |
+| `haversine_distance` | `from`, `to` | Calculate great-circle distance between two points |
 
 #### Example Conversation
 
@@ -204,7 +217,7 @@ The `agent` command consumes a JSON payload, allowing agents to trigger complex 
 
 ### 1. Extract Road Network
 - Navigate to **Extract Data** view
-- Set bounding box (format: `min_lat,min_lon,max_lat,max_lon`)
+- Set bounding box (format: `min_lon,min_lat,max_lon,max_lat`)
 - Toggle between OSM and Overture sources
 - Output: `extract_YYYYMMDD_HHMMSS.geojson`
 
@@ -225,11 +238,20 @@ The core function is also available programmatically:
 
 ```rust
 use v2rmp::core::optimize::filter_bbox;
+use v2rmp::core::geo_types::BBox;
 
+let bbox = Some(BBox {
+    min_lon: -73.6,
+    min_lat: 45.5,
+    max_lon: -73.5,
+    max_lat: 45.6,
+});
 let (sub_nodes, sub_edges) = filter_bbox(
-    &nodes, &edges,
-    Some((45.48, 45.52, -73.62, -73.55)), // min_lat, max_lat, min_lon, max_lon
+    &nodes,
+    &edges,
+    bbox
 );
+
 // Pass None to use the full map
 ```
 
@@ -348,7 +370,7 @@ let output = solver.solve(&vrp_input).await?;
 - [x] **v0.4.1**: Multi-vehicle VRP CLI command operational with CSV coordinates input
 - [x] **v0.4.2**: Elevation engine (DEM GeoTIFF), Embedding engine (fastembed), Headless serve mode
 - [x] **v0.4.3**: BBox deduplication, TUI version auto-sync, FileBrowser ESC fix, CLI guard
-- [x] **v0.4.4**: MCP server with 15 tools (extract, compile, optimize, clean, vrp_solve, elevation query/profile/stats, dem_info, fuel_estimate, inspect_rmp, pipeline, get_valhalla_matrix, list_solvers)
+- [x] **v0.4.4**: MCP server with 20+ tools (AutoML, Solver Prediction, NLP parsing) and feature-gated AI/ML stack
 - [ ] **v0.5.0**: Time Window support (VRPTW) and 3D terrain-aware routing
 
 ## License

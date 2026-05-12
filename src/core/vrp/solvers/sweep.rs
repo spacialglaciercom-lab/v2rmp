@@ -93,7 +93,7 @@ mod tests {
             service_time_secs: None,
             use_time_windows: false,
             window_open: None,
-            window_close: None,
+            window_close: None, hyperparams: None,
         };
         let solver = SweepSolver;
         let err = solver.solve(&input).await.unwrap_err();

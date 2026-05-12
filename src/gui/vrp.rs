@@ -168,6 +168,7 @@ fn run_vrp(app: &mut GuiApp) {
         use_time_windows: false,
         window_open: None,
         window_close: None,
+        hyperparams: None,
     };
 
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();

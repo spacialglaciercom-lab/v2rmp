@@ -22,6 +22,8 @@
 
 use super::solvers::clarke_wright::ClarkeWrightSolver;
 use super::solvers::default::DefaultSolver;
+#[cfg(feature = "ml")]
+use super::solvers::neural_guided::NeuralGuidedSolver;
 use super::solvers::or_opt::OrOptSolver;
 use super::solvers::sweep::SweepSolver;
 use super::solvers::two_opt::TwoOptSolver;
@@ -43,13 +45,16 @@ struct SolverRegistryInner {
 
 impl SolverRegistryInner {
     fn new() -> Self {
-        let builtins: Vec<Arc<dyn VRPSolver>> = vec![
+        let mut builtins: Vec<Arc<dyn VRPSolver>> = vec![
             Arc::new(ClarkeWrightSolver),
             Arc::new(SweepSolver),
             Arc::new(OrOptSolver),
             Arc::new(TwoOptSolver),
-            Arc::new(DefaultSolver),
         ];
+        #[cfg(feature = "ml")]
+        builtins.push(Arc::new(NeuralGuidedSolver));
+        builtins.push(Arc::new(DefaultSolver));
+
         let builtin_ids: Vec<String> = builtins.iter().map(|s| s.id().to_string()).collect();
         let mut solvers = HashMap::new();
         for s in builtins {
@@ -139,6 +144,8 @@ mod tests {
         assert!(ids.contains(&"sweep".to_string()));
         assert!(ids.contains(&"two_opt".to_string()));
         assert!(ids.contains(&"or_opt".to_string()));
+        #[cfg(feature = "ml")]
+        assert!(ids.contains(&"neural_guided".to_string()));
         assert!(ids.contains(&"default".to_string()));
     }
 

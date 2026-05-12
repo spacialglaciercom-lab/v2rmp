@@ -1,6 +1,6 @@
 [package]
 name = "v2rmp"
-version = "0.4.4"
+version = "0.4.6"
 edition = "2021"
 description = "rmpca — Route Optimization TUI & Agent Engine"
 license = "MIT OR Apache-2.0"
@@ -24,10 +24,12 @@ exclude = [
 [[bin]]
 name = "rmpca"
 path = "src/main.rs"
+required-features = ["cli"]
 
 [[bin]]
 name = "rmpca-extract"
 path = "src/bin/extract.rs"
+required-features = ["extract"]
 
 [[bin]]
 name = "zilliz-mcp-server"
@@ -42,6 +44,16 @@ required-features = ["extract"]
 name = "web-ui"
 path = "src/bin/web_ui.rs"
 required-features = ["gui"]
+
+[[bin]]
+name = "generate-training-data"
+path = "src/bin/generate-training-data.rs"
+required-features = ["ml"]
+
+[[bin]]
+name = "evaluate-selector"
+path = "src/bin/evaluate-selector.rs"
+required-features = ["ml"]
 
 [dependencies]
 # TUI (feature-gated)
@@ -110,8 +122,8 @@ codegen-units = 1
 strip = true
 
 [features]
-default = ["cli", "ml", "extract"]
-cli = ["ratatui", "crossterm", "extract", "ml"]
+default = ["cli", "extract"]
+cli = ["ratatui", "crossterm", "extract"]
 gui = ["eframe", "egui", "rfd", "wasm-bindgen-futures"]
 extract = ["object_store", "parquet", "arrow", "osmpbf", "gdal", "dirs", "shellexpand", "sqlx"]
 ml = ["tokenizers", "candle-core", "candle-nn", "candle-transformers", "hf-hub"]

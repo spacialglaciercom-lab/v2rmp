@@ -8,7 +8,6 @@
 
 use crate::core::haversine_m;
 use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
-use std::collections::HashMap;
 
 /// 28-dimensional normalized instance feature vector.
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -287,7 +286,7 @@ fn knn_graph_features(stops: &[&VRPSolverStop], k: usize) -> KnnFeatures {
 
     // Diameter & avg shortest path (Floyd-Warshall for small n)
     let (diameter, avg_sp) = if n <= 200 {
-        let (sp, diam, avg) = all_pairs_shortest_paths(&dists);
+        let (_sp, diam, avg) = all_pairs_shortest_paths(&dists);
         (diam, avg)
     } else {
         // For large n, approximate with sampled pairs

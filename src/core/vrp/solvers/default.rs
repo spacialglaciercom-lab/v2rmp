@@ -41,7 +41,9 @@ impl VRPSolver for DefaultSolver {
 
         let mut with_return = route_indices;
         with_return.push(0);
-        let improved = two_opt_improve(matrix, &with_return);
+
+        let max_iter = input.hyperparams.as_ref().map(|p| p.max_iterations).unwrap_or(300);
+        let improved = two_opt_improve(matrix, &with_return, max_iter);
 
         let mut total_dist = 0.0;
         let mut total_time = 0.0;
@@ -96,7 +98,7 @@ mod tests {
             service_time_secs: None,
             use_time_windows: false,
             window_open: None,
-            window_close: None,
+            window_close: None, hyperparams: None,
         };
         let solver = DefaultSolver;
         let err = solver.solve(&input).await.unwrap_err();
