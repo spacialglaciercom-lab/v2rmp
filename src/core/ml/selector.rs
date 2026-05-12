@@ -12,7 +12,9 @@ use crate::core::ml::features::InstanceFeatures;
 use crate::core::ml_legacy::{predict_solver as rule_predict_solver, SolverPrediction};
 use crate::core::vrp::types::{VRPSolverInput, VrpObjective};
 use anyhow::{Context, Result};
+#[cfg(feature = "ml")]
 use candle_core::{Device, Tensor, DType};
+#[cfg(feature = "ml")]
 use candle_nn::{linear, Module, VarBuilder, Linear};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -31,6 +33,7 @@ const SOLVER_IDS: [&str; NUM_SOLVERS] = [
 ];
 
 /// Learned MLP solver selector.
+#[cfg(feature = "ml")]
 pub struct NeuralSelector {
     lin1: Linear,
     lin2: Linear,
@@ -38,6 +41,7 @@ pub struct NeuralSelector {
     device: Device,
 }
 
+#[cfg(feature = "ml")]
 impl NeuralSelector {
     /// Load from a safetensors file.
     pub fn from_file(path: &Path) -> Result<Self> {
@@ -103,19 +107,22 @@ pub fn predict_solver(
 ) -> Result<NeuralPrediction> {
     let features = InstanceFeatures::from_input(input);
 
-    if let Some(path) = model_path {
-        if path.exists() {
-            match NeuralSelector::from_file(path) {
-                Ok(selector) => {
-                    match selector.predict(&features) {
-                        Ok(pred) => return Ok(pred),
-                        Err(e) => {
-                            tracing::warn!("Neural selector inference failed: {}. Falling back to rule-based.", e);
+    #[cfg(feature = "ml")]
+    {
+        if let Some(path) = model_path {
+            if path.exists() {
+                match NeuralSelector::from_file(path) {
+                    Ok(selector) => {
+                        match selector.predict(&features) {
+                            Ok(pred) => return Ok(pred),
+                            Err(e) => {
+                                tracing::warn!("Neural selector inference failed: {}. Falling back to rule-based.", e);
+                            }
                         }
                     }
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to load neural selector: {}. Falling back to rule-based.", e);
+                    Err(e) => {
+                        tracing::warn!("Failed to load neural selector: {}. Falling back to rule-based.", e);
+                    }
                 }
             }
         }

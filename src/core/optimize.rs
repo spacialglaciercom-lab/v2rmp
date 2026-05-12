@@ -174,14 +174,8 @@ trait NormalizeAngle {
 impl NormalizeAngle for f64 {
     fn normalize(self, lower: f64, upper: f64) -> f64 {
         let width = upper - lower;
-        let mut val = self;
-        while val < lower {
-            val += width;
-        }
-        while val >= upper {
-            val -= width;
-        }
-        val
+        let offset = self - lower;
+        lower + (offset.rem_euclid(width))
     }
 }
 
@@ -257,17 +251,41 @@ pub fn read_rmp_file(data: &[u8]) -> anyhow::Result<(Vec<RmpNode>, Vec<RmpEdge>)
 
 // ── Bearing calculation ──────────────────────────────────────────────
 
+#[derive(Debug, Clone, Copy)]
+struct NodeRad {
+    lat: f64,
+    lon: f64,
+    sin_lat: f64,
+    cos_lat: f64,
+}
+
 /// Calculate the initial bearing from point 1 to point 2 in degrees.
-fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+pub fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let dlon = (lon2 - lon1).to_radians();
     let lat1_r = lat1.to_radians();
     let lat2_r = lat2.to_radians();
 
-    let x = dlon.cos() * lat2_r.sin();
-    let y = lat1_r.cos() * lat2_r.sin() - lat1_r.sin() * lat2_r.cos() * dlon.cos();
+    let y = dlon.sin() * lat2_r.cos();
+    let x = lat1_r.cos() * lat2_r.sin() - lat1_r.sin() * lat2_r.cos() * dlon.cos();
 
     let bearing_rad = y.atan2(x);
-    (bearing_rad.to_degrees() + 360.0) % 360.0
+    (bearing_rad.to_degrees() + 360.0).rem_euclid(360.0)
+}
+
+fn bearing_rad(n1: &NodeRad, n2: &NodeRad) -> f64 {
+    let dlon = n2.lon - n1.lon;
+    let y = dlon.sin() * n2.cos_lat;
+    let x = n1.cos_lat * n2.sin_lat - n1.sin_lat * n2.cos_lat * dlon.cos();
+    let bearing_rad = y.atan2(x);
+    (bearing_rad.to_degrees() + 360.0).rem_euclid(360.0)
+}
+
+fn haversine_m_rad(n1: &NodeRad, n2: &NodeRad) -> f64 {
+    const R: f64 = 6_371_000.0;
+    let dlat = n2.lat - n1.lat;
+    let dlon = n2.lon - n1.lon;
+    let a = (dlat / 2.0).sin().powi(2) + n1.cos_lat * n2.cos_lat * (dlon / 2.0).sin().powi(2);
+    R * 2.0 * a.sqrt().atan2((1.0 - a).sqrt())
 }
 
 // ── CPP internals ────────────────────────────────────────────────────
@@ -431,13 +449,36 @@ pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot
         adj[v].push(AdjEntry { to: u as u32, weight_m: weight, edge_idx: eidx });
     }
 
+    // Pre-calculate radian coordinates and trig values for performance
+    let nodes_rad: Vec<NodeRad> = nodes
+        .iter()
+        .map(|n| {
+            let lat = n.lat.to_radians();
+            NodeRad {
+                lat,
+                lon: n.lon.to_radians(),
+                sin_lat: lat.sin(),
+                cos_lat: lat.cos(),
+            }
+        })
+        .collect();
+
     // Find Eulerian circuit using Hierholzer's algorithm
     let start_node = if let Some((dep_lat, dep_lon)) = depot {
         let mut best_node = 0;
         let mut best_dist = f64::MAX;
-        for (i, node) in nodes.iter().enumerate() {
-            let dist = haversine_m(dep_lat, dep_lon, node.lat, node.lon);
-            if dist < best_dist { best_dist = dist; best_node = i; }
+        let dep_node = NodeRad {
+            lat: dep_lat.to_radians(),
+            lon: dep_lon.to_radians(),
+            sin_lat: dep_lat.to_radians().sin(),
+            cos_lat: dep_lat.to_radians().cos(),
+        };
+        for (i, node_rad) in nodes_rad.iter().enumerate() {
+            let dist = haversine_m_rad(&dep_node, node_rad);
+            if dist < best_dist {
+                best_dist = dist;
+                best_node = i;
+            }
         }
         best_node
     } else if !odd_vertices.is_empty() {
@@ -490,15 +531,25 @@ pub fn solve_cpp(nodes: &[RmpNode], edges: &[RmpEdge], oneway: OnewayMode, depot
 
     // Turn classification
     if circuit.len() > 2 {
+        let mut last_bearing: Option<f64> = None;
+
         for i in 1..circuit.len().saturating_sub(1) {
             let prev = circuit[i - 1] as usize;
             let curr = circuit[i] as usize;
             let next = circuit[i + 1] as usize;
-            if prev == curr || curr == next { continue; }
-            let b_in = bearing(nodes[prev].lat, nodes[prev].lon, nodes[curr].lat, nodes[curr].lon);
-            let b_out = bearing(nodes[curr].lat, nodes[curr].lon, nodes[next].lat, nodes[next].lon);
-            let b_in_reverse = (b_in + 180.0).normalize(0.0, 360.0);
-            let delta = b_out - b_in_reverse;
+            if prev == curr || curr == next {
+                continue;
+            }
+
+            let b_in = match last_bearing {
+                Some(b) => b,
+                None => bearing_rad(&nodes_rad[prev], &nodes_rad[curr]),
+            };
+
+            let b_out = bearing_rad(&nodes_rad[curr], &nodes_rad[next]);
+            last_bearing = Some(b_out);
+
+            let delta = b_out - b_in;
             match classify_turn(delta) {
                 "left" => turns.left += 1,
                 "right" => turns.right += 1,
@@ -639,14 +690,31 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
     if let Some(ref routes) = output.routes {
         for route in routes {
             if route.len() > 2 {
+                // Pre-calculate NodeRad for all stops in this route
+                let route_rad: Vec<NodeRad> = route
+                    .iter()
+                    .map(|s| {
+                        let lat = s.lat.to_radians();
+                        NodeRad {
+                            lat,
+                            lon: s.lon.to_radians(),
+                            sin_lat: lat.sin(),
+                            cos_lat: lat.cos(),
+                        }
+                    })
+                    .collect();
+
+                let mut last_bearing: Option<f64> = None;
                 for i in 1..route.len() - 1 {
-                    let prev = &route[i - 1];
-                    let curr = &route[i];
-                    let next = &route[i + 1];
-                    let b_in = bearing(prev.lat, prev.lon, curr.lat, curr.lon);
-                    let b_out = bearing(curr.lat, curr.lon, next.lat, next.lon);
-                    let b_in_rev = (b_in + 180.0) % 360.0;
-                    let delta = b_out - b_in_rev;
+                    let b_in = match last_bearing {
+                        Some(b) => b,
+                        None => bearing_rad(&route_rad[i - 1], &route_rad[i]),
+                    };
+
+                    let b_out = bearing_rad(&route_rad[i], &route_rad[i + 1]);
+                    last_bearing = Some(b_out);
+
+                    let delta = b_out - b_in;
                     match classify_turn(delta) {
                         "left" => turns.left += 1,
                         "right" => turns.right += 1,

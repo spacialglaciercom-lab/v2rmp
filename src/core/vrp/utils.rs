@@ -36,15 +36,30 @@ pub fn haversine_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 pub fn build_haversine_matrix(locations: &[VRPSolverStop], avg_speed_kmh: f64) -> DistMatrix {
     let n = locations.len();
     let mut matrix = Vec::with_capacity(n);
-    for (i, _) in locations.iter().enumerate().take(n) {
+
+    // Pre-calculate radians and cosines for O(n) instead of O(n^2)
+    let locs_rad: Vec<(f64, f64, f64)> = locations
+        .iter()
+        .map(|l| {
+            let lat_r = l.lat.to_radians();
+            (lat_r, l.lon.to_radians(), lat_r.cos())
+        })
+        .collect();
+
+    const R_KM: f64 = 6371.0;
+
+    for i in 0..n {
         let mut row = Vec::with_capacity(n);
+        let (lat1, lon1, cos_lat1) = locs_rad[i];
+
         for j in 0..n {
-            let dist = haversine_km(
-                locations[i].lat,
-                locations[i].lon,
-                locations[j].lat,
-                locations[j].lon,
-            );
+            let (lat2, lon2, cos_lat2) = locs_rad[j];
+
+            let dlat = lat2 - lat1;
+            let dlon = lon2 - lon1;
+            let a = (dlat / 2.0).sin().powi(2) + cos_lat1 * cos_lat2 * (dlon / 2.0).sin().powi(2);
+            let dist = R_KM * 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+
             let time_sec = (dist / avg_speed_kmh) * 3600.0;
             row.push(DistCell {
                 distance: dist,
