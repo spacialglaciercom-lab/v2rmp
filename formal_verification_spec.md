@@ -22,7 +22,7 @@ To verify correctness in Lean 4, the following properties must hold:
 *   **Termination:** The algorithm is guaranteed to terminate because in each iteration exactly one of two things happens:
     *   An edge is removed from `adj` and added to `stack`.
     *   An element is popped from `stack` and added to `circuit_with_edges`.
-    *   Since the number of edges is finite and strictly decreases in `adj`, and elements in `stack` are bounded by the number of edges + 1, the loop must terminate.
+    *   Since the number of edges is finite and strictly decreases in `adj`, and elements in `stack` are bounded by the number of edges + 1, the loop must terminate. This termination can be modeled using a well-founded lexicographically decreasing measure: `(total remaining edges in the adjacency list, stack length)`.
 
 ## 3. Boundary Conditions
 
