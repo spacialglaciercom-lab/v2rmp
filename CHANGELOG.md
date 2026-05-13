@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-05-13
+
+### Changed
+- Excluded session logs, Python scripts, test artifacts, and documentation drafts from crate package to reduce download size.
+
 ## [0.4.6] - 2026-05-11
 
 ### Added
