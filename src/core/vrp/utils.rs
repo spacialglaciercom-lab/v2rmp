@@ -1,23 +1,3 @@
-#![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(
-    dead_code,
-    unused_imports,
-    unused_variables,
-    unused_macros,
-    clippy::all
-)]
-#![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(
-    dead_code,
-    unused_imports,
-    unused_variables,
-    unused_macros,
-    clippy::all
-)]
 //! Geometric and routing utilities for VRP solvers.
 //!
 //! Provides distance-matrix construction, zone clustering,
@@ -35,23 +15,53 @@ pub fn haversine_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 /// Time estimated at `avg_speed_kmh` (default 40 km/h).
 pub fn build_haversine_matrix(locations: &[VRPSolverStop], avg_speed_kmh: f64) -> DistMatrix {
     let n = locations.len();
-    let mut matrix = Vec::with_capacity(n);
-    for (i, _) in locations.iter().enumerate().take(n) {
-        let mut row = Vec::with_capacity(n);
-        for j in 0..n {
-            let dist = haversine_km(
-                locations[i].lat,
-                locations[i].lon,
-                locations[j].lat,
-                locations[j].lon,
-            );
-            let time_sec = (dist / avg_speed_kmh) * 3600.0;
-            row.push(DistCell {
+    let mut matrix = vec![
+        vec![
+            DistCell {
+                distance: 0.0,
+                time: 0.0
+            };
+            n
+        ];
+        n
+    ];
+
+    // Pre-calculate radians and cosines for O(n) instead of O(n^2)
+    let loc_rads: Vec<(f64, f64, f64)> = locations
+        .iter()
+        .map(|l| {
+            let lat_r = l.lat.to_radians();
+            let lon_r = l.lon.to_radians();
+            (lat_r, lon_r, lat_r.cos())
+        })
+        .collect();
+
+    const R: f64 = 6371.0; // Earth radius in km
+    let time_factor = 3600.0 / avg_speed_kmh;
+
+    for i in 0..n {
+        let (lat1_r, lon1_r, cos_lat1) = loc_rads[i];
+
+        for j in (i + 1)..n {
+            let (lat2_r, lon2_r, cos_lat2) = loc_rads[j];
+
+            let dlat = lat2_r - lat1_r;
+            let dlon = lon2_r - lon1_r;
+
+            let a = (dlat / 2.0).sin().powi(2)
+                + cos_lat1 * cos_lat2 * (dlon / 2.0).sin().powi(2);
+            let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+            let dist = R * c;
+            let time = dist * time_factor;
+
+            let cell = DistCell {
                 distance: dist,
-                time: time_sec,
-            });
+                time,
+            };
+
+            matrix[i][j] = cell.clone();
+            matrix[j][i] = cell;
         }
-        matrix.push(row);
     }
     matrix
 }
@@ -841,6 +851,7 @@ mod tests {
         let route = nearest_neighbor_route(&m, &[0], 0);
         assert_eq!(route, vec![0]);
     }
+
 
     #[test]
     fn test_matrix_get_helpers() {
