@@ -22,7 +22,7 @@ A powerful Terminal User Interface (TUI) and Command-Line Interface (CLI) for ro
   - **Local Search**: 2-Opt path improvements
   - **Simulated Annealing**: Or-Opt metaheuristic
 - 🧠 **AI/ML Engine (Pure Rust)**: Learned models via `candle` for:
-  - **AutoML**: Instance-aware hyperparameter tuning (max iterations, temperature, tabu tenure)
+  - **AutoML**: Instance-aware hyperparameter tuning (max iterations, temperature, tabu tenure, cooling rate, neighbourhood radius)
   - **Solver Selection**: Neural ensemble recommending the best algorithm for your instance
   - **Route Quality**: Predicting gap-to-optimal and tour length before solving
   - **Neural-Guided Search**: MLP-scored candidate moves for local search refinement
@@ -345,6 +345,22 @@ let vrp_input = vrp::VRPSolverInput {
 let solver = vrp::get_solver("clarke-wright")?;
 let output = solver.solve(&vrp_input).await?;
 ```
+
+## Models on Hugging Face 🤗
+
+Trained safetensors models are published to the Hugging Face Hub for download and reuse:
+
+**[aerialblancaservices/v2rmp-routing-ml](https://huggingface.co/aerialblancaservices/v2rmp-routing-ml)**
+
+| Model | Architecture | Purpose |
+|-------|-------------|---------|
+| `automl_v2` | 28 → 64 → 5 MLP | Instance-aware solver hyperparameters |
+| `solver_selector_v2` | 28 → 128 → 64 → 6 MLP | Best algorithm classification |
+| `quality_predictor_v2` | 28 → 64 → 32 → 2 MLP | Gap-to-optimal & tour length prediction |
+| `move_scorer_v2` | 16 → 32 → 16 → 1 MLP | Neural-guided 2-Opt / Or-Opt move scoring |
+| `graph_embed` | 2-layer GraphSAGE | Road network edge embeddings (64-dim) |
+
+Built with [Candle](https://github.com/huggingface/candle) — pure Rust, no Python dependencies required.
 
 ## Data Sources
 
