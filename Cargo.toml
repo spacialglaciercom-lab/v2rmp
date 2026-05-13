@@ -1,11 +1,12 @@
 [package]
 name = "v2rmp"
-version = "0.4.7"
+version = "0.4.8"
 edition = "2021"
-description = "rmpca — Route Optimization TUI & Agent Engine"
+description = "rmpca — Route Optimization TUI & Agent Engine with neural solver selection (HuggingFace: aerialblancaservices/v2rmp-routing-ml)"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/spacialglaciercom-lab/v2rmp"
 homepage = "https://github.com/spacialglaciercom-lab/v2rmp"
+documentation = "https://huggingface.co/aerialblancaservices/v2rmp-routing-ml"
 readme = "README.md"
 keywords = ["vrp", "route-optimization", "tui", "agent", "osm"]
 categories = ["command-line-utilities", "algorithms", "visualization"]
