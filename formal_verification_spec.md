@@ -22,7 +22,7 @@ To verify correctness in Lean 4, the following properties must hold:
 *   **Termination:** The algorithm is guaranteed to terminate because in each iteration exactly one of two things happens:
     *   An edge is removed from `adj` and added to `stack`.
     *   An element is popped from `stack` and added to `circuit_with_edges`.
-    *   Since the number of edges is finite and strictly decreases in `adj`, and elements in `stack` are bounded by the number of edges + 1, the loop must terminate.
+    *   This models termination using a well-founded lexicographically decreasing measure based on `(total remaining edges in the adjacency list, stack length)`. Since the number of edges is finite and strictly decreases in `adj`, and elements in `stack` are bounded by the number of edges + 1, the loop must terminate.
 
 ## 3. Boundary Conditions
 
@@ -32,6 +32,7 @@ The Lean 4 proofs must account for the following edge cases:
 *   **Disconnected Graphs:** The algorithm runs Hierholzer's on the connected component containing `start_node`. If the graph has multiple disconnected components, edges in unreachable components remain in `adj` indefinitely, and only the connected component of `start_node` is traversed.
 *   **Zero Odd Vertices:** If all vertices already have even degrees initially, the graph is inherently Eulerian. The duplicate edge list will be empty, and Hierholzer's algorithm begins immediately without modifications.
 *   **Parallel Edges (Multigraph):** Multiple edges can exist between the exact same pair of nodes. The reverse-edge removal logic (`iter().position(...)`) relies on the tuple `(to, edge_idx, weight_m)` to uniquely identify and remove the correct reverse edge, avoiding the accidental removal of a parallel edge.
+*   **Depot Snapping:** When an external depot is provided as an option (`depot: Option<(f64, f64)>`), the starting node (`start_node`) is calculated by finding the existing node that minimizes the Haversine distance to the depot's coordinates.
 
 ## 4. State Mutations
 
@@ -48,9 +49,12 @@ The algorithm mutates state primarily in four ways during the execution of Hierh
 
 ## 5. Algorithmic Complexity Bounds
 
-Let $V$ be the number of vertices and $E$ be the total number of edges (original + duplicated).
+Let $V$ be the number of vertices, $E$ be the total number of edges (original + duplicated), and $V_{\text{odd}}$ be the number of odd-degree vertices.
 
-*   **Odd Vertices & Matching:** Finding odd vertices is $\mathcal{O}(V)$. The greedy minimum-weight perfect matching involves sorting odd vertices $\mathcal{O}(V_{\text{odd}} \log V_{\text{odd}})$ and a linear search bounded by $\mathcal{O}(V_{\text{odd}}^2)$.
+*   **All-Pairs Shortest Paths (APSP):** Computes shortest paths between all odd vertices using a Dijkstra-like algorithm with a `BinaryHeap`. Bounded by $\mathcal{O}(V_{\text{odd}} \cdot (E \log V))$.
+*   **Minimum-Weight Perfect Matching (MWPM):**
+    *   When $V_{\text{odd}} \leq 24$, the algorithm uses an exact **Bitmask DP**, which has time complexity $\mathcal{O}(2^{V_{\text{odd}}} \cdot V_{\text{odd}}^2)$ and space complexity $\mathcal{O}(2^{V_{\text{odd}}})$.
+    *   When $V_{\text{odd}} > 24$, it falls back to a **Greedy heuristic** to prevent exponential time complexity, with complexity $\mathcal{O}(V_{\text{odd}}^2)$.
 *   **Hierholzer's Algorithm Loop:**
     *   The `while` loop runs exactly $2E + 1$ times.
     *   Finding the reverse edge in `adj` requires an $\mathcal{O}(\text{degree}(v))$ search.
