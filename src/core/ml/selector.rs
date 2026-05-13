@@ -82,6 +82,7 @@ impl NeuralSelector {
             confidence: best_prob as f64,
             runner_up,
             all_scores,
+            model_used: true,
         })
     }
 }
@@ -93,6 +94,8 @@ pub struct NeuralPrediction {
     pub confidence: f64,
     pub runner_up: Option<(String, f32)>,
     pub all_scores: Vec<(String, f64)>,
+    /// Whether the learned neural model was used (true) or rule-based heuristic (false).
+    pub model_used: bool,
 }
 
 /// High-level API: predict the best solver for a VRP instance.
@@ -110,7 +113,10 @@ pub fn predict_solver(
             match NeuralSelector::from_file(path) {
                 Ok(selector) => {
                     match selector.predict(&features) {
-                        Ok(pred) => return Ok(pred),
+                        Ok(mut pred) => {
+                            pred.model_used = true;
+                            return Ok(pred);
+                        }
                         Err(e) => {
                             println!("DEBUG: Neural selector inference failed: {}", e);
                             tracing::warn!("Neural selector inference failed: {}. Falling back to rule-based.", e);
@@ -132,7 +138,10 @@ pub fn predict_solver(
             match NeuralSelector::from_file(&default_path) {
                 Ok(selector) => {
                     match selector.predict(&features) {
-                        Ok(pred) => return Ok(pred),
+                        Ok(mut pred) => {
+                            pred.model_used = true;
+                            return Ok(pred);
+                        }
                         Err(e) => {
                             tracing::warn!("Neural selector inference failed (default path): {}. Falling back to rule-based.", e);
                         }
@@ -155,6 +164,7 @@ pub fn predict_solver(
         confidence: legacy.confidence,
         runner_up,
         all_scores,
+        model_used: false,
     })
 }
 

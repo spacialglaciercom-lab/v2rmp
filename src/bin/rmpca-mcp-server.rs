@@ -4,7 +4,8 @@
 //!        clean, vrp_solve, elevation_query, elevation_profile,
 //!        predict_solver, score_route, route_embedding, pipeline,
 //!        haversine_distance, get_valhalla_matrix, inspect_rmp,
-//!        list_solvers, elevation_stats, dem_info, fuel_estimate
+//!        list_solvers, elevation_stats, dem_info, fuel_estimate,
+//!        submit_feedback
 //!
 //! Runs over stdio with JSON-RPC 2.0 framing (one line per message).
 //!
@@ -47,11 +48,14 @@ use v2rmp::core::ml::selector::{predict_solver, default_model_path};
 use v2rmp::core::ml::quality_predictor::{predict_quality};
 #[cfg(feature = "ml")]
 use v2rmp::core::ml::automl::{predict_hyperparams};
+#[cfg(feature = "ml")]
+use v2rmp::core::ml::feedback::{SolveLogEntry, log_solve};
 use v2rmp::core::ml_legacy::{RouteFeatures, score_route, route_feature_vector};
 #[cfg(feature = "ml")]
 use v2rmp::core::nlp::{parse_query, to_vrp_json};
 #[cfg(feature = "ml")]
 use v2rmp::core::nlp::QwenNLParser;
+use std::path::PathBuf;
 
 // ── JSON-RPC / MCP types ───────────────────────────────────────────────────
 
@@ -904,6 +908,53 @@ fn tool_definitions() -> Vec<ToolDef> {
                 "required": ["query"]
             }),
         },
+        ToolDef {
+            name: "submit_feedback",
+            description: "Submit solve-quality feedback for online learning. Records the instance feature vector, \
+                the solver that was used, the achieved distance, and the actual gap to optimal (or best known) \
+                so future model retraining can learn from real-world solves. Appends a JSONL row to \
+                data/feedback.jsonl (or the path specified) and returns the number of accumulated feedback entries.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "stops": {
+                        "type": "array",
+                        "description": "Array of stops from the instance. The first stop is the depot.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "lat": { "type": "number" },
+                                "lon": { "type": "number" },
+                                "label": { "type": "string" },
+                                "demand": { "type": "number" }
+                            },
+                            "required": ["lat", "lon"]
+                        }
+                    },
+                    "solver_id": {
+                        "type": "string",
+                        "description": "ID of the solver that was actually used (e.g. 'clarke_wright', 'two_opt')"
+                    },
+                    "actual_gap_pct": {
+                        "type": "number",
+                        "description": "Actual gap to best known / optimal solution (%). Defaults to 0.0 if unknown."
+                    },
+                    "total_distance_km": {
+                        "type": "number",
+                        "description": "Achieved route distance in kilometres"
+                    },
+                    "elapsed_ms": {
+                        "type": "integer",
+                        "description": "Solve wall-clock time in milliseconds (optional)"
+                    },
+                    "log_path": {
+                        "type": "string",
+                        "description": "Path to the feedback JSONL file (default: data/feedback.jsonl)"
+                    }
+                },
+                "required": ["stops", "solver_id", "total_distance_km"]
+            }),
+        },
     ]
 }
 
@@ -1721,6 +1772,7 @@ fn handle_predict_solver(args: &Value) -> Result<Value> {
             },
             "instance_feature_vector": inst_features.to_vector(),
             "model_loaded": model_path.exists(),
+            "ml_ready": pred.model_used,
         }))
     }
 }
@@ -2039,6 +2091,7 @@ fn handle_predict_quality(args: &Value) -> Result<Value> {
             "predicted_tour_length_km": pred.predicted_tour_length_km,
             "confidence": pred.confidence,
             "feature_vector": features.to_vector(),
+            "ml_ready": pred.model_used,
         }))
     }
 }
@@ -2104,6 +2157,7 @@ fn handle_tune_hyperparams(args: &Value) -> Result<Value> {
             "cooling_rate": params.cooling_rate,
             "neighbourhood_radius": params.neighbourhood_radius,
             "feature_vector": features.to_vector(),
+            "ml_ready": params.model_used,
         }))
     }
 }
@@ -2158,6 +2212,117 @@ fn handle_parse_routing_query(args: &Value) -> Result<Value> {
         }
         anyhow::bail!("ML feature is not enabled. NLP requires the 'ml' feature.");
     }
+}
+
+// ── Submit Feedback handler ────────────────────────────────────────────
+
+#[cfg(feature = "ml")]
+fn handle_submit_feedback(args: &Value) -> Result<Value> {
+    let stops_val = args
+        .get("stops")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
+
+    let stops: Vec<VRPSolverStop> = stops_val
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let lat = s.get("lat").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+            let lon = s.get("lon").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+            let label = s.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let demand = s.get("demand").and_then(|v| v.as_f64());
+            Ok(VRPSolverStop { lat, lon, label, demand, arrival_time: None })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let solver_id = args
+        .get("solver_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let total_distance_km = args
+        .get("total_distance_km")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+
+    let actual_gap_pct = args
+        .get("actual_gap_pct")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+
+    let elapsed_ms = args
+        .get("elapsed_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    let log_path = args
+        .get("log_path")
+        .and_then(|v| v.as_str())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("data/feedback.jsonl"));
+
+    // Extract instance features
+    let input = VRPSolverInput {
+        locations: stops.clone(),
+        num_vehicles: args.get("num_vehicles").and_then(|v| v.as_u64()).unwrap_or(1) as usize,
+        vehicle_capacity: args.get("vehicle_capacity").and_then(|v| v.as_f64()).unwrap_or(100.0),
+        objective: match args.get("objective").and_then(|v| v.as_str()).unwrap_or("min_distance") {
+            "min_time" => VrpObjective::MinTime,
+            "balance_load" => VrpObjective::BalanceLoad,
+            "min_vehicles" => VrpObjective::MinVehicles,
+            _ => VrpObjective::MinDistance,
+        },
+        matrix: None,
+        service_time_secs: None,
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+        hyperparams: None,
+    };
+
+    let features = InstanceFeatures::from_input(&input);
+    let feature_vec = features.to_vector();
+
+    let entry = SolveLogEntry {
+        timestamp: chrono::Local::now().to_rfc3339(),
+        instance_features: feature_vec,
+        solver_id: solver_id.clone(),
+        total_distance_km,
+        elapsed_ms,
+        gap_to_bks: Some(actual_gap_pct),
+    };
+
+    log_solve(entry, Some(&log_path))?;
+
+    // Count total feedback entries
+    let count = if log_path.exists() {
+        std::fs::read_to_string(&log_path)
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .count()
+    } else {
+        0
+    };
+
+    Ok(json!({
+        "status": "logged",
+        "log_path": log_path.to_string_lossy(),
+        "feedback_count": count,
+        "solver_id": solver_id,
+        "total_distance_km": total_distance_km,
+        "actual_gap_pct": actual_gap_pct,
+        "elapsed_ms": elapsed_ms,
+        "feature_vector": features.to_vector(),
+    }))
+}
+
+#[cfg(not(feature = "ml"))]
+fn handle_submit_feedback(_args: &Value) -> Result<Value> {
+    anyhow::bail!("ML feature is not enabled. submit_feedback requires feature extraction.")
 }
 
 // ── Get Valhalla Matrix handler ──────────────────────────────────────────
@@ -2317,8 +2482,36 @@ async fn main() -> Result<()> {
                     "inspect_rmp" => handle_inspect_rmp(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
-                    "pipeline" => handle_pipeline(&args).await,
-                    "get_valhalla_matrix" => handle_get_valhalla_matrix(&args).await,
+                    "pipeline" => {
+                        match tokio::time::timeout(
+                            std::time::Duration::from_secs(30),
+                            handle_pipeline(&args)
+                        ).await {
+                            Ok(Ok(v)) => Ok(v),
+                            Ok(Err(e)) => Err(anyhow::anyhow!("{e}")),
+                            Err(_elapsed) => Ok(json!({
+                                "error": "timeout",
+                                "stage": "pipeline",
+                                "retryable": true,
+                                "hint": "Overture S3 extraction or pipeline stage exceeded 30-second timeout. Use extract_overture directly with a smaller bbox, or run offline."
+                            })),
+                        }
+                    }
+                    "get_valhalla_matrix" => {
+                        match tokio::time::timeout(
+                            std::time::Duration::from_secs(15),
+                            handle_get_valhalla_matrix(&args)
+                        ).await {
+                            Ok(Ok(v)) => Ok(v),
+                            Ok(Err(e)) => Err(anyhow::anyhow!("{e}")),
+                            Err(_elapsed) => Ok(json!({
+                                "error": "timeout",
+                                "stage": "valhalla_matrix",
+                                "retryable": true,
+                                "hint": "Valhalla API request timed out after 15 seconds (network may be unavailable)."
+                            })),
+                        }
+                    }
                     "predict_solver" => handle_predict_solver(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
@@ -2335,6 +2528,9 @@ async fn main() -> Result<()> {
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
                     "parse_routing_query" => handle_parse_routing_query(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .map(|v| v),
+                    "submit_feedback" => handle_submit_feedback(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
                     other => {

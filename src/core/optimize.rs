@@ -724,7 +724,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         }
     };
     #[cfg(not(feature = "ml"))]
-    let embeddings = None;
+    let embeddings: Option<std::collections::HashMap<usize, Vec<f32>>> = None;
 
     // 2. Build VRP Stops
     let mut stops: Vec<VRPSolverStop> = Vec::new();
@@ -751,7 +751,14 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
     // 3. Build Distance Matrix
     // Use graph-based shortest paths if we have edges, otherwise fallback to haversine.
     let matrix = if !edges.is_empty() {
-        super::vrp::utils::build_graph_matrix(&stops, &nodes, &edges, embeddings.as_deref(), 40.0)
+        #[cfg(feature = "ml")]
+        {
+            super::vrp::utils::build_graph_matrix(&stops, &nodes, &edges, embeddings.as_deref(), 40.0)
+        }
+        #[cfg(not(feature = "ml"))]
+        {
+            super::vrp::utils::build_graph_matrix(&stops, &nodes, &edges, None, 40.0)
+        }
     } else {
         super::vrp::utils::build_haversine_matrix(&stops, 40.0)
     };

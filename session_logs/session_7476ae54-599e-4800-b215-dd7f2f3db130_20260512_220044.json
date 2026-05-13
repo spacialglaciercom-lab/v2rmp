@@ -1,37 +1,139 @@
 {
-  "session_id": "3c0ae5a5-0e29-4c7b-a96e-e5ee5b89a824",
+  "session_id": "7476ae54-599e-4800-b215-dd7f2f3db130",
   "user_id": "aerialblancaservices",
   "hf_username": null,
-  "session_start_time": "2026-05-11T03:08:36.729097",
-  "session_end_time": "2026-05-11T03:08:44.284177",
+  "session_start_time": "2026-05-12T21:47:13.856955",
+  "session_end_time": "2026-05-12T22:01:14.898285",
   "model_name": "ollama/kimi-k2.6:cloud",
   "total_cost_usd": 0.0,
   "messages": [
     {
-      "content": "You are ML Intern, an ML engineering assistant with 18 tools for training, fine-tuning, data processing, inference, and evaluation on the Hugging Face (HF) ecosystem.\n\nYour goal is to complete what the user requested with zero errors. You are fully autonomous \u2014 research, validate, implement, and deliver results without asking for unnecessary confirmation.\n\n# Your knowledge of HF libraries is outdated\n\nYou do not know current APIs for TRL, Transformers, PEFT, Trackio, or other HF libraries. Your internal knowledge WILL produce wrong imports, wrong argument names, and wrong trainer configurations.\n\nBefore writing any ML implementation code, start from the literature. The parallel research sub-agents can crawl papers, read their methodology sections, trace citation graphs, and extract the exact datasets and training recipes that produced published results. This is your primary advantage \u2014 use it.\n\nYour default workflow for any ML task:\n1. Find the landmark paper(s) for the task or domain\n2. Crawl their citation graphs to find recent downstream work\n3. Read methodology sections (not abstracts) of the most promising papers \u2014 especially recent ones with strong results, lot of citations, and publications in high-impact conferences\n4. Extract the recipe: what dataset, what training method, what hyperparameters produced those results\n5. Validate and use those datasets for training\n\n```\nresearch({\"task\": \"Literature crawl for [task]. Start from [paper/topic]. Crawl citation graph for recent downstream papers. Read their methodology sections (3, 4, 5) \u2014 extract the exact datasets, training methods, and hyperparameters that produced their best results. Attribute every finding to a specific result (e.g. 'Dataset X + method Y \u2192 85.3% on benchmark Z'). Also find working code examples using current TRL/Transformers APIs.\", \"context\": \"User wants to [goal]. We need the best training recipe backed by published results.\"})\n```\n\nThe sub-agent knows how to use github_find_examples, github_read_file, explore_hf_docs, fetch_hf_docs, hf_inspect_dataset, and hf_papers (with citation_graph, read_paper, snippet_search, find_datasets). Be specific in your task description \u2014 name anchor papers or arxiv IDs when you have them.\n\nYou can also call research tools directly (explore_hf_docs, github_read_file, etc.) for quick lookups.\n\nSkip research only for trivial non-code operations.\n\n# Mistakes you WILL make without research\n\nHALLUCINATED IMPORTS: You will import from modules that were renamed or removed. Example: old TRL trainer class names, deprecated Transformers APIs, wrong trackio config field names. Fix: read a current example script first.\n\nWRONG TRAINER ARGUMENTS: You will pass configuration arguments that don't exist in current trainer versions. Fix: fetch the actual trainer/config docs via explore_hf_docs + fetch_hf_docs.\n\nWRONG DATASET FORMAT: You will assume column names without checking. Training fails with KeyError. Fix: call hf_inspect_dataset or hub_repo_details and verify columns match the training method.\n\nDEFAULT TIMEOUT KILLS JOBS: You will leave timeout at the default 30m for training jobs. Training takes hours. The job gets killed and all progress is lost. Fix: set timeout based on model size (minimum 2h for any training).\n\nLOST MODELS: You will forget push_to_hub=True and hub_model_id in training config. Job storage is ephemeral \u2014 the filesystem is deleted when the job ends. Without push_to_hub, the trained model is permanently lost.\n\nBATCH FAILURES: You will submit all ablation/batch jobs at once without testing that one works first. All will fail for the same bug. Fix: submit ONE job first, verify it completes successfully, then submit the rest.\n\nSILENT DATASET SUBSTITUTION: When a requested dataset fails to load, you will silently switch to a different one without telling the user. Fix: if the requested dataset isn't available, tell the user and ask what to do.\n\nPREFER HUB KERNELS OVER COMPILING ATTENTION: Do NOT pip install 'flash-attn' to enable flash_attention_2 building from source can take many minutes to hours and often fails on the job's CUDA/PyTorch combo. Instead, use the HF `kernels` library (`pip install kernels`, already pulled in by recent TRL) and load a prebuilt attention kernel from the Hub via `attn_implementation`. Examples: `AutoModelForCausalLM.from_pretrained(..., attn_implementation=\"kernels-community/flash-attn2\")`, or `kernels-community/vllm-flash-attn3`, or `kernels-community/paged-attention`. With TRL/SFT scripts you can pass `--attn_implementation kernels-community/flash-attn2` on the CLI. Search additional kernels at https://huggingface.co/models?other=kernel. Only `pip install` extra packages (and document why) when no Hub kernel covers the need.\n\nSCOPE-CHANGING FIXES: Avoid at all costs! When you hit an error (especially OOM), you will try \"creative\" workarounds that change what the user asked for and/or change the training task itself \u2014 switching full SFT to LoRA on OOM, reducing max_length (silently truncates training data and changes what the model learns), disabling monitoring instead of fixing it. Do not do this. Fix errors with the minimal change that preserves the user's original request and are grounded in research and examples. If the original approach genuinely cannot work, explain why and ask the user for input before changing methods, sequence length, training approach or any other part of the task.\n\n# When writing ML code\n\nRequired sequence before any training/fine-tuning/inference script:\n1. Use `research` tool to find working examples, read docs, and get current API patterns\n2. Validate dataset: hf_inspect_dataset or hub_repo_details to confirm column names and format\n3. Validate model: hub_repo_details to confirm model exists, correct architecture/size/tokenizer\n\nTraining logging: always set disable_tqdm=True, logging_strategy=\"steps\", and logging_first_step=True in your TrainingArguments/SFTConfig so loss values are printed as plain text lines you can grep, not hidden inside tqdm progress bars.\n\nDataset format requirements by training method:\n  SFT: \"messages\", \"text\", or \"prompt\"/\"completion\"\n  DPO: \"prompt\", \"chosen\", \"rejected\"\n  GRPO: \"prompt\"\n\n# Trackio\n\nTrackio is natively integrated with Transformers Trainer and all TRL trainers \u2014 the built-in TrackioCallback handles init/log/finish. In TrainingArguments/SFTConfig/DPOConfig/GRPOConfig set:\n  report_to=\"trackio\"\n  run_name=\"<descriptive-run-name>\"          # e.g. \"sft_qwen3-4b_lr2e-5_bs128\"\n  project=\"<descriptive-project-name>\"       # keeps related runs grouped so you can compare them\n  trackio_space_id=\"<username>/ml-intern-<8-char-id>\"  # creates a public dashboard Space\n`project` and `trackio_space_id` can also be set via TRACKIO_PROJECT / TRACKIO_SPACE_ID env vars.\n\nAlerts are how iterations decide what to change. Use trackio.alert(title, text, level) at every decision point in training. Levels:\n  ERROR \u2014 stop and change approach (divergence, NaN, OOM)\n  WARN  \u2014 tweak hyperparameters (overfitting, early stopping, KL spike, reward collapse, slow convergence)\n  INFO  \u2014 milestones (training complete, target reached, checkpoint saved)\nAlways include numeric values and an actionable suggestion in `text`, e.g. \"loss=12.4 at step 200 \u2014 lr likely too high, try \u00d70.1\". A future call must be able to parse it and act on it.\n\nTo add alerts under Trainer/SFTTrainer/GRPOTrainer, pass a custom TrainerCallback via `callbacks=[...]` that calls trackio.alert() inside `on_log` (training metrics like loss, reward, kl) and `on_evaluate` (eval metrics \u2014 only available here, not in `on_log`). Keep each `if` simple: one metric, one threshold. Conditions stay easy to adjust between runs.\n\nRead alerts back between runs instead of parsing thousands of metric values. CLI \u2014 always use --json:\n  trackio get alerts --project <p> --run <r> --json\n  trackio get alerts --project <p> --since <iso8601> --json   # incremental polling\n  trackio get run    --project <p> --run <r> --json\n  trackio get metric --project <p> --run <r> --metric <m> --json\n  trackio list runs  --project <p> --json\nPython: api = trackio.Api(); api.alerts(<p>, run=<r>, since=<ts>); api.runs(<p>) (each run has .name, .config, .alerts()).\n\nDrive the next config from prior alerts:\n  diverged       \u2192 lr \u00d7 0.1\n  overfitting    \u2192 weight_decay \u00d7 10 or reduce capacity\n  early stopping \u2192 lr \u00d7 0.5 or adjust schedule\n  high accuracy  \u2192 refine around current config\nRead prior config via api.runs(...).config and only mutate keys the alerts justify changing.\n\n# Data audit\n\nBefore working with any dataset, audit it first. Do not assume you know what the data looks like \u2014 inspect it.\n\nUse hf_inspect_dataset to check: schema/columns, number of rows per split, value distributions for key columns, sample rows. Surface anything notable: class imbalance, missing values, unexpected formats, outliers, duplicate rows, etc.\n\nLooking at data is the best way to boost performance of any ML model plus it reduces the likelihood of failed jobs later.\n\n# When submitting a training job\n\nBefore calling hf_jobs, output a pre-flight check:\n  - Reference implementation: [which example you based this on]\n  - Dataset format verified: [columns confirmed via hf_inspect_dataset/hub_repo_details]\n  - push_to_hub=True and hub_model_id set\n  - timeout: [value] (based on: [model size] on [hardware])\n  - Trackio monitoring included and deploying metrics to a public Space\n\nIf you cannot fill in all items, stop and complete the missing steps first.\n\nFor batch/ablation jobs: submit ONE job first. Check logs to confirm it starts training successfully. Only then submit the remaining jobs. Never submit all at once.\n\nHardware sizing:\n  1-3B params: a10g-largex2\n  7-13B params: a100-large\n  30B+ params: l40sx4 or a100x4\n  70B+ params: a100x8\nNote: a10g-small and a10g-large have the SAME 24GB GPU memory. The difference is CPU/RAM only.\n\n# Sandbox-first development\n\nA private cpu-basic sandbox is already available for normal code execution in each session. For non-trivial scripts, develop and test there before launching via hf_jobs:\n  write script \u2192 pip install \u2192 test with small run using bash/read/write/edit \u2192 fix errors \u2192 launch via hf_jobs at scale\n\nDo NOT call sandbox_create before normal CPU work. Call sandbox_create only when you need GPU hardware or another non-default sandbox tier.\n\nUse GPU sandbox (t4-small minimum) when testing code that uses CUDA, bf16, or model loading. CPU sandboxes cannot test GPU code paths.\n\n\n# When a task has 3+ steps\n\nUse plan_tool to track progress. One task in_progress at a time. Mark completed immediately after finishing. Update frequently to show the user what you're doing.\n\n# Error recovery\n\nWhen something fails:\n- Diagnose the actual error. Read the full error message and logs.\n- Do not retry the exact same thing. Identify what needs to change.\n- If an API/import error: check documentation for the correct API.\n- If an OOM error: (1) reduce per_device_train_batch_size and increase gradient_accumulation_steps proportionally to keep effective batch size identical, (2) enable gradient_checkpointing=True, (3) upgrade to larger GPU (a10gx4\u2192a100\u2192a100x4\u2192a100x8). Do NOT switch training methods (e.g. SFT\u2192LoRA) or reduce max_length \u2014 those change what the user gets. If OOM happens in sandbox, create a new sandbox with larger GPU hardware.\n- Never change the user's requested approach (training method, dataset, model, sequence length) without explicit approval.\n- If a tool call fails repeatedly for the same reason: stop and try a different approach.\n- Never silently substitute resources (datasets, models) \u2014 tell the user if something isn't available.\n\n# Task completion\n\nBefore ending your turn, verify:\n- Did you actually DO what the user asked, not just explain what you would do?\n- If something failed: did you diagnose and fix it, or at minimum explain what went wrong and ask for user input?\n- For training jobs: did you include a working Trackio dashboard URL?\n\nDo not stop after describing what you plan to do. Continue calling tools until the task is verifiably done.\nDo not mark plan tasks as completed if they failed or are only partially done.\n\n# Autonomous / headless mode\n\nWhen running autonomously (no human in the loop), you MUST follow these rules:\n\nNEVER respond with only text. Every response MUST include at least one tool call. If you have nothing to do, check the plan, verify outputs or plan ahead. A text-only response ends the agent loop permanently \u2014 there is no human to re-prompt you.\n\nNEVER STOP WORKING. Do NOT decide you are \"done\" while time remains. The human is not watching \u2014 they expect you to use the ENTIRE time budget productively. Do NOT ask \"should I continue?\" or \"is this a good stopping point?\" \u2014 there is nobody to answer. You run until the timer expires or you are manually killed.\n\nYour workflow is a loop, not a checklist. Once you have a working result, KEEP ITERATING:\n\nLOOP UNTIL TIME RUNS OUT:\n1. Research the approach (read docs, find examples, check current APIs)\n2. Implement the solution (write code, set up training)\n3. Train and evaluate\n4. Save the model to the required output location / push it to Hugging Face Hub\n5. Improve: tune hyperparameters, try different data, adjust the training recipe, try a different approach entirely\n6. Go to step 1\n\nHYPERPARAMETER TUNING: Do not tune hyperparameters by hand one-at-a-time. Write a script that launches a sweep over a grid of values (learning rate, epochs, batch size, etc.) and evaluates each run automatically. One well-designed sweep script beats ten manual experiments.\n\nIf you run out of ideas: go back to the literature. Crawl citation graphs deeper \u2014 find papers you haven't read yet, read their methodology sections, extract new datasets or training tricks. Look for papers that cite your current approach and improved on it. Try combining recipes from different papers. Re-read the task prompt for angles you missed. Re-read the training logs for clues. There is always a paper you haven't read yet, and it probably has a better dataset.\n\nCheck the remaining time periodically with the timer command specified in the task prompt. Budget your time: reserve at least 10 minutes at the end for final evaluation and model saving.\n\nThe task is NOT done until:\n- The required output exists (e.g. final model, metrics reached, dataset updated etc)\n- You have evaluated the model and confirmed it works\n\n# Communication\n\n- Be concise and direct. No filler, no restating what the user said.\n- One-word answers when appropriate for simple questions.\n- Always include direct Hub URLs when referencing models, datasets, Spaces, or jobs.\n- For errors: state what went wrong, why, and what you're doing to fix it.\n- Do not over-explain or present elaborate option menus for simple tasks. When the user's intent is clear, act on it. Present options only when there's genuine ambiguity.\n- Use the `notify` tool only when the user explicitly asked for out-of-band notifications or when the task clearly requires reporting to a configured messaging destination. Do not use it for routine chat updates.\n\n# Tool usage\n\n- Execute multiple independent tool calls in parallel when possible.\n- HF_TOKEN is automatically available in job secrets \u2014 no need to include it extra.\n- For training monitoring: include Trackio in the script and provide the dashboard URL.\n- For private/gated datasets: HF_TOKEN is needed \u2014 it's auto-loaded into job secrets.\n\n# CLI / Local mode\n\nYou are running as a local CLI tool on the user's machine. There is NO sandbox \u2014 bash, read, write, and edit operate directly on the local filesystem.\n\nWorking directory: /root/v2rmp\nUse absolute paths or paths relative to the working directory. Do NOT use /app/ paths \u2014 that is a sandbox convention that does not apply here.\nThe sandbox_create tool is NOT available. Run code directly with bash.\n\n[Session context: Date=11-05-2026, Time=05:08:36.612, Timezone=CEST (UTC+02:00), User=aerialblancaservices, Tools=18]",
+      "content": "You are ML Intern, an ML engineering assistant with 18 tools for training, fine-tuning, data processing, inference, and evaluation on the Hugging Face (HF) ecosystem.\n\nYour goal is to complete what the user requested with zero errors. You are fully autonomous \u2014 research, validate, implement, and deliver results without asking for unnecessary confirmation.\n\n# Your knowledge of HF libraries is outdated\n\nYou do not know current APIs for TRL, Transformers, PEFT, Trackio, or other HF libraries. Your internal knowledge WILL produce wrong imports, wrong argument names, and wrong trainer configurations.\n\nBefore writing any ML implementation code, start from the literature. The parallel research sub-agents can crawl papers, read their methodology sections, trace citation graphs, and extract the exact datasets and training recipes that produced published results. This is your primary advantage \u2014 use it.\n\nYour default workflow for any ML task:\n1. Find the landmark paper(s) for the task or domain\n2. Crawl their citation graphs to find recent downstream work\n3. Read methodology sections (not abstracts) of the most promising papers \u2014 especially recent ones with strong results, lot of citations, and publications in high-impact conferences\n4. Extract the recipe: what dataset, what training method, what hyperparameters produced those results\n5. Validate and use those datasets for training\n\n```\nresearch({\"task\": \"Literature crawl for [task]. Start from [paper/topic]. Crawl citation graph for recent downstream papers. Read their methodology sections (3, 4, 5) \u2014 extract the exact datasets, training methods, and hyperparameters that produced their best results. Attribute every finding to a specific result (e.g. 'Dataset X + method Y \u2192 85.3% on benchmark Z'). Also find working code examples using current TRL/Transformers APIs.\", \"context\": \"User wants to [goal]. We need the best training recipe backed by published results.\"})\n```\n\nThe sub-agent knows how to use github_find_examples, github_read_file, explore_hf_docs, fetch_hf_docs, hf_inspect_dataset, and hf_papers (with citation_graph, read_paper, snippet_search, find_datasets). Be specific in your task description \u2014 name anchor papers or arxiv IDs when you have them.\n\nYou can also call research tools directly (explore_hf_docs, github_read_file, etc.) for quick lookups.\n\nSkip research only for trivial non-code operations.\n\n# Mistakes you WILL make without research\n\nHALLUCINATED IMPORTS: You will import from modules that were renamed or removed. Example: old TRL trainer class names, deprecated Transformers APIs, wrong trackio config field names. Fix: read a current example script first.\n\nWRONG TRAINER ARGUMENTS: You will pass configuration arguments that don't exist in current trainer versions. Fix: fetch the actual trainer/config docs via explore_hf_docs + fetch_hf_docs.\n\nWRONG DATASET FORMAT: You will assume column names without checking. Training fails with KeyError. Fix: call hf_inspect_dataset or hub_repo_details and verify columns match the training method.\n\nDEFAULT TIMEOUT KILLS JOBS: You will leave timeout at the default 30m for training jobs. Training takes hours. The job gets killed and all progress is lost. Fix: set timeout based on model size (minimum 2h for any training).\n\nLOST MODELS: You will forget push_to_hub=True and hub_model_id in training config. Job storage is ephemeral \u2014 the filesystem is deleted when the job ends. Without push_to_hub, the trained model is permanently lost.\n\nBATCH FAILURES: You will submit all ablation/batch jobs at once without testing that one works first. All will fail for the same bug. Fix: submit ONE job first, verify it completes successfully, then submit the rest.\n\nSILENT DATASET SUBSTITUTION: When a requested dataset fails to load, you will silently switch to a different one without telling the user. Fix: if the requested dataset isn't available, tell the user and ask what to do.\n\nPREFER HUB KERNELS OVER COMPILING ATTENTION: Do NOT pip install 'flash-attn' to enable flash_attention_2 building from source can take many minutes to hours and often fails on the job's CUDA/PyTorch combo. Instead, use the HF `kernels` library (`pip install kernels`, already pulled in by recent TRL) and load a prebuilt attention kernel from the Hub via `attn_implementation`. Examples: `AutoModelForCausalLM.from_pretrained(..., attn_implementation=\"kernels-community/flash-attn2\")`, or `kernels-community/vllm-flash-attn3`, or `kernels-community/paged-attention`. With TRL/SFT scripts you can pass `--attn_implementation kernels-community/flash-attn2` on the CLI. Search additional kernels at https://huggingface.co/models?other=kernel. Only `pip install` extra packages (and document why) when no Hub kernel covers the need.\n\nSCOPE-CHANGING FIXES: Avoid at all costs! When you hit an error (especially OOM), you will try \"creative\" workarounds that change what the user asked for and/or change the training task itself \u2014 switching full SFT to LoRA on OOM, reducing max_length (silently truncates training data and changes what the model learns), disabling monitoring instead of fixing it. Do not do this. Fix errors with the minimal change that preserves the user's original request and are grounded in research and examples. If the original approach genuinely cannot work, explain why and ask the user for input before changing methods, sequence length, training approach or any other part of the task.\n\n# When writing ML code\n\nRequired sequence before any training/fine-tuning/inference script:\n1. Use `research` tool to find working examples, read docs, and get current API patterns\n2. Validate dataset: hf_inspect_dataset or hub_repo_details to confirm column names and format\n3. Validate model: hub_repo_details to confirm model exists, correct architecture/size/tokenizer\n\nTraining logging: always set disable_tqdm=True, logging_strategy=\"steps\", and logging_first_step=True in your TrainingArguments/SFTConfig so loss values are printed as plain text lines you can grep, not hidden inside tqdm progress bars.\n\nDataset format requirements by training method:\n  SFT: \"messages\", \"text\", or \"prompt\"/\"completion\"\n  DPO: \"prompt\", \"chosen\", \"rejected\"\n  GRPO: \"prompt\"\n\n# Trackio\n\nTrackio is natively integrated with Transformers Trainer and all TRL trainers \u2014 the built-in TrackioCallback handles init/log/finish. In TrainingArguments/SFTConfig/DPOConfig/GRPOConfig set:\n  report_to=\"trackio\"\n  run_name=\"<descriptive-run-name>\"          # e.g. \"sft_qwen3-4b_lr2e-5_bs128\"\n  project=\"<descriptive-project-name>\"       # keeps related runs grouped so you can compare them\n  trackio_space_id=\"<username>/ml-intern-<8-char-id>\"  # creates a public dashboard Space\n`project` and `trackio_space_id` can also be set via TRACKIO_PROJECT / TRACKIO_SPACE_ID env vars.\n\nAlerts are how iterations decide what to change. Use trackio.alert(title, text, level) at every decision point in training. Levels:\n  ERROR \u2014 stop and change approach (divergence, NaN, OOM)\n  WARN  \u2014 tweak hyperparameters (overfitting, early stopping, KL spike, reward collapse, slow convergence)\n  INFO  \u2014 milestones (training complete, target reached, checkpoint saved)\nAlways include numeric values and an actionable suggestion in `text`, e.g. \"loss=12.4 at step 200 \u2014 lr likely too high, try \u00d70.1\". A future call must be able to parse it and act on it.\n\nTo add alerts under Trainer/SFTTrainer/GRPOTrainer, pass a custom TrainerCallback via `callbacks=[...]` that calls trackio.alert() inside `on_log` (training metrics like loss, reward, kl) and `on_evaluate` (eval metrics \u2014 only available here, not in `on_log`). Keep each `if` simple: one metric, one threshold. Conditions stay easy to adjust between runs.\n\nRead alerts back between runs instead of parsing thousands of metric values. CLI \u2014 always use --json:\n  trackio get alerts --project <p> --run <r> --json\n  trackio get alerts --project <p> --since <iso8601> --json   # incremental polling\n  trackio get run    --project <p> --run <r> --json\n  trackio get metric --project <p> --run <r> --metric <m> --json\n  trackio list runs  --project <p> --json\nPython: api = trackio.Api(); api.alerts(<p>, run=<r>, since=<ts>); api.runs(<p>) (each run has .name, .config, .alerts()).\n\nDrive the next config from prior alerts:\n  diverged       \u2192 lr \u00d7 0.1\n  overfitting    \u2192 weight_decay \u00d7 10 or reduce capacity\n  early stopping \u2192 lr \u00d7 0.5 or adjust schedule\n  high accuracy  \u2192 refine around current config\nRead prior config via api.runs(...).config and only mutate keys the alerts justify changing.\n\n# Data audit\n\nBefore working with any dataset, audit it first. Do not assume you know what the data looks like \u2014 inspect it.\n\nUse hf_inspect_dataset to check: schema/columns, number of rows per split, value distributions for key columns, sample rows. Surface anything notable: class imbalance, missing values, unexpected formats, outliers, duplicate rows, etc.\n\nLooking at data is the best way to boost performance of any ML model plus it reduces the likelihood of failed jobs later.\n\n# When submitting a training job\n\nBefore calling hf_jobs, output a pre-flight check:\n  - Reference implementation: [which example you based this on]\n  - Dataset format verified: [columns confirmed via hf_inspect_dataset/hub_repo_details]\n  - push_to_hub=True and hub_model_id set\n  - timeout: [value] (based on: [model size] on [hardware])\n  - Trackio monitoring included and deploying metrics to a public Space\n\nIf you cannot fill in all items, stop and complete the missing steps first.\n\nFor batch/ablation jobs: submit ONE job first. Check logs to confirm it starts training successfully. Only then submit the remaining jobs. Never submit all at once.\n\nHardware sizing:\n  1-3B params: a10g-largex2\n  7-13B params: a100-large\n  30B+ params: l40sx4 or a100x4\n  70B+ params: a100x8\nNote: a10g-small and a10g-large have the SAME 24GB GPU memory. The difference is CPU/RAM only.\n\n# Sandbox-first development\n\nA private cpu-basic sandbox is already available for normal code execution in each session. For non-trivial scripts, develop and test there before launching via hf_jobs:\n  write script \u2192 pip install \u2192 test with small run using bash/read/write/edit \u2192 fix errors \u2192 launch via hf_jobs at scale\n\nDo NOT call sandbox_create before normal CPU work. Call sandbox_create only when you need GPU hardware or another non-default sandbox tier.\n\nUse GPU sandbox (t4-small minimum) when testing code that uses CUDA, bf16, or model loading. CPU sandboxes cannot test GPU code paths.\n\n\n# When a task has 3+ steps\n\nUse plan_tool to track progress. One task in_progress at a time. Mark completed immediately after finishing. Update frequently to show the user what you're doing.\n\n# Error recovery\n\nWhen something fails:\n- Diagnose the actual error. Read the full error message and logs.\n- Do not retry the exact same thing. Identify what needs to change.\n- If an API/import error: check documentation for the correct API.\n- If an OOM error: (1) reduce per_device_train_batch_size and increase gradient_accumulation_steps proportionally to keep effective batch size identical, (2) enable gradient_checkpointing=True, (3) upgrade to larger GPU (a10gx4\u2192a100\u2192a100x4\u2192a100x8). Do NOT switch training methods (e.g. SFT\u2192LoRA) or reduce max_length \u2014 those change what the user gets. If OOM happens in sandbox, create a new sandbox with larger GPU hardware.\n- Never change the user's requested approach (training method, dataset, model, sequence length) without explicit approval.\n- If a tool call fails repeatedly for the same reason: stop and try a different approach.\n- Never silently substitute resources (datasets, models) \u2014 tell the user if something isn't available.\n\n# Task completion\n\nBefore ending your turn, verify:\n- Did you actually DO what the user asked, not just explain what you would do?\n- If something failed: did you diagnose and fix it, or at minimum explain what went wrong and ask for user input?\n- For training jobs: did you include a working Trackio dashboard URL?\n\nDo not stop after describing what you plan to do. Continue calling tools until the task is verifiably done.\nDo not mark plan tasks as completed if they failed or are only partially done.\n\n# Autonomous / headless mode\n\nWhen running autonomously (no human in the loop), you MUST follow these rules:\n\nNEVER respond with only text. Every response MUST include at least one tool call. If you have nothing to do, check the plan, verify outputs or plan ahead. A text-only response ends the agent loop permanently \u2014 there is no human to re-prompt you.\n\nNEVER STOP WORKING. Do NOT decide you are \"done\" while time remains. The human is not watching \u2014 they expect you to use the ENTIRE time budget productively. Do NOT ask \"should I continue?\" or \"is this a good stopping point?\" \u2014 there is nobody to answer. You run until the timer expires or you are manually killed.\n\nYour workflow is a loop, not a checklist. Once you have a working result, KEEP ITERATING:\n\nLOOP UNTIL TIME RUNS OUT:\n1. Research the approach (read docs, find examples, check current APIs)\n2. Implement the solution (write code, set up training)\n3. Train and evaluate\n4. Save the model to the required output location / push it to Hugging Face Hub\n5. Improve: tune hyperparameters, try different data, adjust the training recipe, try a different approach entirely\n6. Go to step 1\n\nHYPERPARAMETER TUNING: Do not tune hyperparameters by hand one-at-a-time. Write a script that launches a sweep over a grid of values (learning rate, epochs, batch size, etc.) and evaluates each run automatically. One well-designed sweep script beats ten manual experiments.\n\nIf you run out of ideas: go back to the literature. Crawl citation graphs deeper \u2014 find papers you haven't read yet, read their methodology sections, extract new datasets or training tricks. Look for papers that cite your current approach and improved on it. Try combining recipes from different papers. Re-read the task prompt for angles you missed. Re-read the training logs for clues. There is always a paper you haven't read yet, and it probably has a better dataset.\n\nCheck the remaining time periodically with the timer command specified in the task prompt. Budget your time: reserve at least 10 minutes at the end for final evaluation and model saving.\n\nThe task is NOT done until:\n- The required output exists (e.g. final model, metrics reached, dataset updated etc)\n- You have evaluated the model and confirmed it works\n\n# Communication\n\n- Be concise and direct. No filler, no restating what the user said.\n- One-word answers when appropriate for simple questions.\n- Always include direct Hub URLs when referencing models, datasets, Spaces, or jobs.\n- For errors: state what went wrong, why, and what you're doing to fix it.\n- Do not over-explain or present elaborate option menus for simple tasks. When the user's intent is clear, act on it. Present options only when there's genuine ambiguity.\n- Use the `notify` tool only when the user explicitly asked for out-of-band notifications or when the task clearly requires reporting to a configured messaging destination. Do not use it for routine chat updates.\n\n# Tool usage\n\n- Execute multiple independent tool calls in parallel when possible.\n- HF_TOKEN is automatically available in job secrets \u2014 no need to include it extra.\n- For training monitoring: include Trackio in the script and provide the dashboard URL.\n- For private/gated datasets: HF_TOKEN is needed \u2014 it's auto-loaded into job secrets.\n\n# CLI / Local mode\n\nYou are running as a local CLI tool on the user's machine. There is NO sandbox \u2014 bash, read, write, and edit operate directly on the local filesystem.\n\nWorking directory: /root/v2rmp\nUse absolute paths or paths relative to the working directory. Do NOT use /app/ paths \u2014 that is a sandbox convention that does not apply here.\nThe sandbox_create tool is NOT available. Run code directly with bash.\n\n[Session context: Date=12-05-2026, Time=23:47:13.582, Timezone=CEST (UTC+02:00), User=aerialblancaservices, Tools=18]",
       "role": "system",
       "tool_calls": null,
       "function_call": null,
       "provider_specific_fields": null
     },
     {
-      "content": "who am I?",
+      "content": "i need you to test all mcp tools, create synthetic data thatreplicates real world situations",
       "role": "user",
       "tool_calls": null,
       "function_call": null,
       "provider_specific_fields": null
     },
     {
-      "content": "Based on the session context, you are **aerialblancaservices**.",
+      "content": null,
       "role": "assistant",
-      "tool_calls": null,
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"todos\":[{\"content\":\"Research and discover available MCP tools on Hugging Face Spaces\",\"id\":\"1\",\"status\":\"in_progress\"},{\"content\":\"Create synthetic test datasets for real-world scenarios (text, structured data, multimodal)\",\"id\":\"2\",\"status\":\"pending\"},{\"content\":\"Test MCP server discovery and search capabilities\",\"id\":\"3\",\"status\":\"pending\"},{\"content\":\"Test text/embedding MCP tools with synthetic data\",\"id\":\"4\",\"status\":\"pending\"},{\"content\":\"Test structured data/CSV MCP tools with synthetic data\",\"id\":\"5\",\"status\":\"pending\"},{\"content\":\"Test image generation MCP tools with synthetic prompts\",\"id\":\"6\",\"status\":\"pending\"},{\"content\":\"Compile comprehensive test results and summary\",\"id\":\"7\",\"status\":\"pending\"}]}",
+            "name": "plan_tool"
+          },
+          "id": "functions.plan_tool:0",
+          "type": "function"
+        }
+      ],
       "function_call": null,
       "provider_specific_fields": null
+    },
+    {
+      "content": "Plan updated:\n\n  [~] 1. Research and discover available MCP tools on Hugging Face Spaces\n  [ ] 2. Create synthetic test datasets for real-world scenarios (text, structured data, multimodal)\n  [ ] 3. Test MCP server discovery and search capabilities\n  [ ] 4. Test text/embedding MCP tools with synthetic data\n  [ ] 5. Test structured data/CSV MCP tools with synthetic data\n  [ ] 6. Test image generation MCP tools with synthetic prompts\n  [ ] 7. Compile comprehensive test results and summary\n\n0/7 done",
+      "role": "tool",
+      "tool_calls": null,
+      "function_call": null,
+      "provider_specific_fields": null,
+      "tool_call_id": "functions.plan_tool:0",
+      "name": "plan_tool"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"query\":\"MCP server tools text embedding image generation structured data CSV\",\"limit\":50,\"mcp\":true}",
+            "name": "space_search"
+          },
+          "id": "functions.space_search:1",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": null
+    },
+    {
+      "content": "# Space Search Results for the query 'MCP server tools text embedding image generation structured data CSV' (All 36 results)\n\n| Space | Description | Author | ID | Category |  Likes | Trending Score | Relevance |\n|-------|-------------|--------|----|----------|--------|----------------|-----------|\n| \ud83d\uddbc\ufe0f [Z Image Turbo](https://hf.co/spaces/mrfakename/Z-Image-Turbo) | Generate high-quality images from text prompts | mrfakename | `mrfakename/Z-Image-Turbo` | `Image Generation` | 3147 | 26 | 82.6% |\n| \u2699\ufe0f [Nymbo Tools MCP](https://hf.co/spaces/Nymbo/Tools) | All-in-one hub of general purpose tools useful for any agent | Nymbo | `Nymbo/Tools` | `Other` | 49 | 4 | 79.4% |\n| \ud83c\udfce\ufe0f\ud83d\udca8 [FLUX.1 [Schnell]](https://hf.co/spaces/evalstate/flux1_schnell) | Generate images from text descriptions | evalstate | `evalstate/flux1\\_schnell` | `Image Generation` | 47 | 2 | 73.0% |\n| \ud83d\uddbc\ufe0f [Z Image Turbo](https://hf.co/spaces/yingzhac/Z_image_NSFW) | Generate high\u2011quality images from text prompts | yingzhac | `yingzhac/Z\\_image\\_NSFW` | `Image Generation` | 157 | 1.5 | 65.5% |\n| \ud83d\uddbc\ufe0f [Qwen Image Fast](https://hf.co/spaces/mcp-tools/Qwen-Image-Fast) | Generate images in 8-steps | mcp-tools | `mcp-tools/Qwen-Image-Fast` | `Image Generation` | 23 | 1 | 63.7% |\n| \ud83d\udd25 [Qwen3-VL-Outpost](https://hf.co/spaces/prithivMLmods/Qwen3-VL-Outpost) | Demo of a collection of Qwen3-VL models | prithivMLmods | `prithivMLmods/Qwen3-VL-Outpost` | `Text Generation` | 206 | 1 | 63.7% |\n| \ud83c\udfc3 [Z Image Turbo](https://hf.co/spaces/mcp-tools/Z-Image-Turbo) | Generate images from text prompts with customizable size | mcp-tools | `mcp-tools/Z-Image-Turbo` | `Image Generation` | 33 | 1 | 63.6% |\n| \ud83d\udd75\ufe0f\u200d\u2642\ufe0f\ud83d\udd75\ufe0f\u200d\u2642\ufe0f [CLIP Interrogator 2](https://hf.co/spaces/fffiloni/CLIP-Interrogator-2) | Generate detailed Stable Diffusion prompts from an image | fffiloni | `fffiloni/CLIP-Interrogator-2` | `Image Captioning` | 1351 | 0.5 | 62.8% |\n| \ud83e\udd56 [FLUX REALISM](https://hf.co/spaces/prithivMLmods/FLUX-REALISM) | flux.1-dev / flux.1-krea-dev | prithivMLmods | `prithivMLmods/FLUX-REALISM` | `Image Generation` | 226 | 1 | 61.9% |\n| \ud83d\udcda [Qwen Image](https://hf.co/spaces/mcp-tools/Qwen-Image) | Qwen-Image - great instruction following and text placement | mcp-tools | `mcp-tools/Qwen-Image` | `Image Generation` | 3 | 0.5 | 55.7% |\n| \ud83d\udcbb [FLUX.2 [Klein] 9B](https://hf.co/spaces/warshanks/FLUX.2-klein-9B) | Generate or edit images from text prompts or existing photos | warshanks | `warshanks/FLUX.2-klein-9B` | `Image Generation` | 21 | 0 | 31.8% |\n| \ud83c\udfc3 [Z Image Turbo](https://hf.co/spaces/jinguotianxin/Z-Image-Turbo) | Generate images from text prompts | jinguotianxin | `jinguotianxin/Z-Image-Turbo` | `Image Generation` | 21 | 0 | 27.2% |\n| \ud83d\udcc3 [Doc Mcp](https://hf.co/spaces/Agents-MCP-Hackathon/doc-mcp) | RAG on documentations for your agent  | Agents-MCP-Hackathon | `Agents-MCP-Hackathon/doc-mcp` | `Text Generation` | 46 | 0 | 26.5% |\n| \ud83c\udfc3 [Z Image](https://hf.co/spaces/Tongyi-MAI/Z-Image) | Generate high-quality images from text prompts | Tongyi-MAI | `Tongyi-MAI/Z-Image` | `Image Generation` | 164 | 0 | 25.5% |\n| \ud83c\udfc3 [Z-Image-Turbo MCP](https://hf.co/spaces/victor/Z-Image-Turbo-MCP) | Generate images from text prompts | victor | `victor/Z-Image-Turbo-MCP` | `Image Generation` | 16 | 0 | 25.5% |\n| \ud83c\udfc3 [OpenAPI2MCP](https://hf.co/spaces/abidlabs/OpenAPI2MCP) | Create a MCP Space from an OpenAPI spec | abidlabs | `abidlabs/OpenAPI2MCP` | `Other` | 23 | 0 | 25.3% |\n| \u2764\ufe0f\u200d\ud83d\udd25 [Qwen3 VL Demo](https://hf.co/spaces/baohuynhbk14/Qwen3-VL-Demo) | An interactive demo for the Qwen3-VL family models. | baohuynhbk14 | `baohuynhbk14/Qwen3-VL-Demo` | `Text Generation` | 54 | 0 | 24.5% |\n| \u26a1 [SearchHFforMCP](https://hf.co/spaces/Chris4K/searchHFforMCP) | Find working MCP servers on HuggingFace Spaces | Chris4K | `Chris4K/searchHFforMCP` | `API Search` | 3 | 0 | 24.4% |\n| \ud83d\udc09 [The DETERMINATOR](https://hf.co/spaces/MCP-1st-Birthday/DETERMINATOR) | Generate research reports with multimedia inputs | MCP-1st-Birthday | `MCP-1st-Birthday/DETERMINATOR` | `Text Generation` | 16 | 0 | 24.4% |\n| \ud83d\udcda [FLUX.1 Krea Dev](https://hf.co/spaces/mcp-tools/FLUX.1-Krea-dev) | Krea Dev - generate natural, lifelike professional images  | mcp-tools | `mcp-tools/FLUX.1-Krea-dev` | `Image Generation` | 11 | 0 | 23.6% |\n| \ud83c\udfce\ufe0f\ud83d\udca8 [FLUX.1 [Schnell]](https://hf.co/spaces/hysts-mcp/FLUX.1-schnell) | Generate images from text prompts | hysts-mcp | `hysts-mcp/FLUX.1-schnell` | `Image Generation` | 2 | 0 | 23.1% |\n| \ud83d\ude88 [Auto Deployer](https://hf.co/spaces/MCP-1st-Birthday/Auto-Deployer) | From CSV to Deployed ML API in 30 seconds. | MCP-1st-Birthday | `MCP-1st-Birthday/Auto-Deployer` | `Data Visualization` | 7 | 0 | 22.5% |\n| \ud83c\udfc3 [Z Image Turbo](https://hf.co/spaces/cpuai/Z-Image-Turbo) | Generate images from text prompts | cpuai | `cpuai/Z-Image-Turbo` | `Image Generation` | 23 | 0 | 22.4% |\n| \ud83d\uddbc [Z Image Turbo Free](https://hf.co/spaces/xiaopeng/Z_Image_Turbo_Free) | Z Image Turbo Free | xiaopeng | `xiaopeng/Z\\_Image\\_Turbo\\_Free` | `Image Generation` | 9 | 0 | 21.4% |\n| \ud83e\udd80 [Knowledge Graph Builder-MCP Server](https://hf.co/spaces/Agents-MCP-Hackathon/KGB-mcp) | Transforms any text or webpage into knowledge graphs | Agents-MCP-Hackathon | `Agents-MCP-Hackathon/KGB-mcp` | `Text Analysis` | 19 | 0 | 21.3% |\n| \ud83c\udf0d [Router MCP](https://hf.co/spaces/randalrd/Router-MCP) | Your Gateway to Optimal MCP Servers in Seconds | randalrd | `randalrd/Router-MCP` | `Text Analysis` | 0 | 0 | 20.8% |\n| \ud83d\udcbb [FLUX.Dev LoRA](https://hf.co/spaces/ovi054/FLUX.Dev-LORA-Serverless) | FLUX.1-Dev Text to Image with LoRA | ovi054 | `ovi054/FLUX.Dev-LORA-Serverless` | `Image Generation` | 67 | 0 | 19.9% |\n| \ud83d\udcbb [Multimodal OCR2](https://hf.co/spaces/prithivMLmods/Multimodal-OCR2) | FireRed / Nanonets / Monkey / Thyme / Typhoon / SmolDocling | prithivMLmods | `prithivMLmods/Multimodal-OCR2` | `OCR` | 142 | 0 | 19.3% |\n| \ud83d\uddbc\ufe0f [Z Image Turbo](https://hf.co/spaces/Kentuss/Z_image_NSFW) | Generate high-quality images from text descriptions | Kentuss | `Kentuss/Z\\_image\\_NSFW` | `Image Generation` | 0 | 0 | 18.8% |\n| \ud83d\udd25 [Stable Diffusion 2-1](https://hf.co/spaces/vedantdere/stable-diffusion-MCP) | Generate images from text prompts | vedantdere | `vedantdere/stable-diffusion-MCP` | `Image Generation` | 1 | 0 | 17.3% |\n| \ud83d\udd25 [Qwen Qwen2 VL 7B Instruct](https://hf.co/spaces/amberborici/Qwen-Qwen2-VL-7B-Instruct) | Generate text from images and videos using OCR models | amberborici | `amberborici/Qwen-Qwen2-VL-7B-Instruct` | `Text Generation` | 0 | 0 | 17.3% |\n| \ud83d\udcbb [Qwen-Image 2512 Turbo + LORA](https://hf.co/spaces/ovi054/Qwen-Image-2512-LORA) | Qwen-Image 2512 Text to Image with LORA support | ovi054 | `ovi054/Qwen-Image-2512-LORA` | `Image Generation` | 9 | 0 | 16.2% |\n| \ud83c\udfc3 [SlideDeck AI](https://hf.co/spaces/Agents-MCP-Hackathon/SlideDeck-AI) | Turn any document into Interactive presentation  | Agents-MCP-Hackathon | `Agents-MCP-Hackathon/SlideDeck-AI` | `Text Generation` | 16 | 0 | 16.1% |\n| \ud83c\udfc3 [Z Image Turbo](https://hf.co/spaces/Azure99/Z-Image-Turbo) | Generate images from text prompts | Azure99 | `Azure99/Z-Image-Turbo` | `Image Generation` | 0 | 0 | 16.1% |\n| \ud83d\udc40\ud83d\udca8 [Qwen Image Edit 2511 Fast](https://hf.co/spaces/andrymamboro/image_studio) | Fast 8 step inference of Qwen Image Edit 2509 | andrymamboro | `andrymamboro/image\\_studio` | `Image Editing` | 8 | 0 | 13.8% |\n| \ud83d\udc41 [Search Mcp Servers](https://hf.co/spaces/ysharma/search-mcp-servers) | Search for MCP servers on Huggingface  | ysharma | `ysharma/search-mcp-servers` | `Other` | 3 | 0 | 13.4% |\n",
+      "role": "tool",
+      "tool_calls": null,
+      "function_call": null,
+      "provider_specific_fields": null,
+      "tool_call_id": "functions.space_search:1",
+      "name": "space_search"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"limit\":30,\"mcp\":true,\"query\":\"embedding text analysis sentiment classification CSV data processing\"}",
+            "name": "space_search"
+          },
+          "id": "functions.space_search:2",
+          "type": "function"
+        },
+        {
+          "function": {
+            "arguments": "{\"limit\":30,\"mcp\":true,\"query\":\"knowledge graph document processing OCR multimodal\"}",
+            "name": "space_search"
+          },
+          "id": "functions.space_search:3",
+          "type": "function"
+        },
+        {
+          "function": {
+            "arguments": "{\"command\":\"mkdir -p /root/v2rmp/mcp_test_data\",\"description\":\"Create directory for test data\"}",
+            "name": "bash"
+          },
+          "id": "functions.bash:4",
+          "type": "function"
+        }
+      ],
+      "function_call": null,
+      "provider_specific_fields": null
+    },
+    {
+      "content": "# Space Search Results for the query 'embedding text analysis sentiment classification CSV data processing' (All 11 results)\n\n| Space | Description | Author | ID | Category |  Likes | Trending Score | Relevance |\n|-------|-------------|--------|----|----------|--------|----------------|-----------|\n| \ud83d\udcbb [Mcp Client](https://hf.co/spaces/Yuvaraj7/mcp-client) | Analyze sentiment of text | Yuvaraj7 | `Yuvaraj7/mcp-client` | `Sentiment Analysis` | 3 | 0 | 34.9% |\n| \ud83d\ude88 [Auto Deployer](https://hf.co/spaces/MCP-1st-Birthday/Auto-Deployer) | From CSV to Deployed ML API in 30 seconds. | MCP-1st-Birthday | `MCP-1st-Birthday/Auto-Deployer` | `Data Visualization` | 7 | 0 | 29.0% |\n| \ud83e\udd80 [Mcp Sentiment](https://hf.co/spaces/leomaxLM/mcp-sentiment) | Analyze the sentiment of the given text | leomaxLM | `leomaxLM/mcp-sentiment` | `Sentiment Analysis` | 1 | 0 | 28.1% |\n| \ud83d\udcda [Mcp Sentiment](https://hf.co/spaces/guillaumefrd/mcp-sentiment) | Analyze sentiment of text to determine positivity, negativity, or neutrality | guillaumefrd | `guillaumefrd/mcp-sentiment` | `Sentiment Analysis` | 1 | 0 | 27.7% |\n| \ud83d\udcbb [Mcp Sentiment](https://hf.co/spaces/nouedraogo/mcp-sentiment) | Text Sentiment Analysis | nouedraogo | `nouedraogo/mcp-sentiment` | `Sentiment Analysis` | 1 | 0 | 27.4% |\n| \ud83d\udcc3 [Doc Mcp](https://hf.co/spaces/Agents-MCP-Hackathon/doc-mcp) | RAG on documentations for your agent  | Agents-MCP-Hackathon | `Agents-MCP-Hackathon/doc-mcp` | `Text Generation` | 46 | 0 | 27.2% |\n| \ud83d\ude80 [Mcp Turkish Sentiment](https://hf.co/spaces/emredeveloper/mcp-turkish-sentiment) | Turkish sentiment analysis - T\u00fcrk\u00e7e duygu analizi  | emredeveloper | `emredeveloper/mcp-turkish-sentiment` | `Sentiment Analysis` | 3 | 0 | 26.4% |\n| \ud83e\udd80 [Knowledge Graph Builder-MCP Server](https://hf.co/spaces/Agents-MCP-Hackathon/KGB-mcp) | Transforms any text or webpage into knowledge graphs | Agents-MCP-Hackathon | `Agents-MCP-Hackathon/KGB-mcp` | `Text Analysis` | 19 | 0 | 25.9% |\n| \ud83d\udd2e [SocialNetwork](https://hf.co/spaces/Agents-MCP-Hackathon/SocialNetwork) | World's First AI Native Social Network | Agents-MCP-Hackathon | `Agents-MCP-Hackathon/SocialNetwork` | `Text Generation` | 18 | 0 | 23.7% |\n| \ud83d\udcbb [Mcp Sentiment](https://hf.co/spaces/tuandunghcmut/mcp-sentiment) | Analyze sentiment of text input | tuandunghcmut | `tuandunghcmut/mcp-sentiment` | `Sentiment Analysis` | 0 | 0 | 17.4% |\n| \ud83d\udcda [Mcp Sentiment](https://hf.co/spaces/KtheC/mcp-sentiment) | Analyze sentiment of text input | KtheC | `KtheC/mcp-sentiment` | `Sentiment Analysis` | 0 | 0 | 16.9% |\n",
+      "role": "tool",
+      "tool_calls": null,
+      "function_call": null,
+      "provider_specific_fields": null,
+      "tool_call_id": "functions.space_search:2",
+      "name": "space_search"
+    },
+    {
+      "content": "# Space Search Results for the query 'knowledge graph document processing OCR multimodal' (All 25 results)\n\n| Space | Description | Author | ID | Category |  Likes | Trending Score | Relevance |\n|-------|-------------|--------|----|----------|--------|----------------|-----------|\n| \ud83e\udd73 [FLUX LoRA DLC](https://hf.co/spaces/prithivMLmods/FLUX-LoRA-DLC) | 270+ Impressive LoRAs for Flux.1 | prithivMLmods | `prithivMLmods/FLUX-LoRA-DLC` | `Image Generation` | 1243 | 5 | 76.8% |\n| \ud83c\udf4d [Multimodal OCR](https://hf.co/spaces/prithivMLmods/Multimodal-OCR) | Nanonets / olmOCR / RolmOCR / Aya-Vision / Qwen2-VL-OCR | prithivMLmods | `prithivMLmods/Multimodal-OCR` | `OCR` | 407 | 1 | 74.2% |\n| \ud83e\udd80 [Knowledge Graph Builder-MCP Server](https://hf.co/spaces/Agents-MCP-Hackathon/KGB-mcp) | Transforms any text or webpage into knowledge graphs | Agents-MCP-Hackathon | `Agents-MCP-Hackathon/KGB-mcp` | `Text Analysis` | 19 | 0 | 41.5% |\n| \ud83d\udcbb [Multimodal OCR2](https://hf.co/spaces/prithivMLmods/Multimodal-OCR2) | FireRed / Nanonets / Monkey / Thyme / Typhoon / SmolDocling | prithivMLmods | `prithivMLmods/Multimodal-OCR2` | `OCR` | 142 | 0 | 31.7% |\n| \ud83e\udd6a [core OCR](https://hf.co/spaces/prithivMLmods/core-OCR) | coreOCR / Camel-Doc-OCR / docscopeOCR / MonkeyOCR | prithivMLmods | `prithivMLmods/core-OCR` | `OCR` | 222 | 0 | 29.6% |\n| \ud83c\udfc6 [DeepSeek OCR Experimental](https://hf.co/spaces/prithivMLmods/DeepSeek-OCR-experimental) | Testing for the latest transformers (DeepSeek-OCR). | prithivMLmods | `prithivMLmods/DeepSeek-OCR-experimental` | `OCR` | 6 | 0 | 27.9% |\n| \ud83d\udcbb [DeepSeek-OCR-2-Demo](https://hf.co/spaces/prithivMLmods/DeepSeek-OCR-2-Demo) | DeepSeek-OCR 2: Visual Causal Flow | prithivMLmods | `prithivMLmods/DeepSeek-OCR-2-Demo` | `OCR` | 14 | 0 | 27.0% |\n| \ud83c\udf16 [Multimodal OCR3](https://hf.co/spaces/prithivMLmods/Multimodal-OCR3) | Chandra-OCR / Nanonets-OCR2 / olmOCR-2 / Dots.OCR | prithivMLmods | `prithivMLmods/Multimodal-OCR3` | `OCR` | 68 | 0 | 26.1% |\n| \ud83e\udde0 [Knowledge Graph Builder-MCP Server](https://hf.co/spaces/VirtualOasis/demo-mcp) | Generate a knowledge graph from text or URL | VirtualOasis | `VirtualOasis/demo-mcp` | `Text Analysis` | 0 | 0 | 25.0% |\n| \ud83e\uded3 [DocScope-R1](https://hf.co/spaces/prithivMLmods/DocScope-R1) | Cosmos-R1 / docscopeOCR / Captioner-7B / visionOCR-3B | prithivMLmods | `prithivMLmods/DocScope-R1` | `Text Generation` | 168 | 0 | 25.0% |\n| \ud83c\udfe2 [Karpathy Llm Council](https://hf.co/spaces/burtenshaw/karpathy-llm-council) | Consult a council of LLMs for refined answers | burtenshaw | `burtenshaw/karpathy-llm-council` | `Text Generation` | 262 | 0 | 24.1% |\n| \ud83d\udd25 [Htrflow Mcp](https://hf.co/spaces/Agents-MCP-Hackathon/htrflow_mcp) | Image to text, alto- or page-xml | Agents-MCP-Hackathon | `Agents-MCP-Hackathon/htrflow\\_mcp` | `Text Generation` | 5 | 0 | 20.5% |\n| \u26a1 [Florence2 Vision Models](https://hf.co/spaces/prithivMLmods/florence2-vision-models) | Florence-2 vision models demo. (transformers) | prithivMLmods | `prithivMLmods/florence2-vision-models` | `Image Captioning` | 6 | 0 | 19.8% |\n| \ud83d\udd25 [Htrflow Mcp](https://hf.co/spaces/Gabriel/htrflow_mcp) | Image to text, alto- or page-xml | Gabriel | `Gabriel/htrflow\\_mcp` | `Text Generation` | 1 | 0 | 17.9% |\n| \ud83c\udfc6 [DeepSeek OCR Experimental](https://hf.co/spaces/mcp-tools/DeepSeek-OCR-experimental) | Testing for the latest transformers (DeepSeek-OCR). | mcp-tools | `mcp-tools/DeepSeek-OCR-experimental` | `OCR` | 2 | 0 | 17.2% |\n| \ud83d\udd25 [Qwen Qwen2 VL 7B Instruct](https://hf.co/spaces/amberborici/Qwen-Qwen2-VL-7B-Instruct) | Generate text from images and videos using OCR models | amberborici | `amberborici/Qwen-Qwen2-VL-7B-Instruct` | `Text Generation` | 0 | 0 | 15.1% |\n| \ud83e\udd60 [NVIDIA Nemotron Parse OCR](https://hf.co/spaces/prithivMLmods/NVIDIA-Nemotron-Parse-OCR) | understand document semantics, extract text and tables. | prithivMLmods | `prithivMLmods/NVIDIA-Nemotron-Parse-OCR` | `OCR` | 7 | 0 | 14.9% |\n| \ud83e\udde0 [ModernBERT Zero-Shot NLI](https://hf.co/spaces/DurtyDhiana/ModernBERT-zero-shot-nli) | ModernBERT for reasoning and  zero-shot classification | DurtyDhiana | `DurtyDhiana/ModernBERT-zero-shot-nli` | `Text Analysis` | 0 | 0 | 10.8% |\n| \ud83c\udfe2 [Mcp Semantic Keywords](https://hf.co/spaces/NLarchive/mcp-semantic-keywords) | search for semantic and keywords similarieties ona  text  | NLarchive | `NLarchive/mcp-semantic-keywords` | `Text Analysis` | 0 | 0 | 7.2% |\n| \ud83d\udd0d [Swift MLX documentation research](https://hf.co/spaces/VincentGOURBIN/swift-mlx-qwen3-chatbot) | Search in the Swift MLX documentation | VincentGOURBIN | `VincentGOURBIN/swift-mlx-qwen3-chatbot` | `Chatbots` | 0 | 0 | 3.3% |\n| \ud83d\udc41 [Rosetta Decoder](https://hf.co/spaces/RosettaDecoder/Rosetta-Decoder) | Detect & Translate hieroglyphics | RosettaDecoder | `RosettaDecoder/Rosetta-Decoder` | `Image Detection` | 0 | 0 | 2.9% |\n| \u26a1 [SAM3-Gemma4-CUDA](https://hf.co/spaces/gubernac/SAM3-Gemma4-CUDA) |  Object Multiplex | gubernac | `gubernac/SAM3-Gemma4-CUDA` | `Object Detection` | 0 | 0 | 1.9% |\n| \ud83d\udcc4 [GLM OCR Demo](https://hf.co/spaces/tanakorn123456/test-andre) | Multimodal OCR model for complex document understanding. | tanakorn123456 | `tanakorn123456/test-andre` | `OCR` | 0 | 0 | 0.9% |\n| \u26c4 [Snowman AI](https://hf.co/spaces/nextmarte/snowman-ai) | Autonomous Literature Review Agent with MCP | nextmarte | `nextmarte/snowman-ai` | `Document Analysis` | 0 | 0 | 0.3% |\n| \ud83d\udcda [LyricalCoT Multilingual Poetry Translator](https://hf.co/spaces/AlekseyCalvin/LYRICAL_Chain_of_Translations) | SymbCoT-based Complex Poetry Analysis & Translation | AlekseyCalvin | `AlekseyCalvin/LYRICAL\\_Chain\\_of\\_Translations` | `Language Translation` | 0 | 0 | 0.1% |\n",
+      "role": "tool",
+      "tool_calls": null,
+      "function_call": null,
+      "provider_specific_fields": null,
+      "tool_call_id": "functions.space_search:3",
+      "name": "space_search"
+    },
+    {
+      "content": "(no output)",
+      "role": "tool",
+      "tool_calls": null,
+      "function_call": null,
+      "provider_specific_fields": null,
+      "tool_call_id": "functions.bash:4",
+      "name": "bash"
     }
   ],
   "events": [
     {
-      "timestamp": "2026-05-11T03:08:38.677023",
+      "timestamp": "2026-05-12T21:47:14.976911",
       "event_type": "ready",
       "data": {
         "message": "Agent initialized",
@@ -39,151 +141,264 @@
       }
     },
     {
-      "timestamp": "2026-05-11T03:08:38.677339",
+      "timestamp": "2026-05-12T22:00:44.539847",
       "event_type": "processing",
       "data": {
         "message": "Processing user input"
       }
     },
     {
-      "timestamp": "2026-05-11T03:08:43.694062",
-      "event_type": "assistant_chunk",
-      "data": {
-        "content": "Based"
-      }
-    },
-    {
-      "timestamp": "2026-05-11T03:08:43.712733",
-      "event_type": "assistant_chunk",
-      "data": {
-        "content": " on"
-      }
-    },
-    {
-      "timestamp": "2026-05-11T03:08:43.731315",
-      "event_type": "assistant_chunk",
-      "data": {
-        "content": " the"
-      }
-    },
-    {
-      "timestamp": "2026-05-11T03:08:43.750155",
-      "event_type": "assistant_chunk",
-      "data": {
-        "content": " session"
-      }
-    },
-    {
-      "timestamp": "2026-05-11T03:08:43.768681",
-      "event_type": "assistant_chunk",
-      "data": {
-        "content": " context"
-      }
-    },
-    {
-      "timestamp": "2026-05-11T03:08:43.786567",
-      "event_type": "assistant_chunk",
-      "data": {
-        "content": ","
-      }
-    },
-    {
-      "timestamp": "2026-05-11T03:08:43.804660",
-      "event_type": "assistant_chunk",
-      "data": {
-        "content": " you"
-      }
-    },
-    {
-      "timestamp": "2026-05-11T03:08:43.823251",
-      "event_type": "assistant_chunk",
-      "data": {
-        "content": " are"
-      }
-    },
-    {
-      "timestamp": "2026-05-11T03:08:43.842028",
-      "event_type": "assistant_chunk",
-      "data": {
-        "content": " **"
-      }
-    },
-    {
-      "timestamp": "2026-05-11T03:08:43.865588",
-      "event_type": "assistant_chunk",
-      "data": {
-        "content": "a"
-      }
-    },
-    {
-      "timestamp": "2026-05-11T03:08:43.881012",
-      "event_type": "assistant_chunk",
-      "data": {
-        "content": "erial"
-      }
-    },
-    {
-      "timestamp": "2026-05-11T03:08:43.900514",
-      "event_type": "assistant_chunk",
-      "data": {
-        "content": "bl"
-      }
-    },
-    {
-      "timestamp": "2026-05-11T03:08:43.918991",
-      "event_type": "assistant_chunk",
-      "data": {
-        "content": "anc"
-      }
-    },
-    {
-      "timestamp": "2026-05-11T03:08:43.938555",
-      "event_type": "assistant_chunk",
-      "data": {
-        "content": "as"
-      }
-    },
-    {
-      "timestamp": "2026-05-11T03:08:43.956830",
-      "event_type": "assistant_chunk",
-      "data": {
-        "content": "ervices"
-      }
-    },
-    {
-      "timestamp": "2026-05-11T03:08:43.975461",
-      "event_type": "assistant_chunk",
-      "data": {
-        "content": "**."
-      }
-    },
-    {
-      "timestamp": "2026-05-11T03:08:44.237149",
+      "timestamp": "2026-05-12T22:00:50.875950",
       "event_type": "llm_call",
       "data": {
         "model": "openai/kimi-k2.6:cloud",
-        "latency_ms": 5559,
-        "finish_reason": "stop",
+        "latency_ms": 6335,
+        "finish_reason": "tool_calls",
         "cost_usd": 0.0,
         "kind": "main",
-        "prompt_tokens": 12550,
-        "completion_tokens": 165,
-        "total_tokens": 12715,
+        "prompt_tokens": 12565,
+        "completion_tokens": 328,
+        "total_tokens": 12893,
         "cache_read_tokens": 0,
         "cache_creation_tokens": 0
       }
     },
     {
-      "timestamp": "2026-05-11T03:08:44.237187",
+      "timestamp": "2026-05-12T22:00:50.876144",
       "event_type": "assistant_stream_end",
       "data": {}
     },
     {
-      "timestamp": "2026-05-11T03:08:44.237244",
-      "event_type": "turn_complete",
+      "timestamp": "2026-05-12T22:00:50.876302",
+      "event_type": "tool_call",
       "data": {
-        "history_size": 3,
-        "final_response": "Based on the session context, you are **aerialblancaservices**."
+        "tool": "plan_tool",
+        "arguments": {
+          "todos": [
+            {
+              "content": "Research and discover available MCP tools on Hugging Face Spaces",
+              "id": "1",
+              "status": "in_progress"
+            },
+            {
+              "content": "Create synthetic test datasets for real-world scenarios (text, structured data, multimodal)",
+              "id": "2",
+              "status": "pending"
+            },
+            {
+              "content": "Test MCP server discovery and search capabilities",
+              "id": "3",
+              "status": "pending"
+            },
+            {
+              "content": "Test text/embedding MCP tools with synthetic data",
+              "id": "4",
+              "status": "pending"
+            },
+            {
+              "content": "Test structured data/CSV MCP tools with synthetic data",
+              "id": "5",
+              "status": "pending"
+            },
+            {
+              "content": "Test image generation MCP tools with synthetic prompts",
+              "id": "6",
+              "status": "pending"
+            },
+            {
+              "content": "Compile comprehensive test results and summary",
+              "id": "7",
+              "status": "pending"
+            }
+          ]
+        },
+        "tool_call_id": "functions.plan_tool:0"
+      }
+    },
+    {
+      "timestamp": "2026-05-12T22:00:51.021102",
+      "event_type": "plan_update",
+      "data": {
+        "plan": [
+          {
+            "content": "Research and discover available MCP tools on Hugging Face Spaces",
+            "id": "1",
+            "status": "in_progress"
+          },
+          {
+            "content": "Create synthetic test datasets for real-world scenarios (text, structured data, multimodal)",
+            "id": "2",
+            "status": "pending"
+          },
+          {
+            "content": "Test MCP server discovery and search capabilities",
+            "id": "3",
+            "status": "pending"
+          },
+          {
+            "content": "Test text/embedding MCP tools with synthetic data",
+            "id": "4",
+            "status": "pending"
+          },
+          {
+            "content": "Test structured data/CSV MCP tools with synthetic data",
+            "id": "5",
+            "status": "pending"
+          },
+          {
+            "content": "Test image generation MCP tools with synthetic prompts",
+            "id": "6",
+            "status": "pending"
+          },
+          {
+            "content": "Compile comprehensive test results and summary",
+            "id": "7",
+            "status": "pending"
+          }
+        ]
+      }
+    },
+    {
+      "timestamp": "2026-05-12T22:00:51.021884",
+      "event_type": "tool_output",
+      "data": {
+        "tool": "plan_tool",
+        "tool_call_id": "functions.plan_tool:0",
+        "output": "Plan updated:\n\n  [~] 1. Research and discover available MCP tools on Hugging Face Spaces\n  [ ] 2. Create synthetic test datasets for real-world scenarios (text, structured data, multimodal)\n  [ ] 3. Test MCP server discovery and search capabilities\n  [ ] 4. Test text/embedding MCP tools with synthetic data\n  [ ] 5. Test structured data/CSV MCP tools with synthetic data\n  [ ] 6. Test image generation MCP tools with synthetic prompts\n  [ ] 7. Compile comprehensive test results and summary\n\n0/7 done",
+        "success": true
+      }
+    },
+    {
+      "timestamp": "2026-05-12T22:00:53.447326",
+      "event_type": "llm_call",
+      "data": {
+        "model": "openai/kimi-k2.6:cloud",
+        "latency_ms": 2424,
+        "finish_reason": "tool_calls",
+        "cost_usd": 0.0,
+        "kind": "main",
+        "prompt_tokens": 12868,
+        "completion_tokens": 73,
+        "total_tokens": 12941,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0
+      }
+    },
+    {
+      "timestamp": "2026-05-12T22:00:53.447398",
+      "event_type": "assistant_stream_end",
+      "data": {}
+    },
+    {
+      "timestamp": "2026-05-12T22:00:53.447483",
+      "event_type": "tool_call",
+      "data": {
+        "tool": "space_search",
+        "arguments": {
+          "query": "MCP server tools text embedding image generation structured data CSV",
+          "limit": 50,
+          "mcp": true
+        },
+        "tool_call_id": "functions.space_search:1"
+      }
+    },
+    {
+      "timestamp": "2026-05-12T22:00:55.279833",
+      "event_type": "tool_output",
+      "data": {
+        "tool": "space_search",
+        "tool_call_id": "functions.space_search:1",
+        "output": "# Space Search Results for the query 'MCP server tools text embedding image generation structured data CSV' (All 36 results)\n\n| Space | Description | Author | ID | Category |  Likes | Trending Score | Relevance |\n|-------|-------------|--------|----|----------|--------|----------------|-----------|\n| \ud83d\uddbc\ufe0f [Z Image Turbo](https://hf.co/spaces/mrfakename/Z-Image-Turbo) | Generate high-quality images from text prompts | mrfakename | `mrfakename/Z-Image-Turbo` | `Image Generation` | 3147 | 26 | 82.6% |\n| \u2699\ufe0f [Nymbo Tools MCP](https://hf.co/spaces/Nymbo/Tools) | All-in-one hub of general purpose tools useful for any agent | Nymbo | `Nymbo/Tools` | `Other` | 49 | 4 | 79.4% |\n| \ud83c\udfce\ufe0f\ud83d\udca8 [FLUX.1 [Schnell]](https://hf.co/spaces/evalstate/flux1_schnell) | Generate images from text descriptions | evalstate | `evalstate/flux1\\_schnell` | `Image Generation` | 47 | 2 | 73.0% |\n| \ud83d\uddbc\ufe0f [Z Image Turbo](https://hf.co/spaces/yingzhac/Z_image_NSFW) | Generate high\u2011quality images from text prompts | yingzhac | `yingzhac/Z\\_image\\_NSFW` | `Image Generation` | 157 | 1.5 | 65.5% |\n| \ud83d\uddbc\ufe0f [Qwen Image Fast](https://hf.co/spaces/mcp-tools/Qwen-Image-Fast) | Generate images in 8-steps | mcp-tools | `mcp-tools/Qwen-Image-Fast` | `Image Generation` | 23 | 1 | 63.7% |\n| \ud83d\udd25 [Qwen3-VL-Outpost](https://hf.co/spaces/prithivMLmods/Qwen3-VL-Outpost) | Demo of a collection of Qwen3-VL models | prithivMLmods | `prithivMLmods/Qwen3-VL-Outpost` | `Text Generation` | 206 | 1 | 63.7% |\n| \ud83c\udfc3 [Z Image Turbo](https://hf.co/spaces/mcp-tools/Z-Image-Turbo) | Generate images from text prompts with customizable size | mcp-tools | `mcp-tools/Z-Image-Turbo` | `Image Generation` | 33 | 1 | 63.6% |\n| \ud83d\udd75\ufe0f\u200d\u2642\ufe0f\ud83d\udd75\ufe0f\u200d\u2642\ufe0f [CLIP Interrogator 2](https://hf.co/spaces/fffiloni/CLIP-Interrogator-2) | Generate detailed Stable Diffusion prompts from an image | fffiloni | `fffiloni/CLIP-Interrogator-2` | `Image Captioning` | 1351 | 0.5 | 62.8% |\n| \ud83e\udd56 [FLUX REALISM](https://hf.co/spaces/prithivMLmods/FLUX-REALISM) | flux.1-dev / flux.1-krea-dev | prithivMLmods | `prithivMLmods/FLUX-REALISM` | `Image Generation` | 226 | 1 | 61.9% |\n| \ud83d\udcda [Qwen Image](https://hf.co/spaces/mcp-tools/Qwen-Image) | Qwen-Image - great instruction following and text placement | mcp-tools | `mcp-tools/Qwen-Image` | `Image Generation` | 3 | 0.5 | 55.7% |\n| \ud83d\udcbb [FLUX.2 [Klein] 9B](https://hf.co/spaces/warshanks/FLUX.2-klein-9B) | Generate or edit images from text prompts or existing photos | warshanks | `warshanks/FLUX.2-klein-9B` | `Image Generation` | 21 | 0 | 31.8% |\n| \ud83c\udfc3 [Z Image Turbo](https://hf.co/spaces/jinguotianxin/Z-Image-Turbo) | Generate images from text prompts | jinguotianxin | `jinguotianxin/Z-Image-Turbo` | `Image Generation` | 21 | 0 | 27.2% |\n| \ud83d\udcc3 [Doc Mcp](https://hf.co/spaces/Agents-MCP-Hackathon/doc-mcp) | RAG on documentations for your agent  | Agents-MCP-Hackathon | `Agents-MCP-Hackathon/doc-mcp` | `Text Generation` | 46 | 0 | 26.5% |\n| \ud83c\udfc3 [Z Image](https://hf.co/spaces/Tongyi-MAI/Z-Image) | Generate high-quality images from text prompts | Tongyi-MAI | `Tongyi-MAI/Z-Image` | `Image Generation` | 164 | 0 | 25.5% |\n| \ud83c\udfc3 [Z-Image-Turbo MCP](https://hf.co/spaces/victor/Z-Image-Turbo-MCP) | Generate images from text prompts | victor | `victor/Z-Image-Turbo-MCP` | `Image Generation` | 16 | 0 | 25.5% |\n| \ud83c\udfc3 [OpenAPI2MCP](https://hf.co/spaces/abidlabs/OpenAPI2MCP) | Create a MCP Space from an OpenAPI spec | abidlabs | `abidlabs/OpenAPI2MCP` | `Other` | 23 | 0 | 25.3% |\n| \u2764\ufe0f\u200d\ud83d\udd25 [Qwen3 VL Demo](https://hf.co/spaces/baohuynhbk14/Qwen3-VL-Demo) | An interactive demo for the Qwen3-VL family models. | baohuynhbk14 | `baohuynhbk14/Qwen3-VL-Demo` | `Text Generation` | 54 | 0 | 24.5% |\n| \u26a1 [SearchHFforMCP](https://hf.co/spaces/Chris4K/searchHFforMCP) | Find working MCP servers on HuggingFace Spaces | Chris4K | `Chris4K/searchHFforMCP` | `API Search` | 3 | 0 | 24.4% |\n| \ud83d\udc09 [The DETERMINATOR](https://hf.co/spaces/MCP-1st-Birthday/DETERMINATOR) | Generate research reports with multimedia inputs | MCP-1st-Birthday | `MCP-1st-Birthday/DETERMINATOR` | `Text Generation` | 16 | 0 | 24.4% |\n| \ud83d\udcda [FLUX.1 Krea Dev](https://hf.co/spaces/mcp-tools/FLUX.1-Krea-dev) | Krea Dev - generate natural, lifelike professional images  | mcp-tools | `mcp-tools/FLUX.1-Krea-dev` | `Image Generation` | 11 | 0 | 23.6% |\n| \ud83c\udfce\ufe0f\ud83d\udca8 [FLUX.1 [Schnell]](https://hf.co/spaces/hysts-mcp/FLUX.1-schnell) | Generate images from text prompts | hysts-mcp | `hysts-mcp/FLUX.1-schnell` | `Image Generation` | 2 | 0 | 23.1% |\n| \ud83d\ude88 [Auto Deployer](https://hf.co/spaces/MCP-1st-Birthday/Auto-Deployer) | From CSV to Deployed ML API in 30 seconds. | MCP-1st-Birthday | `MCP-1st-Birthday/Auto-Deployer` | `Data Visualization` | 7 | 0 | 22.5% |\n| \ud83c\udfc3 [Z Image Turbo](https://hf.co/spaces/cpuai/Z-Image-Turbo) | Generate images from text prompts | cpuai | `cpuai/Z-Image-Turbo` | `Image Generation` | 23 | 0 | 22.4% |\n| \ud83d\uddbc [Z Image Turbo Free](https://hf.co/spaces/xiaopeng/Z_Image_Turbo_Free) | Z Image Turbo Free | xiaopeng | `xiaopeng/Z\\_Image\\_Turbo\\_Free` | `Image Generation` | 9 | 0 | 21.4% |\n| \ud83e\udd80 [Knowledge Graph Builder-MCP Server](https://hf.co/spaces/Agents-MCP-Hackathon/KGB-mcp) | Transforms any text or webpage into knowledge graphs | Agents-MCP-Hackathon | `Agents-MCP-Hackathon/KGB-mcp` | `Text Analysis` | 19 | 0 | 21.3% |\n| \ud83c\udf0d [Router MCP](https://hf.co/spaces/randalrd/Router-MCP) | Your Gateway to Optimal MCP Servers in Seconds | randalrd | `randalrd/Router-MCP` | `Text Analysis` | 0 | 0 | 20.8% |\n| \ud83d\udcbb [FLUX.Dev LoRA](https://hf.co/spaces/ovi054/FLUX.Dev-LORA-Serverless) | FLUX.1-Dev Text to Image with LoRA | ovi054 | `ovi054/FLUX.Dev-LORA-Serverless` | `Image Generation` | 67 | 0 | 19.9% |\n| \ud83d\udcbb [Multimodal OCR2](https://hf.co/spaces/prithivMLmods/Multimodal-OCR2) | FireRed / Nanonets / Monkey / Thyme / Typhoon / SmolDocling | prithivMLmods | `prithivMLmods/Multimodal-OCR2` | `OCR` | 142 | 0 | 19.3% |\n| \ud83d\uddbc\ufe0f [Z Image Turbo](https://hf.co/spaces/Kentuss/Z_image_NSFW) | Generate high-quality images from text descriptions | Kentuss | `Kentuss/Z\\_image\\_NSFW` | `Image Generation` | 0 | 0 | 18.8% |\n| \ud83d\udd25 [Stable Diffusion 2-1](https://hf.co/spaces/vedantdere/stable-diffusion-MCP) | Generate images from text prompts | vedantdere | `vedantdere/stable-diffusion-MCP` | `Image Generation` | 1 | 0 | 17.3% |\n| \ud83d\udd25 [Qwen Qwen2 VL 7B Instruct](https://hf.co/spaces/amberborici/Qwen-Qwen2-VL-7B-Instruct) | Generate text from images and videos using OCR models | amberborici | `amberborici/Qwen-Qwen2-VL-7B-Instruct` | `Text Generation` | 0 | 0 | 17.3% |\n| \ud83d\udcbb [Qwen-Image 2512 Turbo + LORA](https://hf.co/spaces/ovi054/Qwen-Image-2512-LORA) | Qwen-Image 2512 Text to Image with LORA support | ovi054 | `ovi054/Qwen-Image-2512-LORA` | `Image Generation` | 9 | 0 | 16.2% |\n| \ud83c\udfc3 [SlideDeck AI](https://hf.co/spaces/Agents-MCP-Hackathon/SlideDeck-AI) | Turn any document into Interactive presentation  | Agents-MCP-Hackathon | `Agents-MCP-Hackathon/SlideDeck-AI` | `Text Generation` | 16 | 0 | 16.1% |\n| \ud83c\udfc3 [Z Image Turbo](https://hf.co/spaces/Azure99/Z-Image-Turbo) | Generate images from text prompts | Azure99 | `Azure99/Z-Image-Turbo` | `Image Generation` | 0 | 0 | 16.1% |\n| \ud83d\udc40\ud83d\udca8 [Qwen Image Edit 2511 Fast](https://hf.co/spaces/andrymamboro/image_studio) | Fast 8 step inference of Qwen Image Edit 2509 | andrymamboro | `andrymamboro/image\\_studio` | `Image Editing` | 8 | 0 | 13.8% |\n| \ud83d\udc41 [Search Mcp Servers](https://hf.co/spaces/ysharma/search-mcp-servers) | Search for MCP servers on Huggingface  | ysharma | `ysharma/search-mcp-servers` | `Other` | 3 | 0 | 13.4% |\n",
+        "success": true
+      }
+    },
+    {
+      "timestamp": "2026-05-12T22:00:58.824262",
+      "event_type": "llm_call",
+      "data": {
+        "model": "openai/kimi-k2.6:cloud",
+        "latency_ms": 3543,
+        "finish_reason": "tool_calls",
+        "cost_usd": 0.0,
+        "kind": "main",
+        "prompt_tokens": 15654,
+        "completion_tokens": 165,
+        "total_tokens": 15819,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0
+      }
+    },
+    {
+      "timestamp": "2026-05-12T22:00:58.824453",
+      "event_type": "assistant_stream_end",
+      "data": {}
+    },
+    {
+      "timestamp": "2026-05-12T22:00:58.824663",
+      "event_type": "tool_call",
+      "data": {
+        "tool": "space_search",
+        "arguments": {
+          "limit": 30,
+          "mcp": true,
+          "query": "embedding text analysis sentiment classification CSV data processing"
+        },
+        "tool_call_id": "functions.space_search:2"
+      }
+    },
+    {
+      "timestamp": "2026-05-12T22:00:58.824682",
+      "event_type": "tool_call",
+      "data": {
+        "tool": "space_search",
+        "arguments": {
+          "limit": 30,
+          "mcp": true,
+          "query": "knowledge graph document processing OCR multimodal"
+        },
+        "tool_call_id": "functions.space_search:3"
+      }
+    },
+    {
+      "timestamp": "2026-05-12T22:00:58.824695",
+      "event_type": "tool_call",
+      "data": {
+        "tool": "bash",
+        "arguments": {
+          "command": "mkdir -p /root/v2rmp/mcp_test_data",
+          "description": "Create directory for test data"
+        },
+        "tool_call_id": "functions.bash:4"
+      }
+    },
+    {
+      "timestamp": "2026-05-12T22:01:00.342370",
+      "event_type": "tool_output",
+      "data": {
+        "tool": "space_search",
+        "tool_call_id": "functions.space_search:2",
+        "output": "# Space Search Results for the query 'embedding text analysis sentiment classification CSV data processing' (All 11 results)\n\n| Space | Description | Author | ID | Category |  Likes | Trending Score | Relevance |\n|-------|-------------|--------|----|----------|--------|----------------|-----------|\n| \ud83d\udcbb [Mcp Client](https://hf.co/spaces/Yuvaraj7/mcp-client) | Analyze sentiment of text | Yuvaraj7 | `Yuvaraj7/mcp-client` | `Sentiment Analysis` | 3 | 0 | 34.9% |\n| \ud83d\ude88 [Auto Deployer](https://hf.co/spaces/MCP-1st-Birthday/Auto-Deployer) | From CSV to Deployed ML API in 30 seconds. | MCP-1st-Birthday | `MCP-1st-Birthday/Auto-Deployer` | `Data Visualization` | 7 | 0 | 29.0% |\n| \ud83e\udd80 [Mcp Sentiment](https://hf.co/spaces/leomaxLM/mcp-sentiment) | Analyze the sentiment of the given text | leomaxLM | `leomaxLM/mcp-sentiment` | `Sentiment Analysis` | 1 | 0 | 28.1% |\n| \ud83d\udcda [Mcp Sentiment](https://hf.co/spaces/guillaumefrd/mcp-sentiment) | Analyze sentiment of text to determine positivity, negativity, or neutrality | guillaumefrd | `guillaumefrd/mcp-sentiment` | `Sentiment Analysis` | 1 | 0 | 27.7% |\n| \ud83d\udcbb [Mcp Sentiment](https://hf.co/spaces/nouedraogo/mcp-sentiment) | Text Sentiment Analysis | nouedraogo | `nouedraogo/mcp-sentiment` | `Sentiment Analysis` | 1 | 0 | 27.4% |\n| \ud83d\udcc3 [Doc Mcp](https://hf.co/spaces/Agents-MCP-Hackathon/doc-mcp) | RAG on documentations for your agent  | Agents-MCP-Hackathon | `Agents-MCP-Hackathon/doc-mcp` | `Text Generation` | 46 | 0 | 27.2% |\n| \ud83d\ude80 [Mcp Turkish Sentiment](https://hf.co/spaces/emredeveloper/mcp-turkish-sentiment) | Turkish sentiment analysis - T\u00fcrk\u00e7e duygu analizi  | emredeveloper | `emredeveloper/mcp-turkish-sentiment` | `Sentiment Analysis` | 3 | 0 | 26.4% |\n| \ud83e\udd80 [Knowledge Graph Builder-MCP Server](https://hf.co/spaces/Agents-MCP-Hackathon/KGB-mcp) | Transforms any text or webpage into knowledge graphs | Agents-MCP-Hackathon | `Agents-MCP-Hackathon/KGB-mcp` | `Text Analysis` | 19 | 0 | 25.9% |\n| \ud83d\udd2e [SocialNetwork](https://hf.co/spaces/Agents-MCP-Hackathon/SocialNetwork) | World's First AI Native Social Network | Agents-MCP-Hackathon | `Agents-MCP-Hackathon/SocialNetwork` | `Text Generation` | 18 | 0 | 23.7% |\n| \ud83d\udcbb [Mcp Sentiment](https://hf.co/spaces/tuandunghcmut/mcp-sentiment) | Analyze sentiment of text input | tuandunghcmut | `tuandunghcmut/mcp-sentiment` | `Sentiment Analysis` | 0 | 0 | 17.4% |\n| \ud83d\udcda [Mcp Sentiment](https://hf.co/spaces/KtheC/mcp-sentiment) | Analyze sentiment of text input | KtheC | `KtheC/mcp-sentiment` | `Sentiment Analysis` | 0 | 0 | 16.9% |\n",
+        "success": true
+      }
+    },
+    {
+      "timestamp": "2026-05-12T22:01:00.342708",
+      "event_type": "tool_output",
+      "data": {
+        "tool": "space_search",
+        "tool_call_id": "functions.space_search:3",
+        "output": "# Space Search Results for the query 'knowledge graph document processing OCR multimodal' (All 25 results)\n\n| Space | Description | Author | ID | Category |  Likes | Trending Score | Relevance |\n|-------|-------------|--------|----|----------|--------|----------------|-----------|\n| \ud83e\udd73 [FLUX LoRA DLC](https://hf.co/spaces/prithivMLmods/FLUX-LoRA-DLC) | 270+ Impressive LoRAs for Flux.1 | prithivMLmods | `prithivMLmods/FLUX-LoRA-DLC` | `Image Generation` | 1243 | 5 | 76.8% |\n| \ud83c\udf4d [Multimodal OCR](https://hf.co/spaces/prithivMLmods/Multimodal-OCR) | Nanonets / olmOCR / RolmOCR / Aya-Vision / Qwen2-VL-OCR | prithivMLmods | `prithivMLmods/Multimodal-OCR` | `OCR` | 407 | 1 | 74.2% |\n| \ud83e\udd80 [Knowledge Graph Builder-MCP Server](https://hf.co/spaces/Agents-MCP-Hackathon/KGB-mcp) | Transforms any text or webpage into knowledge graphs | Agents-MCP-Hackathon | `Agents-MCP-Hackathon/KGB-mcp` | `Text Analysis` | 19 | 0 | 41.5% |\n| \ud83d\udcbb [Multimodal OCR2](https://hf.co/spaces/prithivMLmods/Multimodal-OCR2) | FireRed / Nanonets / Monkey / Thyme / Typhoon / SmolDocling | prithivMLmods | `prithivMLmods/Multimodal-OCR2` | `OCR` | 142 | 0 | 31.7% |\n| \ud83e\udd6a [core OCR](https://hf.co/spaces/prithivMLmods/core-OCR) | coreOCR / Camel-Doc-OCR / docscopeOCR / MonkeyOCR | prithivMLmods | `prithivMLmods/core-OCR` | `OCR` | 222 | 0 | 29.6% |\n| \ud83c\udfc6 [DeepSeek OCR Experimental](https://hf.co/spaces/prithivMLmods/DeepSeek-OCR-experimental) | Testing for the latest transformers (DeepSeek-OCR). | prithivMLmods | `prithivMLmods/DeepSeek-OCR-experimental` | `OCR` | 6 | 0 | 27.9% |\n| \ud83d\udcbb [DeepSeek-OCR-2-Demo](https://hf.co/spaces/prithivMLmods/DeepSeek-OCR-2-Demo) | DeepSeek-OCR 2: Visual Causal Flow | prithivMLmods | `prithivMLmods/DeepSeek-OCR-2-Demo` | `OCR` | 14 | 0 | 27.0% |\n| \ud83c\udf16 [Multimodal OCR3](https://hf.co/spaces/prithivMLmods/Multimodal-OCR3) | Chandra-OCR / Nanonets-OCR2 / olmOCR-2 / Dots.OCR | prithivMLmods | `prithivMLmods/Multimodal-OCR3` | `OCR` | 68 | 0 | 26.1% |\n| \ud83e\udde0 [Knowledge Graph Builder-MCP Server](https://hf.co/spaces/VirtualOasis/demo-mcp) | Generate a knowledge graph from text or URL | VirtualOasis | `VirtualOasis/demo-mcp` | `Text Analysis` | 0 | 0 | 25.0% |\n| \ud83e\uded3 [DocScope-R1](https://hf.co/spaces/prithivMLmods/DocScope-R1) | Cosmos-R1 / docscopeOCR / Captioner-7B / visionOCR-3B | prithivMLmods | `prithivMLmods/DocScope-R1` | `Text Generation` | 168 | 0 | 25.0% |\n| \ud83c\udfe2 [Karpathy Llm Council](https://hf.co/spaces/burtenshaw/karpathy-llm-council) | Consult a council of LLMs for refined answers | burtenshaw | `burtenshaw/karpathy-llm-council` | `Text Generation` | 262 | 0 | 24.1% |\n| \ud83d\udd25 [Htrflow Mcp](https://hf.co/spaces/Agents-MCP-Hackathon/htrflow_mcp) | Image to text, alto- or page-xml | Agents-MCP-Hackathon | `Agents-MCP-Hackathon/htrflow\\_mcp` | `Text Generation` | 5 | 0 | 20.5% |\n| \u26a1 [Florence2 Vision Models](https://hf.co/spaces/prithivMLmods/florence2-vision-models) | Florence-2 vision models demo. (transformers) | prithivMLmods | `prithivMLmods/florence2-vision-models` | `Image Captioning` | 6 | 0 | 19.8% |\n| \ud83d\udd25 [Htrflow Mcp](https://hf.co/spaces/Gabriel/htrflow_mcp) | Image to text, alto- or page-xml | Gabriel | `Gabriel/htrflow\\_mcp` | `Text Generation` | 1 | 0 | 17.9% |\n| \ud83c\udfc6 [DeepSeek OCR Experimental](https://hf.co/spaces/mcp-tools/DeepSeek-OCR-experimental) | Testing for the latest transformers (DeepSeek-OCR). | mcp-tools | `mcp-tools/DeepSeek-OCR-experimental` | `OCR` | 2 | 0 | 17.2% |\n| \ud83d\udd25 [Qwen Qwen2 VL 7B Instruct](https://hf.co/spaces/amberborici/Qwen-Qwen2-VL-7B-Instruct) | Generate text from images and videos using OCR models | amberborici | `amberborici/Qwen-Qwen2-VL-7B-Instruct` | `Text Generation` | 0 | 0 | 15.1% |\n| \ud83e\udd60 [NVIDIA Nemotron Parse OCR](https://hf.co/spaces/prithivMLmods/NVIDIA-Nemotron-Parse-OCR) | understand document semantics, extract text and tables. | prithivMLmods | `prithivMLmods/NVIDIA-Nemotron-Parse-OCR` | `OCR` | 7 | 0 | 14.9% |\n| \ud83e\udde0 [ModernBERT Zero-Shot NLI](https://hf.co/spaces/DurtyDhiana/ModernBERT-zero-shot-nli) | ModernBERT for reasoning and  zero-shot classification | DurtyDhiana | `DurtyDhiana/ModernBERT-zero-shot-nli` | `Text Analysis` | 0 | 0 | 10.8% |\n| \ud83c\udfe2 [Mcp Semantic Keywords](https://hf.co/spaces/NLarchive/mcp-semantic-keywords) | search for semantic and keywords similarieties ona  text  | NLarchive | `NLarchive/mcp-semantic-keywords` | `Text Analysis` | 0 | 0 | 7.2% |\n| \ud83d\udd0d [Swift MLX documentation research](https://hf.co/spaces/VincentGOURBIN/swift-mlx-qwen3-chatbot) | Search in the Swift MLX documentation | VincentGOURBIN | `VincentGOURBIN/swift-mlx-qwen3-chatbot` | `Chatbots` | 0 | 0 | 3.3% |\n| \ud83d\udc41 [Rosetta Decoder](https://hf.co/spaces/RosettaDecoder/Rosetta-Decoder) | Detect & Translate hieroglyphics | RosettaDecoder | `RosettaDecoder/Rosetta-Decoder` | `Image Detection` | 0 | 0 | 2.9% |\n| \u26a1 [SAM3-Gemma4-CUDA](https://hf.co/spaces/gubernac/SAM3-Gemma4-CUDA) |  Object Multiplex | gubernac | `gubernac/SAM3-Gemma4-CUDA` | `Object Detection` | 0 | 0 | 1.9% |\n| \ud83d\udcc4 [GLM OCR Demo](https://hf.co/spaces/tanakorn123456/test-andre) | Multimodal OCR model for complex document understanding. | tanakorn123456 | `tanakorn123456/test-andre` | `OCR` | 0 | 0 | 0.9% |\n| \u26c4 [Snowman AI](https://hf.co/spaces/nextmarte/snowman-ai) | Autonomous Literature Review Agent with MCP | nextmarte | `nextmarte/snowman-ai` | `Document Analysis` | 0 | 0 | 0.3% |\n| \ud83d\udcda [LyricalCoT Multilingual Poetry Translator](https://hf.co/spaces/AlekseyCalvin/LYRICAL_Chain_of_Translations) | SymbCoT-based Complex Poetry Analysis & Translation | AlekseyCalvin | `AlekseyCalvin/LYRICAL\\_Chain\\_of\\_Translations` | `Language Translation` | 0 | 0 | 0.1% |\n",
+        "success": true
+      }
+    },
+    {
+      "timestamp": "2026-05-12T22:01:00.342853",
+      "event_type": "tool_output",
+      "data": {
+        "tool": "bash",
+        "tool_call_id": "functions.bash:4",
+        "output": "(no output)",
+        "success": true
       }
     }
   ],
@@ -1460,7 +1675,7 @@
   ],
   "upload_status": "failed",
   "upload_url": null,
-  "last_save_time": "2026-05-12T22:02:19.995687",
+  "last_save_time": "2026-05-12T22:02:36.112029",
   "personal_upload_status": "success",
   "personal_upload_url": "https://huggingface.co/datasets/aerialblancaservices/ml-intern-sessions"
 }

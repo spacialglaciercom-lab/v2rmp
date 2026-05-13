@@ -188,13 +188,22 @@ pub async fn get_valhalla_matrix(locations: &[VRPSolverStop]) -> Result<DistMatr
         "directions_options": { "units": "kilometers" }
     });
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
     let resp = client
         .post(url)
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("Valhalla request failed: {e}"))?;
+        .map_err(|e| {
+            if e.is_timeout() {
+                "Valhalla request timed out after 15 seconds (network may be unavailable)".to_string()
+            } else {
+                format!("Valhalla request failed: {e}")
+            }
+        })?;
 
     if !resp.status().is_success() {
         return Err(format!("Valhalla HTTP {}", resp.status()));
