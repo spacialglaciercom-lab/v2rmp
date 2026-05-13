@@ -41,3 +41,4 @@ test_dem.tif
 *.core
 .deepseek/
 find_duplicates.py
+session_logs/
