@@ -323,6 +323,109 @@ pub fn solve_cpp(
 
     // Build adjacency list
     let n = nodes.len();
+    let mut adj = build_adjacency_list(n, edges, oneway);
+
+    // Find odd-degree vertices
+    let odd_vertices = find_odd_vertices(&adj, n);
+
+    // Exact Minimum-Weight Perfect Matching (MWPM) using Dynamic Programming.
+    // For graphs with a large number of odd vertices (> 24), we fall back to a greedy heuristic
+    // to prevent exponential time complexity (O(2^N)).
+    let mut duplicate_edges = Vec::new();
+    let num_odd = odd_vertices.len();
+
+    if num_odd > 0 {
+        // 1. All-Pairs Shortest Paths between odd vertices
+        let (dist_matrix, path_matrix) = compute_odd_vertices_apsp(n, &odd_vertices, &adj, edges, nodes, &penalties);
+
+        // 2. Minimum Weight Perfect Matching
+        let pairs = compute_mwpm(num_odd, &dist_matrix);
+
+        // Add the paths for all matched pairs into duplicate_edges
+        duplicate_edges = build_duplicate_edges(&pairs, &path_matrix);
+    }
+
+    // Add duplicate edges
+    for (i, &(u, v, weight, _eidx)) in duplicate_edges.iter().enumerate() {
+        let deadhead_edge_idx = edges.len() + i;
+        adj[u].push(AdjEntry { to: v as u32, weight_m: weight, edge_idx: deadhead_edge_idx });
+        adj[v].push(AdjEntry { to: u as u32, weight_m: weight, edge_idx: deadhead_edge_idx });
+    }
+
+    // Find Eulerian circuit using Hierholzer's algorithm
+    let start_node = if let Some((dep_lat, dep_lon)) = depot {
+        let mut best_node = 0;
+        let mut best_dist = f64::MAX;
+        for (i, node) in nodes.iter().enumerate() {
+            let dist = haversine_m(dep_lat, dep_lon, node.lat, node.lon);
+            if dist < best_dist { best_dist = dist; best_node = i; }
+        }
+        best_node
+    } else if !odd_vertices.is_empty() {
+        odd_vertices[0]
+    } else {
+        0
+    };
+
+    let circuit_with_edges = find_eulerian_circuit(&mut adj, start_node);
+    let circuit: Vec<u32> = circuit_with_edges.iter().map(|(v, _)| *v).collect();
+
+    // Compute metrics
+    let (total_distance_m, deadhead_distance_m, total_segments, turns) = compute_route_metrics(
+        &circuit_with_edges,
+        &circuit,
+        nodes,
+        edges.len()
+    );
+
+    // Compute efficiency
+    let effective_distance_m = total_distance_m - deadhead_distance_m;
+    let efficiency_pct = if total_distance_m > 0.0 {
+        (effective_distance_m / total_distance_m) * 100.0
+    } else {
+        100.0
+    };
+
+    #[allow(unused_variables)]
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+
+    Ok(CppOutput {
+        summary: OptimizeResult {
+            total_distance_km: total_distance_m / 1000.0,
+            total_segments,
+            deadhead_distance_km: deadhead_distance_m / 1000.0,
+            efficiency_pct,
+            turns,
+            elapsed_ms,
+            num_routes: 1,
+        },
+        circuit,
+    })
+}
+
+use std::collections::BinaryHeap;
+use std::cmp::Ordering;
+
+#[derive(Copy, Clone, PartialEq)]
+struct State {
+    cost: f64,
+    position: usize,
+    incoming_edge_idx: Option<usize>,
+}
+impl Eq for State {}
+impl Ord for State {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other.cost.partial_cmp(&self.cost).unwrap_or(Ordering::Equal)
+    }
+}
+impl PartialOrd for State {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Helper function to build an adjacency list from nodes and edges
+fn build_adjacency_list(n: usize, edges: &[RmpEdge], oneway: OnewayMode) -> Vec<Vec<AdjEntry>> {
     let mut adj: Vec<Vec<AdjEntry>> = vec![vec![]; n];
 
     for (idx, edge) in edges.iter().enumerate() {
@@ -350,235 +453,219 @@ pub fn solve_cpp(
             }
         }
     }
+    adj
+}
 
-    // Find odd-degree vertices
+/// Helper function to find vertices with an odd degree
+fn find_odd_vertices(adj: &[Vec<AdjEntry>], n: usize) -> Vec<usize> {
     let mut degrees = vec![0usize; n];
     for (i, adj_list) in adj.iter().enumerate() {
         degrees[i] = adj_list.len();
     }
-    let odd_vertices: Vec<usize> = (0..n).filter(|&i| !degrees[i].is_multiple_of(2)).collect();
+    (0..n).filter(|&i| !degrees[i].is_multiple_of(2)).collect()
+}
 
-    // Exact Minimum-Weight Perfect Matching (MWPM) using Dynamic Programming.
-    // For graphs with a large number of odd vertices (> 24), we fall back to a greedy heuristic
-    // to prevent exponential time complexity (O(2^N)).
-    let mut duplicate_edges: Vec<(usize, usize, f64, usize)> = Vec::new();
+/// Helper function to compute all-pairs shortest paths between odd-degree vertices
+#[allow(clippy::type_complexity)]
+fn compute_odd_vertices_apsp(
+    n: usize,
+    odd_vertices: &[usize],
+    adj: &[Vec<AdjEntry>],
+    edges: &[RmpEdge],
+    nodes: &[RmpNode],
+    penalties: &TurnPenalties,
+) -> (Vec<Vec<f64>>, Vec<Vec<Vec<(usize, usize, f64, usize)>>>) {
     let num_odd = odd_vertices.len();
+    let mut dist_matrix = vec![vec![f64::MAX; num_odd]; num_odd];
+    let mut path_matrix = vec![vec![Vec::new(); num_odd]; num_odd];
 
-    if num_odd > 0 {
-        use std::collections::BinaryHeap;
-        use std::cmp::Ordering;
+    for i in 0..num_odd {
+        let u = odd_vertices[i];
+        let mut dists = vec![f64::MAX; n];
+        let mut prev = vec![None; n];
+        let mut heap = BinaryHeap::new();
 
-        #[derive(Copy, Clone, PartialEq)]
-        struct State {
-            cost: f64,
-            position: usize,
-            incoming_edge_idx: Option<usize>,
-        }
-        impl Eq for State {}
-        impl Ord for State {
-            fn cmp(&self, other: &Self) -> Ordering {
-                other.cost.partial_cmp(&self.cost).unwrap_or(Ordering::Equal)
+        dists[u] = 0.0;
+        heap.push(State {
+            cost: 0.0,
+            position: u,
+            incoming_edge_idx: None,
+        });
+
+        while let Some(State {
+            cost,
+            position,
+            incoming_edge_idx,
+        }) = heap.pop()
+        {
+            if cost > dists[position] {
+                continue;
+            }
+
+            for edge in &adj[position] {
+                let mut penalty = 0.0;
+                if let Some(prev_idx) = incoming_edge_idx {
+                    let prev_edge = &edges[prev_idx];
+                    let (p_from, p_to) = if prev_edge.to as usize == position {
+                        (prev_edge.from as usize, position)
+                    } else {
+                        (prev_edge.to as usize, position)
+                    };
+
+                    let b_in = bearing(
+                        nodes[p_from].lat,
+                        nodes[p_from].lon,
+                        nodes[p_to].lat,
+                        nodes[p_to].lon,
+                    );
+                    let b_out = bearing(
+                        nodes[position].lat,
+                        nodes[position].lon,
+                        nodes[edge.to as usize].lat,
+                        nodes[edge.to as usize].lon,
+                    );
+                    let delta = b_out - b_in;
+
+                    match classify_turn(delta) {
+                        "left" => penalty = penalties.left,
+                        "right" => penalty = penalties.right,
+                        "u_turn" => penalty = penalties.u_turn,
+                        _ => {}
+                    }
+                }
+
+                let next_cost = cost + edge.weight_m + penalty;
+                if next_cost < dists[edge.to as usize] {
+                    dists[edge.to as usize] = next_cost;
+                    prev[edge.to as usize] = Some((position, edge.weight_m, edge.edge_idx));
+                    heap.push(State {
+                        cost: next_cost,
+                        position: edge.to as usize,
+                        incoming_edge_idx: Some(edge.edge_idx),
+                    });
+                }
             }
         }
-        impl PartialOrd for State {
-            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-                Some(self.cmp(other))
+
+        for j in (i + 1)..num_odd {
+            let v = odd_vertices[j];
+            if dists[v] < f64::MAX {
+                dist_matrix[i][j] = dists[v];
+                dist_matrix[j][i] = dists[v];
+
+                let mut path = Vec::new();
+                let mut curr = v;
+                while let Some((p, weight, eidx)) = prev[curr] {
+                    path.push((p, curr, weight, eidx));
+                    curr = p;
+                }
+                path_matrix[i][j] = path;
+            }
+        }
+    }
+
+    (dist_matrix, path_matrix)
+}
+
+/// Helper function to compute minimum-weight perfect matching (MWPM)
+fn compute_mwpm(num_odd: usize, dist_matrix: &[Vec<f64>]) -> Vec<(usize, usize)> {
+    let mut pairs = Vec::new();
+
+    if num_odd <= 24 {
+        // Exact DP (Bitmask DP)
+        let mut memo = vec![f64::MAX; 1 << num_odd];
+        let mut parent = vec![usize::MAX; 1 << num_odd];
+        memo[0] = 0.0;
+
+        for mask in 0..(1 << num_odd) {
+            if memo[mask] == f64::MAX { continue; }
+
+            // Find first unmatched vertex
+            let mut i = 0;
+            while i < num_odd {
+                if (mask & (1 << i)) == 0 { break; }
+                i += 1;
+            }
+            if i == num_odd { continue; }
+
+            #[allow(clippy::needless_range_loop)]
+            for j in (i + 1)..num_odd {
+                if (mask & (1 << j)) == 0 && dist_matrix[i][j] < f64::MAX {
+                    let next_mask = mask | (1 << i) | (1 << j);
+                    let new_cost = memo[mask] + dist_matrix[i][j];
+                    if new_cost < memo[next_mask] {
+                        memo[next_mask] = new_cost;
+                        parent[next_mask] = mask;
+                    }
+                }
             }
         }
 
-        // 1. All-Pairs Shortest Paths between odd vertices
-        let mut dist_matrix = vec![vec![f64::MAX; num_odd]; num_odd];
-        let mut path_matrix = vec![vec![Vec::new(); num_odd]; num_odd];
+        // Backtrack
+        let mut curr = (1 << num_odd) - 1;
+        while curr > 0 {
+            let prev_mask = parent[curr];
+            if prev_mask == usize::MAX { break; } // Safety against disconnected components
+            let diff = curr ^ prev_mask;
 
+            let mut u = usize::MAX;
+            let mut v = usize::MAX;
+            for i in 0..num_odd {
+                if (diff & (1 << i)) != 0 {
+                    if u == usize::MAX { u = i; }
+                    else { v = i; }
+                }
+            }
+            pairs.push((u, v));
+            curr = prev_mask;
+        }
+    } else {
+        // Greedy fallback for very large odd-vertex counts
+        let mut matched = vec![false; num_odd];
         for i in 0..num_odd {
-            let u = odd_vertices[i];
-            let mut dists = vec![f64::MAX; n];
-            let mut prev = vec![None; n];
-            let mut heap = BinaryHeap::new();
-
-            dists[u] = 0.0;
-            heap.push(State {
-                cost: 0.0,
-                position: u,
-                incoming_edge_idx: None,
-            });
-
-            while let Some(State {
-                cost,
-                position,
-                incoming_edge_idx,
-            }) = heap.pop()
-            {
-                if cost > dists[position] {
-                    continue;
-                }
-
-                for edge in &adj[position] {
-                    let mut penalty = 0.0;
-                    if let Some(prev_idx) = incoming_edge_idx {
-                        let prev_edge = &edges[prev_idx];
-                        let (p_from, p_to) = if prev_edge.to as usize == position {
-                            (prev_edge.from as usize, position)
-                        } else {
-                            (prev_edge.to as usize, position)
-                        };
-
-                        let b_in = bearing(
-                            nodes[p_from].lat,
-                            nodes[p_from].lon,
-                            nodes[p_to].lat,
-                            nodes[p_to].lon,
-                        );
-                        let b_out = bearing(
-                            nodes[position].lat,
-                            nodes[position].lon,
-                            nodes[edge.to as usize].lat,
-                            nodes[edge.to as usize].lon,
-                        );
-                        let delta = b_out - b_in;
-
-                        match classify_turn(delta) {
-                            "left" => penalty = penalties.left,
-                            "right" => penalty = penalties.right,
-                            "u_turn" => penalty = penalties.u_turn,
-                            _ => {}
-                        }
-                    }
-
-                    let next_cost = cost + edge.weight_m + penalty;
-                    if next_cost < dists[edge.to as usize] {
-                        dists[edge.to as usize] = next_cost;
-                        prev[edge.to as usize] = Some((position, edge.weight_m, edge.edge_idx));
-                        heap.push(State {
-                            cost: next_cost,
-                            position: edge.to as usize,
-                            incoming_edge_idx: Some(edge.edge_idx),
-                        });
-                    }
-                }
-            }
+            if matched[i] { continue; }
+            let mut best_j = None;
+            let mut best_dist = f64::MAX;
 
             for j in (i + 1)..num_odd {
-                let v = odd_vertices[j];
-                if dists[v] < f64::MAX {
-                    dist_matrix[i][j] = dists[v];
-                    dist_matrix[j][i] = dists[v];
-                    
-                    let mut path = Vec::new();
-                    let mut curr = v;
-                    while let Some((p, weight, eidx)) = prev[curr] {
-                        path.push((p, curr, weight, eidx));
-                        curr = p;
-                    }
-                    path_matrix[i][j] = path;
-                }
-            }
-        }
-
-        // 2. Minimum Weight Perfect Matching
-        let mut pairs = Vec::new();
-        
-        if num_odd <= 24 {
-            // Exact DP (Bitmask DP)
-            let mut memo = vec![f64::MAX; 1 << num_odd];
-            let mut parent = vec![usize::MAX; 1 << num_odd];
-            memo[0] = 0.0;
-
-            for mask in 0..(1 << num_odd) {
-                if memo[mask] == f64::MAX { continue; }
-                
-                // Find first unmatched vertex
-                let mut i = 0;
-                while i < num_odd {
-                    if (mask & (1 << i)) == 0 { break; }
-                    i += 1;
-                }
-                if i == num_odd { continue; }
-
-                for j in (i + 1)..num_odd {
-                    if (mask & (1 << j)) == 0 && dist_matrix[i][j] < f64::MAX {
-                        let next_mask = mask | (1 << i) | (1 << j);
-                        let new_cost = memo[mask] + dist_matrix[i][j];
-                        if new_cost < memo[next_mask] {
-                            memo[next_mask] = new_cost;
-                            parent[next_mask] = mask;
-                        }
-                    }
+                if !matched[j] && dist_matrix[i][j] < best_dist {
+                    best_dist = dist_matrix[i][j];
+                    best_j = Some(j);
                 }
             }
 
-            // Backtrack
-            let mut curr = (1 << num_odd) - 1;
-            while curr > 0 {
-                let prev_mask = parent[curr];
-                if prev_mask == usize::MAX { break; } // Safety against disconnected components
-                let diff = curr ^ prev_mask;
-                
-                let mut u = usize::MAX;
-                let mut v = usize::MAX;
-                for i in 0..num_odd {
-                    if (diff & (1 << i)) != 0 {
-                        if u == usize::MAX { u = i; }
-                        else { v = i; }
-                    }
-                }
-                pairs.push((u, v));
-                curr = prev_mask;
-            }
-        } else {
-            // Greedy fallback for very large odd-vertex counts
-            let mut matched = vec![false; num_odd];
-            for i in 0..num_odd {
-                if matched[i] { continue; }
-                let mut best_j = None;
-                let mut best_dist = f64::MAX;
-                
-                for j in (i + 1)..num_odd {
-                    if !matched[j] && dist_matrix[i][j] < best_dist {
-                        best_dist = dist_matrix[i][j];
-                        best_j = Some(j);
-                    }
-                }
-                
-                if let Some(j) = best_j {
-                    matched[i] = true;
-                    matched[j] = true;
-                    pairs.push((i, j));
-                }
-            }
-        }
-
-        // Add the paths for all matched pairs into duplicate_edges
-        for (u_idx, v_idx) in pairs {
-            let (i, j) = if u_idx < v_idx { (u_idx, v_idx) } else { (v_idx, u_idx) };
-            for &(p, c, weight, eidx) in &path_matrix[i][j] {
-                duplicate_edges.push((p, c, weight, eidx));
+            if let Some(j) = best_j {
+                matched[i] = true;
+                matched[j] = true;
+                pairs.push((i, j));
             }
         }
     }
 
-    // Add duplicate edges
-    for (i, &(u, v, weight, _eidx)) in duplicate_edges.iter().enumerate() {
-        let deadhead_edge_idx = edges.len() + i;
-        adj[u].push(AdjEntry { to: v as u32, weight_m: weight, edge_idx: deadhead_edge_idx });
-        adj[v].push(AdjEntry { to: u as u32, weight_m: weight, edge_idx: deadhead_edge_idx });
-    }
+    pairs
+}
 
-    // Find Eulerian circuit using Hierholzer's algorithm
-    let start_node = if let Some((dep_lat, dep_lon)) = depot {
-        let mut best_node = 0;
-        let mut best_dist = f64::MAX;
-        for (i, node) in nodes.iter().enumerate() {
-            let dist = haversine_m(dep_lat, dep_lon, node.lat, node.lon);
-            if dist < best_dist { best_dist = dist; best_node = i; }
+/// Helper function to build duplicate edges from the MWPM pairs
+#[allow(clippy::type_complexity)]
+fn build_duplicate_edges(
+    pairs: &[(usize, usize)],
+    path_matrix: &[Vec<Vec<(usize, usize, f64, usize)>>],
+) -> Vec<(usize, usize, f64, usize)> {
+    let mut duplicate_edges = Vec::new();
+    for &(u_idx, v_idx) in pairs {
+        let (i, j) = if u_idx < v_idx { (u_idx, v_idx) } else { (v_idx, u_idx) };
+        for &(p, c, weight, eidx) in &path_matrix[i][j] {
+            duplicate_edges.push((p, c, weight, eidx));
         }
-        best_node
-    } else if !odd_vertices.is_empty() {
-        odd_vertices[0]
-    } else {
-        0
-    };
+    }
+    duplicate_edges
+}
 
+/// Helper function to find the Eulerian circuit using Hierholzer's algorithm
+fn find_eulerian_circuit(
+    adj: &mut [Vec<AdjEntry>],
+    start_node: usize,
+) -> Vec<(u32, Option<AdjEntry>)> {
     let mut stack = vec![(start_node as u32, None)];
     let mut circuit_with_edges: Vec<(u32, Option<AdjEntry>)> = Vec::new();
 
@@ -597,20 +684,27 @@ pub fn solve_cpp(
     }
 
     circuit_with_edges.reverse();
-    let circuit: Vec<u32> = circuit_with_edges.iter().map(|(v, _)| *v).collect();
+    circuit_with_edges
+}
 
-    // Compute total distance, deadhead distance, and turn summary
+/// Helper function to compute route metrics including distance and turns
+fn compute_route_metrics(
+    circuit_with_edges: &[(u32, Option<AdjEntry>)],
+    circuit: &[u32],
+    nodes: &[RmpNode],
+    num_original_edges: usize,
+) -> (f64, f64, usize, TurnSummary) {
     let mut total_distance_m = 0.0;
     let mut deadhead_distance_m = 0.0;
     let mut total_segments = 0usize;
     let mut turns = TurnSummary { left: 0, right: 0, u_turn: 0, straight: 0 };
-    let mut edge_traversal_count = vec![0u32; edges.len()];
+    let mut edge_traversal_count = vec![0u32; num_original_edges];
 
     for entry in circuit_with_edges.iter().skip(1) {
         if let Some(e) = &entry.1 {
             total_distance_m += e.weight_m;
             total_segments += 1;
-            if e.edge_idx >= edges.len() {
+            if e.edge_idx >= num_original_edges {
                 deadhead_distance_m += e.weight_m;
             } else {
                 edge_traversal_count[e.edge_idx] += 1;
@@ -640,31 +734,9 @@ pub fn solve_cpp(
         }
     }
 
-    // Compute efficiency
-    let effective_distance_m = total_distance_m - deadhead_distance_m;
-    let efficiency_pct = if total_distance_m > 0.0 {
-        (effective_distance_m / total_distance_m) * 100.0
-    } else {
-        100.0
-    };
-
-    let elapsed_ms = start.elapsed().as_millis() as u64;
-
-    Ok(CppOutput {
-        summary: OptimizeResult {
-            total_distance_km: total_distance_m / 1000.0,
-            total_segments,
-            deadhead_distance_km: deadhead_distance_m / 1000.0,
-            efficiency_pct,
-            turns,
-            elapsed_ms,
-            num_routes: 1,
-        },
-        circuit,
-    })
+    (total_distance_m, deadhead_distance_m, total_segments, turns)
 }
 
-/// Run the Chinese Postman Problem route optimization (filesystem wrapper).
 fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     let start = Instant::now();
 
@@ -724,7 +796,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         }
     };
     #[cfg(not(feature = "ml"))]
-    let embeddings: Option<std::collections::HashMap<usize, Vec<f32>>> = None;
+    let _embeddings: Option<std::collections::HashMap<usize, Vec<f32>>> = None;
 
     // 2. Build VRP Stops
     let mut stops: Vec<VRPSolverStop> = Vec::new();
@@ -781,6 +853,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         .await
         .map_err(|e| anyhow::anyhow!("VRP Solver error: {}", e))?;
 
+    #[allow(unused_variables)]
     let elapsed_ms = start.elapsed().as_millis() as u64;
     let total_dist_km: f64 = output.total_distance_km.parse().unwrap_or(0.0);
 

@@ -55,7 +55,6 @@ use v2rmp::core::ml_legacy::{RouteFeatures, score_route, route_feature_vector};
 use v2rmp::core::nlp::{parse_query, to_vrp_json};
 #[cfg(feature = "ml")]
 use v2rmp::core::nlp::QwenNLParser;
-use std::path::PathBuf;
 
 // ── JSON-RPC / MCP types ───────────────────────────────────────────────────
 
@@ -1282,7 +1281,7 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
             let lon = s.get("lon").and_then(|v| v.as_f64())
                 .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
             let label = s.get("label").and_then(|v| v.as_str())
-                .unwrap_or_else(|| "")
+                .unwrap_or("")
                 .to_string();
             let demand = s.get("demand").and_then(|v| v.as_f64());
             Ok(VRPSolverStop {
@@ -1717,7 +1716,7 @@ fn handle_predict_solver(args: &Value) -> Result<Value> {
                 let lon = s.get("lon").and_then(|v| v.as_f64())
                     .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
                 let label = s.get("label").and_then(|v| v.as_str())
-                    .unwrap_or_else(|| "")
+                    .unwrap_or("")
                     .to_string();
                 let demand = s.get("demand").and_then(|v| v.as_f64());
                 Ok(VRPSolverStop {
@@ -2165,7 +2164,7 @@ fn handle_tune_hyperparams(args: &Value) -> Result<Value> {
 // ── Parse Routing Query handler ──────────────────────────────────────────
 
 fn handle_parse_routing_query(args: &Value) -> Result<Value> {
-    let query = args
+    let _query = args
         .get("query")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing 'query' parameter"))?;
@@ -2452,36 +2451,36 @@ async fn main() -> Result<()> {
                     "extract_osm" => handle_extract_osm(&args).await,
                     "compile" => handle_compile(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "optimize" => handle_optimize(&args).await,
                     "clean" => handle_clean(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "vrp_solve" => handle_vrp_solve(&args).await,
                     "elevation_query" => handle_elevation_query(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "elevation_profile" => handle_elevation_profile(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "list_solvers" => handle_list_solvers(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "haversine_distance" => handle_haversine_distance(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "elevation_stats" => handle_elevation_stats(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "dem_info" => handle_dem_info(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "fuel_estimate" => handle_fuel_estimate(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "inspect_rmp" => handle_inspect_rmp(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "pipeline" => {
                         match tokio::time::timeout(
                             std::time::Duration::from_secs(30),
@@ -2514,25 +2513,25 @@ async fn main() -> Result<()> {
                     }
                     "predict_solver" => handle_predict_solver(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "score_route" => handle_score_route(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "route_embedding" => handle_route_embedding(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "predict_quality" => handle_predict_quality(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "tune_hyperparams" => handle_tune_hyperparams(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "parse_routing_query" => handle_parse_routing_query(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     "submit_feedback" => handle_submit_feedback(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        ,
                     other => {
                         send_err(&req.id, -32602, &format!("Unknown tool: {other}"));
                         continue;
