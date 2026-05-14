@@ -453,90 +453,94 @@ impl App {
             .map(|b| b.previous_view.clone())
             .unwrap_or(View::Home);
 
-        if let Some(path) = selected_path {
-            let path_str = path.to_string_lossy().to_string();
-
-            if let Some(browser) = &self.file_browser {
-                match browser.target_field {
-                    InputField::InputFile => {
-                        self.input_file = Some(path_str.clone());
-                        if self.output_file.is_none() {
-                            let out = path_str
-                                .replace(".geojson", ".rmp")
-                                .replace(".json", ".rmp");
-                            self.output_file = Some(out);
-                        }
-                        self.log(
-                            LogLevel::Success,
-                            format!("Input file selected: {}", path_str),
-                        );
-                        self.current_view = View::Compile;
-                    }
-                    InputField::OutputFile => {
-                        self.output_file = Some(path_str.clone());
-                        self.log(
-                            LogLevel::Success,
-                            format!("Output file selected: {}", path_str),
-                        );
-                        self.current_view = View::Compile;
-                    }
-                    InputField::CacheFile => {
-                        self.cache_file = Some(path_str.clone());
-                        self.log(
-                            LogLevel::Success,
-                            format!("Cache file selected: {}", path_str),
-                        );
-                        self.current_view = View::Optimize;
-                    }
-                    InputField::RouteFile => {
-                        self.route_file = Some(path_str.clone());
-                        self.log(
-                            LogLevel::Success,
-                            format!("Route file selected: {}", path_str),
-                        );
-                        self.current_view = View::Optimize;
-                    }
-                    InputField::CleanInputFile => {
-                        self.clean_input_file = Some(path_str.clone());
-                        if self.clean_output_file.is_none() {
-                            let out = path_str
-                                .replace(".geojson", ".cleaned.geojson")
-                                .replace(".json", ".cleaned.json");
-                            self.clean_output_file = Some(out);
-                        }
-                        self.log(
-                            LogLevel::Success,
-                            format!("Clean input file selected: {}", path_str),
-                        );
-                        self.current_view = View::Clean;
-                    }
-                    InputField::CleanOutputFile => {
-                        self.clean_output_file = Some(path_str.clone());
-                        self.log(
-                            LogLevel::Success,
-                            format!("Clean output file selected: {}", path_str),
-                        );
-                        self.current_view = View::Clean;
-                    }
-                    InputField::VrpWaypointsFile => {
-                        self.vrp_waypoints_file = Some(path_str.clone());
-                        self.log(
-                            LogLevel::Success,
-                            format!("VRP waypoints file selected: {}", path_str),
-                        );
-                        self.current_view = View::Vrp;
-                    }
-                    _ => {
-                        self.current_view = View::Home;
-                    }
-                }
-            }
-        } else {
-            // User cancelled — restore the view they came from
-            self.current_view = previous_view;
-        }
+        let target_field = self.file_browser.as_ref().map(|b| b.target_field.clone());
 
         self.file_browser = None;
+
+        let (Some(path), Some(field)) = (selected_path, target_field) else {
+            // User cancelled — restore the view they came from
+            self.current_view = previous_view;
+            return;
+        };
+
+        let path_str = path.to_string_lossy().to_string();
+        self.apply_file_selection(field, path_str);
+    }
+
+    fn apply_file_selection(&mut self, field: InputField, path_str: String) {
+        match field {
+            InputField::InputFile => {
+                self.input_file = Some(path_str.clone());
+                if self.output_file.is_none() {
+                    let out = path_str
+                        .replace(".geojson", ".rmp")
+                        .replace(".json", ".rmp");
+                    self.output_file = Some(out);
+                }
+                self.log(
+                    LogLevel::Success,
+                    format!("Input file selected: {}", path_str),
+                );
+                self.current_view = View::Compile;
+            }
+            InputField::OutputFile => {
+                self.output_file = Some(path_str.clone());
+                self.log(
+                    LogLevel::Success,
+                    format!("Output file selected: {}", path_str),
+                );
+                self.current_view = View::Compile;
+            }
+            InputField::CacheFile => {
+                self.cache_file = Some(path_str.clone());
+                self.log(
+                    LogLevel::Success,
+                    format!("Cache file selected: {}", path_str),
+                );
+                self.current_view = View::Optimize;
+            }
+            InputField::RouteFile => {
+                self.route_file = Some(path_str.clone());
+                self.log(
+                    LogLevel::Success,
+                    format!("Route file selected: {}", path_str),
+                );
+                self.current_view = View::Optimize;
+            }
+            InputField::CleanInputFile => {
+                self.clean_input_file = Some(path_str.clone());
+                if self.clean_output_file.is_none() {
+                    let out = path_str
+                        .replace(".geojson", ".cleaned.geojson")
+                        .replace(".json", ".cleaned.json");
+                    self.clean_output_file = Some(out);
+                }
+                self.log(
+                    LogLevel::Success,
+                    format!("Clean input file selected: {}", path_str),
+                );
+                self.current_view = View::Clean;
+            }
+            InputField::CleanOutputFile => {
+                self.clean_output_file = Some(path_str.clone());
+                self.log(
+                    LogLevel::Success,
+                    format!("Clean output file selected: {}", path_str),
+                );
+                self.current_view = View::Clean;
+            }
+            InputField::VrpWaypointsFile => {
+                self.vrp_waypoints_file = Some(path_str.clone());
+                self.log(
+                    LogLevel::Success,
+                    format!("VRP waypoints file selected: {}", path_str),
+                );
+                self.current_view = View::Vrp;
+            }
+            _ => {
+                self.current_view = View::Home;
+            }
+        }
     }
 
     pub fn log(&mut self, level: LogLevel, message: impl Into<String>) {
@@ -673,7 +677,10 @@ impl App {
             }
             InputField::VrpWaypointsFile => {
                 self.vrp_waypoints_file = Some(value.clone());
-                self.log(LogLevel::Success, format!("VRP waypoints file set: {}", value));
+                self.log(
+                    LogLevel::Success,
+                    format!("VRP waypoints file set: {}", value),
+                );
             }
             InputField::DepotCoordinates => {
                 let parts: Vec<&str> = value.split(',').collect();
@@ -805,7 +812,6 @@ mod tests {
         app.navigate_up();
         assert_eq!(app.workflow_selection, 0);
     }
-
 
     #[test]
     fn test_app_cancel_input() {
