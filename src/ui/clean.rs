@@ -5,7 +5,6 @@ use crate::app::{App, Status};
 pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let inner = super::draw_panel(f, "Clean Map", area);
 
-
     let cyan = ratatui::style::Color::Cyan;
     let yellow = ratatui::style::Color::Yellow;
     let green = ratatui::style::Color::Green;

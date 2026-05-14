@@ -10,7 +10,7 @@
 use super::super::types::*;
 use super::super::utils::{build_sweep_routes, matrix_get_dist};
 use anyhow::{Context, Result};
-use candle_core::{Device, DType, Tensor};
+use candle_core::{DType, Device, Tensor};
 use candle_nn::{linear, Linear, Module, VarBuilder};
 use std::path::{Path, PathBuf};
 
@@ -191,13 +191,8 @@ fn neural_guided_two_opt(
                 let delta = after - before;
 
                 if scorer.is_some() || delta < -1e-9 {
-                    features.extend_from_slice(&move_features_2opt(
-                        route,
-                        i,
-                        j,
-                        matrix,
-                        total_dist,
-                    ));
+                    features
+                        .extend_from_slice(&move_features_2opt(route, i, j, matrix, total_dist));
                     meta.push((i, j, delta));
                 }
             }
@@ -322,10 +317,17 @@ fn neural_guided_or_opt(
                     .enumerate()
                     .map(|(idx, score)| (idx, score as f64))
                     .collect(),
-                Err(_) => meta.iter().enumerate().map(|(idx, m)| (idx, -m.6)).collect(),
+                Err(_) => meta
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, m)| (idx, -m.6))
+                    .collect(),
             }
         } else {
-            meta.iter().enumerate().map(|(idx, m)| (idx, -m.6)).collect()
+            meta.iter()
+                .enumerate()
+                .map(|(idx, m)| (idx, -m.6))
+                .collect()
         };
 
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -382,7 +384,10 @@ fn solve(
     };
 
     if scorer.is_some() {
-        tracing::info!("Neural-guided solver: MoveScorer loaded. Max iterations: {}", max_iterations);
+        tracing::info!(
+            "Neural-guided solver: MoveScorer loaded. Max iterations: {}",
+            max_iterations
+        );
     } else {
         tracing::info!(
             "Neural-guided solver: MoveScorer not available, falling back to exhaustive 2-opt. Max iterations: {}",
@@ -395,7 +400,6 @@ fn solve(
     for route in &mut routes {
         neural_guided_two_opt(route, matrix, scorer.as_ref(), max_iterations);
     }
-
 
     neural_guided_or_opt(&mut routes, matrix, scorer.as_ref(), max_iterations / 4);
 
@@ -461,7 +465,12 @@ impl VRPSolver for NeuralGuidedSolver {
             .matrix
             .as_ref()
             .ok_or("Neural-guided solver requires a distance matrix")?;
-        let result = solve(matrix, &input.locations, input.num_vehicles, input.hyperparams.as_ref());
+        let result = solve(
+            matrix,
+            &input.locations,
+            input.num_vehicles,
+            input.hyperparams.as_ref(),
+        );
         Ok(result.into_output(input))
     }
 

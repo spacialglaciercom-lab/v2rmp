@@ -17,8 +17,8 @@ mod dem_info_tests {
             path.display()
         );
 
-        let dem = LocalDem::open(path)
-            .expect("Failed to open DEM via GDAL — check GDAL installation");
+        let dem =
+            LocalDem::open(path).expect("Failed to open DEM via GDAL — check GDAL installation");
 
         let info = dem.info();
 

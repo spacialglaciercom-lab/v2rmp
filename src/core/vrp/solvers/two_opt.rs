@@ -88,7 +88,12 @@ impl VRPSolver for TwoOptSolver {
             .matrix
             .as_ref()
             .ok_or("2-Opt solver requires a distance matrix")?;
-        let result = solve(matrix, &input.locations, input.num_vehicles, input.hyperparams.as_ref());
+        let result = solve(
+            matrix,
+            &input.locations,
+            input.num_vehicles,
+            input.hyperparams.as_ref(),
+        );
         Ok(result.into_output(input))
     }
     fn clone_box(&self) -> Box<dyn VRPSolver> {
@@ -98,8 +103,8 @@ impl VRPSolver for TwoOptSolver {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::vrp::test_utils::{make_input, make_stop};
     use super::*;
+    use crate::core::vrp::test_utils::{make_input, make_stop};
 
     #[tokio::test]
     async fn test_two_opt_single_depot() {
@@ -129,7 +134,8 @@ mod tests {
             service_time_secs: None,
             use_time_windows: false,
             window_open: None,
-            window_close: None, hyperparams: None,
+            window_close: None,
+            hyperparams: None,
         };
         let solver = TwoOptSolver;
         let err = solver.solve(&input).await.unwrap_err();
