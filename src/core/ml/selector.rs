@@ -12,8 +12,8 @@ use crate::core::ml::features::InstanceFeatures;
 use crate::core::ml_legacy::predict_solver as rule_predict_solver;
 use crate::core::vrp::types::VRPSolverInput;
 use anyhow::{Context, Result};
-use candle_core::{Device, Tensor, DType};
-use candle_nn::{linear, Module, VarBuilder, Linear};
+use candle_core::{DType, Device, Tensor};
+use candle_nn::{linear, Linear, Module, VarBuilder};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -49,13 +49,16 @@ impl NeuralSelector {
         let lin1 = linear(NUM_FEATURES, HIDDEN1, vb.pp("lin1"))?;
         let lin2 = linear(HIDDEN1, HIDDEN2, vb.pp("lin2"))?;
         let lin3 = linear(HIDDEN2, NUM_SOLVERS, vb.pp("lin3"))?;
-        Ok(Self { lin1, lin2, lin3, device })
+        Ok(Self {
+            lin1,
+            lin2,
+            lin3,
+            device,
+        })
     }
 
     /// Predict best solver using classification (argmax probability).
-    pub fn predict(&self,
-        features: &InstanceFeatures,
-    ) -> Result<NeuralPrediction> {
+    pub fn predict(&self, features: &InstanceFeatures) -> Result<NeuralPrediction> {
         let x = features.to_vector();
         let input = Tensor::from_vec(x, (1, NUM_FEATURES), &self.device)?;
         let h1 = self.lin1.forward(&input)?.relu()?;
@@ -63,14 +66,17 @@ impl NeuralSelector {
         let logits = self.lin3.forward(&h2)?;
         let probs = candle_nn::ops::softmax(&logits, 1)?;
         let vals: Vec<f32> = probs.squeeze(0)?.to_vec1()?;
-        
-        let mut indexed: Vec<(usize, f32)> = vals.iter().enumerate().map(|(i, &v)| (i, v)).collect();
+
+        let mut indexed: Vec<(usize, f32)> =
+            vals.iter().enumerate().map(|(i, &v)| (i, v)).collect();
         // Sort by probability DESCENDING (higher is better)
         indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let best_idx = indexed[0].0;
         let best_prob = indexed[0].1;
-        let runner_up = indexed.get(1).map(|(i, v)| (SOLVER_IDS[*i].to_string(), *v));
+        let runner_up = indexed
+            .get(1)
+            .map(|(i, v)| (SOLVER_IDS[*i].to_string(), *v));
 
         let all_scores: Vec<(String, f64)> = indexed
             .iter()
@@ -111,21 +117,28 @@ pub fn predict_solver(
     if let Some(path) = model_path {
         if path.exists() {
             match NeuralSelector::from_file(path) {
-                Ok(selector) => {
-                    match selector.predict(&features) {
-                        Ok(mut pred) => {
-                            pred.model_used = true;
-                            return Ok(pred);
-                        }
-                        Err(e) => {
-                            println!("DEBUG: Neural selector inference failed: {}", e);
-                            tracing::warn!("Neural selector inference failed: {}. Falling back to rule-based.", e);
-                        }
+                Ok(selector) => match selector.predict(&features) {
+                    Ok(mut pred) => {
+                        pred.model_used = true;
+                        return Ok(pred);
                     }
-                }
+                    Err(e) => {
+                        println!("DEBUG: Neural selector inference failed: {}", e);
+                        tracing::warn!(
+                            "Neural selector inference failed: {}. Falling back to rule-based.",
+                            e
+                        );
+                    }
+                },
                 Err(e) => {
-                    println!("DEBUG: Failed to load neural selector from {:?}: {}", path, e);
-                    tracing::warn!("Failed to load neural selector: {}. Falling back to rule-based.", e);
+                    println!(
+                        "DEBUG: Failed to load neural selector from {:?}: {}",
+                        path, e
+                    );
+                    tracing::warn!(
+                        "Failed to load neural selector: {}. Falling back to rule-based.",
+                        e
+                    );
                 }
             }
         } else {
@@ -136,17 +149,15 @@ pub fn predict_solver(
         let default_path = default_model_path();
         if default_path.exists() {
             match NeuralSelector::from_file(&default_path) {
-                Ok(selector) => {
-                    match selector.predict(&features) {
-                        Ok(mut pred) => {
-                            pred.model_used = true;
-                            return Ok(pred);
-                        }
-                        Err(e) => {
-                            tracing::warn!("Neural selector inference failed (default path): {}. Falling back to rule-based.", e);
-                        }
+                Ok(selector) => match selector.predict(&features) {
+                    Ok(mut pred) => {
+                        pred.model_used = true;
+                        return Ok(pred);
                     }
-                }
+                    Err(e) => {
+                        tracing::warn!("Neural selector inference failed (default path): {}. Falling back to rule-based.", e);
+                    }
+                },
                 Err(e) => {
                     tracing::warn!("Failed to load neural selector from default path: {}. Falling back to rule-based.", e);
                 }
@@ -155,8 +166,7 @@ pub fn predict_solver(
     }
 
     // Fallback: rule-based
-    let legacy = rule_predict_solver(&crate::core::ml_legacy::RouteFeatures::from_input(input)
-    );
+    let legacy = rule_predict_solver(&crate::core::ml_legacy::RouteFeatures::from_input(input));
     let all_scores: Vec<(String, f64)> = legacy.all_scores;
     let runner_up = legacy.runner_up.map(|(id, score)| (id, score as f32));
     Ok(NeuralPrediction {
@@ -221,8 +231,8 @@ mod tests {
             make_stop(2.0, 0.0, "b"),
         ];
         let input = make_input(stops, 1);
-        let pred = predict_solver(&input, Some(Path::new("/nonexistent/model.safetensors"))
-        ).unwrap();
+        let pred =
+            predict_solver(&input, Some(Path::new("/nonexistent/model.safetensors"))).unwrap();
         assert!(!pred.recommended.is_empty());
         assert!(pred.confidence > 0.0);
     }

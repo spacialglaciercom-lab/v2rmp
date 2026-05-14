@@ -29,7 +29,8 @@ pub(crate) mod test_utils {
             service_time_secs: None,
             use_time_windows: false,
             window_open: None,
-            window_close: None, hyperparams: None,
+            window_close: None,
+            hyperparams: None,
         }
     }
 }

@@ -14,7 +14,8 @@ fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize) 
         };
     }
 
-    let route_indices = crate::core::vrp::utils::build_sweep_routes(matrix, locations, num_vehicles);
+    let route_indices =
+        crate::core::vrp::utils::build_sweep_routes(matrix, locations, num_vehicles);
 
     let mut total_distance = 0.0;
     let mut total_time = 0.0;
@@ -61,8 +62,8 @@ impl VRPSolver for SweepSolver {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::vrp::test_utils::{make_input, make_stop};
     use super::*;
+    use crate::core::vrp::test_utils::{make_input, make_stop};
 
     #[tokio::test]
     async fn test_sweep_single_depot() {
@@ -93,7 +94,8 @@ mod tests {
             service_time_secs: None,
             use_time_windows: false,
             window_open: None,
-            window_close: None, hyperparams: None,
+            window_close: None,
+            hyperparams: None,
         };
         let solver = SweepSolver;
         let err = solver.solve(&input).await.unwrap_err();

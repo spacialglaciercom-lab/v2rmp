@@ -1,9 +1,9 @@
 #![cfg(feature = "ml")]
-use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective, VRPSolver};
-use v2rmp::core::vrp::utils::build_haversine_matrix;
+use std::time::Instant;
 use v2rmp::core::vrp::solvers::neural_guided::NeuralGuidedSolver;
 use v2rmp::core::vrp::solvers::two_opt::TwoOptSolver;
-use std::time::Instant;
+use v2rmp::core::vrp::types::{VRPSolver, VRPSolverInput, VRPSolverStop, VrpObjective};
+use v2rmp::core::vrp::utils::build_haversine_matrix;
 
 fn make_stop(lat: f64, lon: f64, label: &str) -> VRPSolverStop {
     VRPSolverStop {
@@ -21,8 +21,14 @@ async fn benchmark_neural_vs_2opt() {
     let mut stops = vec![make_stop(0.0, 0.0, "depot")];
     for x in 0..7 {
         for y in 0..7 {
-            if x == 0 && y == 0 { continue; }
-            stops.push(make_stop(x as f64 * 0.1, y as f64 * 0.1, &format!("stop_{}_{}", x, y)));
+            if x == 0 && y == 0 {
+                continue;
+            }
+            stops.push(make_stop(
+                x as f64 * 0.1,
+                y as f64 * 0.1,
+                &format!("stop_{}_{}", x, y),
+            ));
         }
     }
 
@@ -46,21 +52,33 @@ async fn benchmark_neural_vs_2opt() {
     let start = Instant::now();
     let out_2opt = solver_2opt.solve(&input).await.unwrap();
     let duration_2opt = start.elapsed();
-    println!("TwoOptSolver: dist = {}, time = {:?}", out_2opt.total_distance_km, duration_2opt);
+    println!(
+        "TwoOptSolver: dist = {}, time = {:?}",
+        out_2opt.total_distance_km, duration_2opt
+    );
 
     let solver_neural = NeuralGuidedSolver;
     let start = Instant::now();
     let out_neural = solver_neural.solve(&input).await.unwrap();
     let duration_neural = start.elapsed();
-    println!("NeuralGuidedSolver: dist = {}, time = {:?}", out_neural.total_distance_km, duration_neural);
-    
+    println!(
+        "NeuralGuidedSolver: dist = {}, time = {:?}",
+        out_neural.total_distance_km, duration_neural
+    );
+
     let dist_2opt: f64 = out_2opt.total_distance_km.parse().unwrap();
     let dist_neural: f64 = out_neural.total_distance_km.parse().unwrap();
-    
+
     if dist_neural < dist_2opt {
-        println!("NeuralGuidedSolver improved result by {:.2}%", (dist_2opt - dist_neural) / dist_2opt * 100.0);
+        println!(
+            "NeuralGuidedSolver improved result by {:.2}%",
+            (dist_2opt - dist_neural) / dist_2opt * 100.0
+        );
     } else if dist_neural > dist_2opt {
-        println!("NeuralGuidedSolver was {:.2}% worse than 2-Opt", (dist_neural - dist_2opt) / dist_2opt * 100.0);
+        println!(
+            "NeuralGuidedSolver was {:.2}% worse than 2-Opt",
+            (dist_neural - dist_2opt) / dist_2opt * 100.0
+        );
     } else {
         println!("Both solvers produced the same distance.");
     }
