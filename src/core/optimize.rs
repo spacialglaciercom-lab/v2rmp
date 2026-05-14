@@ -458,7 +458,8 @@ pub fn solve_cpp(
                 }
             }
 
-            for j in (i + 1)..num_odd {
+            #[allow(clippy::needless_range_loop)]
+                for j in (i + 1)..num_odd {
                 let v = odd_vertices[j];
                 if dists[v] < f64::MAX {
                     dist_matrix[i][j] = dists[v];
@@ -495,6 +496,7 @@ pub fn solve_cpp(
                 }
                 if i == num_odd { continue; }
 
+                #[allow(clippy::needless_range_loop)]
                 for j in (i + 1)..num_odd {
                     if (mask & (1 << j)) == 0 && dist_matrix[i][j] < f64::MAX {
                         let next_mask = mask | (1 << i) | (1 << j);
@@ -533,6 +535,7 @@ pub fn solve_cpp(
                 let mut best_j = None;
                 let mut best_dist = f64::MAX;
                 
+                #[allow(clippy::needless_range_loop)]
                 for j in (i + 1)..num_odd {
                     if !matched[j] && dist_matrix[i][j] < best_dist {
                         best_dist = dist_matrix[i][j];
@@ -724,7 +727,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         }
     };
     #[cfg(not(feature = "ml"))]
-    let embeddings: Option<std::collections::HashMap<usize, Vec<f32>>> = None;
+    let _embeddings: Option<std::collections::HashMap<usize, Vec<f32>>> = None;
 
     // 2. Build VRP Stops
     let mut stops: Vec<VRPSolverStop> = Vec::new();
@@ -781,7 +784,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         .await
         .map_err(|e| anyhow::anyhow!("VRP Solver error: {}", e))?;
 
-    let elapsed_ms = start.elapsed().as_millis() as u64;
+    let _elapsed_ms = start.elapsed().as_millis() as u64;
     let total_dist_km: f64 = output.total_distance_km.parse().unwrap_or(0.0);
 
     // ── Online Learning Feedback ─────────────────────────────────────
