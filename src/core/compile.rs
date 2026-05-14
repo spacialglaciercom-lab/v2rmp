@@ -258,4 +258,60 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Failed to open input GeoJSON"));
     }
+
+    #[test]
+    fn test_prune_disconnected_components_normal() {
+        // Largest component (0, 1, 2)
+        // Smaller component (3, 4)
+        // Even smaller (5)
+        let mut nodes = vec![
+            (0.0, 0.0), // 0
+            (0.0, 1.0), // 1
+            (1.0, 0.0), // 2
+            (5.0, 5.0), // 3
+            (5.0, 6.0), // 4
+            (9.0, 9.0), // 5
+        ];
+
+        let mut edges = vec![
+            (0, 1, 10.0, 0), // in component 1
+            (1, 2, 10.0, 0), // in component 1
+            (3, 4, 10.0, 0), // in component 2
+        ];
+
+        prune_disconnected_components(&mut nodes, &mut edges);
+
+        // Only the largest component should remain (size 3)
+        assert_eq!(nodes.len(), 3);
+        assert_eq!(edges.len(), 2);
+
+        // New node IDs should be mapped from 0..2
+        assert_eq!(nodes, vec![(0.0, 0.0), (0.0, 1.0), (1.0, 0.0)]);
+        assert_eq!(edges, vec![(0, 1, 10.0, 0), (1, 2, 10.0, 0)]);
+    }
+
+    #[test]
+    fn test_prune_disconnected_components_single() {
+        let mut nodes = vec![(0.0, 0.0), (0.0, 1.0)];
+        let mut edges = vec![(0, 1, 10.0, 0)];
+
+        prune_disconnected_components(&mut nodes, &mut edges);
+
+        // Should remain unchanged
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(edges.len(), 1);
+        assert_eq!(nodes, vec![(0.0, 0.0), (0.0, 1.0)]);
+        assert_eq!(edges, vec![(0, 1, 10.0, 0)]);
+    }
+
+    #[test]
+    fn test_prune_disconnected_components_empty() {
+        let mut nodes = vec![];
+        let mut edges = vec![];
+
+        prune_disconnected_components(&mut nodes, &mut edges);
+
+        assert!(nodes.is_empty());
+        assert!(edges.is_empty());
+    }
 }
