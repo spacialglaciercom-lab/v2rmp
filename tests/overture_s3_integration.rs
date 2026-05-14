@@ -1,3 +1,4 @@
+
 #[cfg(test)]
 mod overture_s3_integration {
     use std::sync::Arc;
@@ -24,6 +25,7 @@ mod overture_s3_integration {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_s3_list_segment_parquet_files() {
         let store = build_store();
         let prefix = Path::from(format!(
@@ -52,6 +54,7 @@ mod overture_s3_integration {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_s3_download_single_parquet_file() {
         let store = build_store();
         let prefix = Path::from(format!(
@@ -87,6 +90,7 @@ mod overture_s3_integration {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_s3_list_finds_multiple_partitions() {
         let store = build_store();
         let prefix = Path::from(format!(

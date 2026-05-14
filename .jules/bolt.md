@@ -20,3 +20,6 @@
 ## 2026-05-08 - [Avoid Redundant Allocations]
 **Learning:** Using `std::slice::from_ref(item)` is a zero-cost way to pass a single item to a function expecting a slice, avoiding unnecessary vector allocations or clones that occur with `&[item.clone()]`.
 **Action:** Prefer `std::slice::from_ref` for performance-critical paths where single items are passed as slices.
+## 2026-05-14 - [Test Stability & Agent Integration]
+**Learning:** When developing MCP tools and automated agents, robust error handling and conditional test execution are crucial. Tests dependent on large files or specific ML models (e.g. `test_solver_selector_loading`, `test_dem_info_opens_and_returns_metadata`) should gracefully skip execution if dependencies are missing, rather than failing the CI pipeline. Furthermore, complex CLI inputs passed via JSON to agents require precise `serde` aliases to align JSON payload keys with internal struct properties (e.g. mapping JSON `num_vehicles` to struct `vehicles`).
+**Action:** 1. Check for expected environment state (like model files) before test execution and skip if necessary. 2. Verify `serde` macros on payload structs to ensure exact alignment with JSON schema when building agent tooling.

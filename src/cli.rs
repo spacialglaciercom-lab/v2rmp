@@ -543,6 +543,7 @@ struct OptimizeArgs {
 
     /// Number of vehicles (for VRP mode only)
     #[arg(long, default_value_t = 1)]
+    #[serde(default = "default_vehicles", alias = "num_vehicles")]
     vehicles: usize,
 
     /// Solver algorithm for VRP mode (clarke_wright, sweep, two_opt, or_opt, default)
