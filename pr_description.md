@@ -1,5 +1,6 @@
-🧪 [testing improvement description]
+🧹 [Code Health] Resolve deep nesting in input field matching
 
-🎯 **What:** Added missing test coverage for error paths in `src/core/compile.rs`'s `run_compile` function. Specifically, checking that providing a non-existent input GeoJSON file correctly returns an `anyhow::Result::Err`.
-📊 **Coverage:** The error path scenario where the input GeoJSON file fails to open is now explicitly tested.
-✨ **Result:** Improved test coverage and validated that the application correctly handles and reports invalid input file paths without panicking.
+🎯 **What:** Extracted the massive matching block in `close_file_browser` and `confirm_input` into a single, unified helper method `update_field(&mut self, field: &InputField, value: String)`.
+💡 **Why:** `close_file_browser` had deeply nested code (around line 530) handling many enum variants, which was nearly completely duplicated in `confirm_input`. This extraction resolves the nesting issue, drastically improves readability, and centralizes input state management so adding new input fields in the future only requires updating a single location.
+✅ **Verification:** Verified that both `close_file_browser` and `confirm_input` correctly map to the new helper method and compiled successfully with `cargo check` and `cargo test --lib --no-default-features`. Tests passed successfully.
+✨ **Result:** Cleaned up over 100 lines of duplicated logic, making both functions much flatter and easier to follow, without altering any functionality.

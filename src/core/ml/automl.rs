@@ -8,7 +8,7 @@
 use crate::core::ml::features::InstanceFeatures;
 pub use crate::core::vrp::types::SolverHyperparams;
 use anyhow::{Context, Result};
-use candle_core::{Device, DType, Tensor};
+use candle_core::{DType, Device, Tensor};
 use candle_nn::{linear, Linear, Module, VarBuilder};
 use std::path::Path;
 
@@ -97,16 +97,20 @@ pub fn predict_hyperparams(features: &InstanceFeatures) -> SolverHyperparams {
     let path = default_model_path();
     if path.exists() {
         match HyperparamPredictor::from_file(&path) {
-            Ok(model) => {
-                match model.predict(features) {
-                    Ok(params) => return params,
-                    Err(e) => {
-                        tracing::warn!("Hyperparam predictor inference failed: {}. Falling back to defaults.", e);
-                    }
+            Ok(model) => match model.predict(features) {
+                Ok(params) => return params,
+                Err(e) => {
+                    tracing::warn!(
+                        "Hyperparam predictor inference failed: {}. Falling back to defaults.",
+                        e
+                    );
                 }
-            }
+            },
             Err(e) => {
-                tracing::warn!("Failed to load hyperparam predictor: {}. Falling back to defaults.", e);
+                tracing::warn!(
+                    "Failed to load hyperparam predictor: {}. Falling back to defaults.",
+                    e
+                );
             }
         }
     }
