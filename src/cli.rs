@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
@@ -1195,6 +1196,7 @@ async fn run_serve_cmd(_args: ServeArgs) -> Result<()> {
 }
 
 #[cfg(feature = "ml")]
+#[allow(dead_code)]
 async fn run_embed_cmd(args: EmbedArgs, json: bool) -> Result<()> {
     if !json {
         tracing::info!("Generating embeddings for {} texts...", args.text.len());
