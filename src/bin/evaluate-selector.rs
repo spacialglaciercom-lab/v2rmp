@@ -158,7 +158,7 @@ fn main() {
         let input = make_input(stops.clone(), n_vehicles, objective.clone());
 
         // Neural prediction
-        let pred = predict_solver(&input, None).unwrap_or(NeuralPrediction {
+        let pred = predict_solver(&input, None).unwrap_or(NeuralPrediction { model_used: true,
             recommended: "default".to_string(),
             confidence: 0.0,
             runner_up: None,
