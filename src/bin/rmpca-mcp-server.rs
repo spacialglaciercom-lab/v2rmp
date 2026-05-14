@@ -55,7 +55,6 @@ use v2rmp::core::ml_legacy::{RouteFeatures, score_route, route_feature_vector};
 use v2rmp::core::nlp::{parse_query, to_vrp_json};
 #[cfg(feature = "ml")]
 use v2rmp::core::nlp::QwenNLParser;
-use std::path::PathBuf;
 
 // ── JSON-RPC / MCP types ───────────────────────────────────────────────────
 
@@ -2165,7 +2164,7 @@ fn handle_tune_hyperparams(args: &Value) -> Result<Value> {
 // ── Parse Routing Query handler ──────────────────────────────────────────
 
 fn handle_parse_routing_query(args: &Value) -> Result<Value> {
-    let query = args
+    let _query = args
         .get("query")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing 'query' parameter"))?;
