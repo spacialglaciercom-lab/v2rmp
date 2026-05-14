@@ -724,7 +724,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         }
     };
     #[cfg(not(feature = "ml"))]
-    let embeddings: Option<std::collections::HashMap<usize, Vec<f32>>> = None;
+    let _embeddings: Option<std::collections::HashMap<usize, Vec<f32>>> = None;
 
     // 2. Build VRP Stops
     let mut stops: Vec<VRPSolverStop> = Vec::new();
