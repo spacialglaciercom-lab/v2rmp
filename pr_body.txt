@@ -1,0 +1,4 @@
+🎯 **What:** Extracted the deeply nested `match` statement in `close_file_browser` (`src/app.rs`) into a separate `handle_file_selection` helper method. Uses early returns via `.take()` to flatten control flow.
+💡 **Why:** `close_file_browser` contained a large inline match spanning nearly 80 lines and indented deeply, making it hard to follow. Separating the dispatch logic from the browser state teardown logic improves maintainability and readability.
+✅ **Verification:** Verified by running `cargo check` and `cargo test`. All standard tests pass (1 failing integration test relates to an expected missing local file, `dem_info_tests::test_dem_info_opens_and_returns_metadata`).
+✨ **Result:** A simplified `close_file_browser` function and a cleanly separated `handle_file_selection` method that clearly maps input types to application state mutations.

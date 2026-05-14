@@ -42,7 +42,11 @@ impl VRPSolver for DefaultSolver {
         let mut with_return = route_indices;
         with_return.push(0);
 
-        let max_iter = input.hyperparams.as_ref().map(|p| p.max_iterations).unwrap_or(300);
+        let max_iter = input
+            .hyperparams
+            .as_ref()
+            .map(|p| p.max_iterations)
+            .unwrap_or(300);
         let improved = two_opt_improve(matrix, &with_return, max_iter);
 
         let mut total_dist = 0.0;
@@ -57,7 +61,7 @@ impl VRPSolver for DefaultSolver {
             total_distance: total_dist,
             total_time,
         };
-        
+
         Ok(result.into_output(input))
     }
     fn clone_box(&self) -> Box<dyn VRPSolver> {
@@ -67,8 +71,8 @@ impl VRPSolver for DefaultSolver {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::vrp::test_utils::{make_input, make_stop};
     use super::*;
+    use crate::core::vrp::test_utils::{make_input, make_stop};
 
     #[tokio::test]
     async fn test_default_single_depot() {
@@ -98,7 +102,8 @@ mod tests {
             service_time_secs: None,
             use_time_windows: false,
             window_open: None,
-            window_close: None, hyperparams: None,
+            window_close: None,
+            hyperparams: None,
         };
         let solver = DefaultSolver;
         let err = solver.solve(&input).await.unwrap_err();

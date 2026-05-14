@@ -14,7 +14,10 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
             if let Some(ref path) = app.vrp_csv_file {
                 ui.colored_label(egui::Color32::from_rgb(80, 220, 80), path);
             } else {
-                ui.colored_label(egui::Color32::from_rgb(220, 200, 60), "(not set — browse for a CSV)");
+                ui.colored_label(
+                    egui::Color32::from_rgb(220, 200, 60),
+                    "(not set — browse for a CSV)",
+                );
             }
             ui.horizontal(|ui| {
                 if ui.button("Browse…").clicked() {
@@ -24,7 +27,10 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
                     {
                         let path_str = path.display().to_string();
                         app.vrp_csv_file = Some(path_str.clone());
-                        app.log(LogLevel::Success, format!("Coordinates CSV set: {}", path_str));
+                        app.log(
+                            LogLevel::Success,
+                            format!("Coordinates CSV set: {}", path_str),
+                        );
                     }
                 }
                 if ui.button("✕ Clear").clicked() {
@@ -51,7 +57,10 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
                         let path_str = path.display().to_string();
                         app.vrp_input_file = Some(path_str.clone());
                         app.load_rmp(&path);
-                        app.log(LogLevel::Success, format!("Road network loaded: {}", path_str));
+                        app.log(
+                            LogLevel::Success,
+                            format!("Road network loaded: {}", path_str),
+                        );
                     }
                 }
                 if ui.button("✕ Clear").clicked() {
@@ -68,7 +77,10 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
                 if ui.button("Browse…").clicked() {
                     if let Some(path) = rfd::FileDialog::new().pick_folder() {
                         app.vrp_output_dir = path.display().to_string();
-                        app.log(LogLevel::Success, format!("Output dir: {}", app.vrp_output_dir));
+                        app.log(
+                            LogLevel::Success,
+                            format!("Output dir: {}", app.vrp_output_dir),
+                        );
                     }
                 }
             });
@@ -78,7 +90,11 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
         ui.group(|ui| {
             ui.heading("Vehicles & Algorithm");
             ui.horizontal(|ui| {
-                ui.add(egui::DragValue::new(&mut app.vrp_vehicles).speed(1).range(1..=100));
+                ui.add(
+                    egui::DragValue::new(&mut app.vrp_vehicles)
+                        .speed(1)
+                        .range(1..=100),
+                );
                 ui.label("Vehicles");
             });
 
@@ -89,7 +105,7 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
                     for opt in &algo_options {
                         ui.selectable_value(&mut app.vrp_algo, opt.to_string(), *opt);
                     }
-            });
+                });
         });
 
         // Capacity
@@ -97,7 +113,11 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
             ui.heading("Capacity");
             let mut cap_val = app.vrp_capacity.unwrap_or(0.0);
             ui.horizontal(|ui| {
-                ui.add(egui::DragValue::new(&mut cap_val).speed(1.0).range(0.0..=10000.0));
+                ui.add(
+                    egui::DragValue::new(&mut cap_val)
+                        .speed(1.0)
+                        .range(0.0..=10000.0),
+                );
                 ui.label("Vehicle capacity");
                 if cap_val > 0.0 {
                     app.vrp_capacity = Some(cap_val);
@@ -114,7 +134,10 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
         ui.group(|ui| {
             super::status_label(ui, &app.vrp_status);
             let can_run = app.vrp_csv_file.is_some();
-            if ui.add_enabled(can_run, egui::Button::new("🚀 Run VRP Solver")).clicked() {
+            if ui
+                .add_enabled(can_run, egui::Button::new("🚀 Run VRP Solver"))
+                .clicked()
+            {
                 run_vrp(app);
             }
         });
@@ -142,8 +165,17 @@ fn run_vrp(app: &mut GuiApp) {
         }
     };
 
-    app.vrp_status = Status::Running { progress: 0, message: "Solving VRP…".to_string() };
-    app.log(LogLevel::Info, format!("Starting VRP with {} vehicles, algo={}", app.vrp_vehicles, app.vrp_algo));
+    app.vrp_status = Status::Running {
+        progress: 0,
+        message: "Solving VRP…".to_string(),
+    };
+    app.log(
+        LogLevel::Info,
+        format!(
+            "Starting VRP with {} vehicles, algo={}",
+            app.vrp_vehicles, app.vrp_algo
+        ),
+    );
 
     // Parse stops from CSV
     let (stops, _depot_indices) = match crate::core::vrp::utils::parse_csv_stops(&csv_path) {
@@ -155,7 +187,14 @@ fn run_vrp(app: &mut GuiApp) {
         }
     };
 
-    app.log(LogLevel::Info, format!("Loaded {} stops from CSV ({} depots)", stops.len(), _depot_indices.len()));
+    app.log(
+        LogLevel::Info,
+        format!(
+            "Loaded {} stops from CSV ({} depots)",
+            stops.len(),
+            _depot_indices.len()
+        ),
+    );
 
     let matrix = crate::core::vrp::utils::build_haversine_matrix(&stops, 40.0);
     let input = crate::core::vrp::types::VRPSolverInput {
@@ -171,14 +210,28 @@ fn run_vrp(app: &mut GuiApp) {
         hyperparams: None,
     };
 
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-    match rt.block_on(crate::core::vrp::registry::solve_with(&app.vrp_algo, &input)) {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    match rt.block_on(crate::core::vrp::registry::solve_with(
+        &app.vrp_algo,
+        &input,
+    )) {
         Ok(output) => {
-            app.vrp_status = Status::Done(format!("{} km, {} stops", output.total_distance_km, output.stops.len()));
-            app.log(LogLevel::Success, format!(
-                "VRP complete: {} km total distance, {} stops",
-                output.total_distance_km, output.stops.len()
+            app.vrp_status = Status::Done(format!(
+                "{} km, {} stops",
+                output.total_distance_km,
+                output.stops.len()
             ));
+            app.log(
+                LogLevel::Success,
+                format!(
+                    "VRP complete: {} km total distance, {} stops",
+                    output.total_distance_km,
+                    output.stops.len()
+                ),
+            );
         }
         Err(e) => {
             app.vrp_status = Status::Error(e.clone());

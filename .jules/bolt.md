@@ -20,3 +20,7 @@
 ## 2026-05-08 - [Avoid Redundant Allocations]
 **Learning:** Using `std::slice::from_ref(item)` is a zero-cost way to pass a single item to a function expecting a slice, avoiding unnecessary vector allocations or clones that occur with `&[item.clone()]`.
 **Action:** Prefer `std::slice::from_ref` for performance-critical paths where single items are passed as slices.
+
+## 2023-10-27 - [Code Health Improvement: Refactoring Deep Nesting]
+**Learning:** Extracting deeply nested match arms in UI code into separate helper methods significantly improves readability and maintainability. In `src/app.rs`, `close_file_browser` had a large `match` statement dealing with multiple file input types.
+**Action:** When working on UI handlers or large match statements, actively look for opportunities to extract logical groupings of code into well-named helper methods (like `handle_file_selection`) to keep the primary function concise.
