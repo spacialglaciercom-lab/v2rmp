@@ -24,3 +24,7 @@
 ## 2023-10-27 - [Code Health Improvement: Refactoring Deep Nesting]
 **Learning:** Extracting deeply nested match arms in UI code into separate helper methods significantly improves readability and maintainability. In `src/app.rs`, `close_file_browser` had a large `match` statement dealing with multiple file input types.
 **Action:** When working on UI handlers or large match statements, actively look for opportunities to extract logical groupings of code into well-named helper methods (like `handle_file_selection`) to keep the primary function concise.
+
+## 2026-05-09 - [Haversine Matrix Optimization]
+**Learning:** Calculating a distance matrix using the Haversine formula is $O(n^2)$. Redundant trigonometric calls (lat/lon to radians, cosine of latitude) are a major bottleneck. Pre-calculating these $O(n)$ once and exploiting matrix symmetry ($dist(i, j) = dist(j, i)$) provides a significant speedup.
+**Action:** Always pre-calculate trigonometric inputs for $O(n^2)$ geometric loops and use symmetry to halve the workload.

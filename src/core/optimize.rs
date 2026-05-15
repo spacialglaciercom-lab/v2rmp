@@ -800,7 +800,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         }
     };
     #[cfg(not(feature = "ml"))]
-    let embeddings: Option<std::collections::HashMap<usize, Vec<f32>>> = None;
+    let _embeddings: Option<std::collections::HashMap<usize, Vec<f32>>> = None;
 
     // 2. Build VRP Stops
     let mut stops: Vec<VRPSolverStop> = Vec::new();
@@ -863,6 +863,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         .await
         .map_err(|e| anyhow::anyhow!("VRP Solver error: {}", e))?;
 
+    #[cfg(feature = "ml")]
     let elapsed_ms = start.elapsed().as_millis() as u64;
     let total_dist_km: f64 = output.total_distance_km.parse().unwrap_or(0.0);
 
