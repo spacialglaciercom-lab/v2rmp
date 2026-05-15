@@ -23,6 +23,8 @@
 use super::solvers::clarke_wright::ClarkeWrightSolver;
 use super::solvers::default::DefaultSolver;
 #[cfg(feature = "ml")]
+use super::solvers::neural::NeuralSolver;
+#[cfg(feature = "ml")]
 use super::solvers::neural_guided::NeuralGuidedSolver;
 use super::solvers::or_opt::OrOptSolver;
 use super::solvers::sweep::SweepSolver;
@@ -51,6 +53,8 @@ impl SolverRegistryInner {
             Arc::new(OrOptSolver),
             Arc::new(TwoOptSolver),
         ];
+        #[cfg(feature = "ml")]
+        builtins.push(Arc::new(NeuralSolver));
         #[cfg(feature = "ml")]
         builtins.push(Arc::new(NeuralGuidedSolver));
         builtins.push(Arc::new(DefaultSolver));

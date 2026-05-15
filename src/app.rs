@@ -13,6 +13,7 @@ pub enum View {
     Clean,
     Optimize,
     Vrp,
+    Neural,
     BrowseMaps,
     BrowseRoutes,
     FileBrowser,
@@ -307,6 +308,7 @@ pub enum InputField {
     VrpDepot,
     VrpVehicles,
     VrpWaypointsFile,
+    VrpModelPath,
 }
 
 pub struct App {
@@ -351,8 +353,8 @@ pub struct App {
     pub vrp_depots: Vec<String>,
     pub vrp_csv_file: Option<String>,
     pub vrp_waypoints_file: Option<String>,
+    pub vrp_model_path: String,
     pub vrp_status: Status,
-
     // Browse state
     pub cached_maps: Vec<String>,
     pub saved_routes: Vec<String>,
@@ -414,6 +416,7 @@ impl App {
             vrp_depots: Vec::new(),
             vrp_csv_file: None,
             vrp_waypoints_file: None,
+            vrp_model_path: "cvrp50_model.onnx".to_string(),
             vrp_status: Status::Ready,
 
             cached_maps: Vec::new(),
@@ -685,6 +688,10 @@ impl App {
                     format!("VRP waypoints file set: {}", value),
                 );
             }
+            InputField::VrpModelPath => {
+                self.vrp_model_path = value.clone();
+                self.log(LogLevel::Success, format!("VRP model path set: {}", value));
+            }
             InputField::DepotCoordinates => {
                 let parts: Vec<&str> = value.split(',').collect();
                 if parts.len() == 2 {
@@ -720,7 +727,7 @@ impl App {
     pub fn navigate_up(&mut self) {
         match self.current_view {
             View::Home => {
-                self.workflow_selection = (self.workflow_selection + 6) % 7;
+                self.workflow_selection = (self.workflow_selection + 7) % 8;
             }
             View::BrowseMaps => {
                 let max = self.cached_maps.len().max(1);
@@ -741,7 +748,7 @@ impl App {
     pub fn navigate_down(&mut self) {
         match self.current_view {
             View::Home => {
-                self.workflow_selection = (self.workflow_selection + 1) % 7;
+                self.workflow_selection = (self.workflow_selection + 1) % 8;
             }
             View::BrowseMaps => {
                 let max = self.cached_maps.len().max(1);

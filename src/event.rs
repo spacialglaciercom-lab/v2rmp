@@ -72,6 +72,7 @@ async fn handle_view_keys(app: &mut App, code: KeyCode, mods: KeyModifiers) {
         View::Compile => handle_compile_keys(app, code, mods),
         View::Optimize => handle_optimize_keys(app, code, mods).await,
         View::Vrp => handle_vrp_keys(app, code, mods).await,
+        View::Neural => handle_neural_keys(app, code, mods).await,
         View::BrowseMaps => handle_browse_maps_keys(app, code),
         View::BrowseRoutes => handle_browse_routes_keys(app, code),
         View::FileBrowser => {} // Handled separately in handle_normal_mode
@@ -107,11 +108,18 @@ fn handle_home_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                 app.log(crate::app::LogLevel::Info, "Switched to VRP Solver view");
             }
             5 => {
+                app.current_view = View::Neural;
+                app.log(
+                    crate::app::LogLevel::Info,
+                    "Switched to Neural ONNX Solver view",
+                );
+            }
+            6 => {
                 app.current_view = View::BrowseMaps;
                 app.browse_selection = 0;
                 app.log(crate::app::LogLevel::Info, "Switched to Cached Maps view");
             }
-            6 => {
+            7 => {
                 app.current_view = View::BrowseRoutes;
                 app.browse_selection = 0;
                 app.log(crate::app::LogLevel::Info, "Switched to Saved Routes view");
@@ -626,6 +634,120 @@ async fn handle_vrp_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                     crate::app::LogLevel::Warn,
                     "Set an input .rmp file first (press 'i')",
                 );
+            }
+        }
+        _ => {}
+    }
+}
+
+async fn handle_neural_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+    match code {
+        KeyCode::Char('m') | KeyCode::Char('M') => {
+            app.start_input(InputField::VrpModelPath);
+        }
+        KeyCode::Char('w') | KeyCode::Char('W') => {
+            app.start_file_browser(InputField::VrpWaypointsFile);
+        }
+        KeyCode::Char('o') | KeyCode::Char('O') => {
+            app.start_input(InputField::VrpOutputDir);
+        }
+        KeyCode::Char('v') | KeyCode::Char('V') => {
+            app.start_input(InputField::VrpVehicles);
+        }
+        KeyCode::Char('k') | KeyCode::Char('K') => {
+            app.start_input(InputField::VrpCapacity);
+        }
+        KeyCode::Enter => {
+            if app.vrp_waypoints_file.is_none() {
+                app.log(
+                    crate::app::LogLevel::Warn,
+                    "Set a waypoints file first (press 'w')",
+                );
+                return;
+            }
+
+            let model_path = app.vrp_model_path.clone();
+            let waypoints_path = app.vrp_waypoints_file.clone().unwrap();
+            let vehicles = app.vrp_vehicles;
+            let capacity = app.vrp_capacity.unwrap_or(100.0);
+            let output_dir = app.vrp_output_dir.clone();
+
+            app.vrp_status = crate::app::Status::Running {
+                progress: 0,
+                message: "Neural Solving...".to_string(),
+            };
+            app.log(
+                crate::app::LogLevel::Info,
+                format!("Starting Neural Solve with model: {}", model_path),
+            );
+
+            // 1. Read waypoints
+            let points: Vec<[f64; 2]> = match std::fs::read_to_string(&waypoints_path) {
+                Ok(data) => match serde_json::from_str(&data) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        app.vrp_status = Status::Error(format!("Invalid waypoints JSON: {}", e));
+                        return;
+                    }
+                },
+                Err(e) => {
+                    app.vrp_status = Status::Error(format!("Failed to read waypoints: {}", e));
+                    return;
+                }
+            };
+
+            // 2. Prepare solver input
+            use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
+
+            let mut locations = Vec::new();
+            for (i, p) in points.iter().enumerate() {
+                locations.push(VRPSolverStop {
+                    lat: p[0],
+                    lon: p[1],
+                    label: format!("WP {}", i),
+                    demand: Some(if i == 0 { 0.0 } else { 1.0 }),
+                    arrival_time: None,
+                });
+            }
+
+            let mut hyperparams = crate::core::vrp::types::SolverHyperparams {
+                max_iterations: 1,
+                ..Default::default()
+            };
+            hyperparams.other.insert("model_path".to_string(), serde_json::Value::String(model_path));
+
+            let input = VRPSolverInput {
+                locations,
+                num_vehicles: vehicles,
+                vehicle_capacity: capacity,
+                objective: VrpObjective::MinDistance,
+                matrix: None,
+                service_time_secs: None,
+                use_time_windows: false,
+                window_open: None,
+                window_close: None,
+                hyperparams: Some(hyperparams),
+            };
+
+            // 3. Solve
+            match crate::core::vrp::registry::solve_with("neural", &input).await {
+                Ok(output) => {
+                    if let Some(routes) = output.routes {
+                        let _ = std::fs::create_dir_all(&output_dir);
+                        for (i, route) in routes.iter().enumerate() {
+                            let path = format!("{}/neural_v{}.gpx", output_dir, i + 1);
+                            let _ = crate::core::optimize::write_gpx_multi(&path, std::slice::from_ref(route));
+                        }
+                        app.vrp_status = Status::Done(format!("Neural Solve Done: {} routes", routes.len()));
+                        app.log(crate::app::LogLevel::Success, "Neural solving complete");
+                    } else {
+                        app.vrp_status = Status::Done("No routes produced".into());
+                    }
+                }
+                Err(e) => {
+                    app.vrp_status = Status::Error(e.clone());
+                    app.log(crate::app::LogLevel::Error, format!("Neural solve failed: {}", e));
+                }
             }
         }
         _ => {}

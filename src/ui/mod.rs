@@ -5,6 +5,7 @@ pub mod compile;
 pub mod extract;
 pub mod file_browser;
 pub mod home;
+pub mod neural;
 pub mod optimize;
 pub mod vrp;
 
@@ -67,6 +68,7 @@ fn draw_main(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         View::Compile => compile::draw(f, app, area),
         View::Optimize => optimize::draw(f, app, area),
         View::Vrp => vrp::draw(f, app, area),
+        View::Neural => neural::draw(f, app, area),
         View::BrowseMaps => browse_maps::draw(f, app, area),
         View::BrowseRoutes => browse_routes::draw(f, app, area),
         View::FileBrowser => file_browser::draw(f, app, area),
@@ -126,6 +128,9 @@ fn draw_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         }
         View::Vrp => {
             "[Esc] Home  [I] Input  [W] Waypoints  [V] Vehicles  [A] Algo  [D] Depot  [Enter] Run VRP"
+        }
+        View::Neural => {
+            "[Esc] Home  [M] Model  [W] Waypoints  [V] Vehicles  [K] Capacity  [Enter] Solve"
         }
         View::Compile => "[q] Quit  [Esc] Home  [I] Input file  [O] Output file  [Enter] Compile",
         View::BrowseMaps => {
@@ -218,6 +223,7 @@ pub fn draw_input_prompt(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         crate::app::InputField::VrpCapacity => "VRP vehicle capacity",
         crate::app::InputField::VrpVehicles => "Number of VRP vehicles",
         crate::app::InputField::VrpWaypointsFile => "VRP waypoints file path (.json)",
+        crate::app::InputField::VrpModelPath => "ONNX model file path (.onnx)",
         crate::app::InputField::VrpDepot => "VRP depot (lat,lon)",
     };
 
