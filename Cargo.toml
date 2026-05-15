@@ -9,8 +9,8 @@ repository = "https://github.com/spacialglaciercom-lab/v2rmp"
 homepage = "https://github.com/spacialglaciercom-lab/v2rmp"
 documentation = "https://docs.rs/v2rmp"
 readme = "README.md"
-keywords = ["route", "optimization", "tui", "gis", "osm", "agent"]
-categories = ["command-line-utilities", "visualization"]
+keywords = ["route", "optimization", "tui", "gis", "osm"]
+categories = ["command-line-utilities", "visualization", "science"]
 exclude = [
     ".env",
     ".env.*",
