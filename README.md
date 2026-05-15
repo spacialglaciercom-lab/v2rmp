@@ -10,15 +10,13 @@ A powerful Terminal User Interface (TUI) for route optimization using the Chines
 
 - 🗺️ **Data Extraction**: Extract road networks from Overture Maps S3 (Parquet) or OpenStreetMap PBF files
 - 🔧 **Binary Compilation**: Convert GeoJSON to optimized `.rmp` binary format with CRC32 integrity checking
-- 🚗 **Route Optimization**: Solve the Chinese Postman Problem with:
-  - Eulerian circuit finding (Hierholzer's algorithm)
-  - Turn penalties (left, right, u-turn)
-  - Depot location support
-  - Oneway street handling (ignore/respect/reverse modes)
-  - Efficiency metrics and turn statistics
+- 🚗 **Route Optimization**:
+  - **CPP**: Chinese Postman Problem (Hierholzer's algorithm)
+  - **VRP**: Multi-vehicle routing with capacity constraints
+  - **Neural**: Direct ONNX inference for complex CVRP problems
 - 🖥️ **Interactive TUI**: Beautiful terminal interface built with `ratatui`
 - 📁 **Cached Maps Browser**: Automatically scans for compiled `.rmp` files
-- ⚡ **Performance**: Concurrent S3 file processing, efficient graph algorithms
+- ⚡ **Performance**: Concurrent S3 processing, GNN/Attention-based neural solvers, efficient graph algorithms
 
 ## Installation
 
@@ -80,7 +78,7 @@ rmpca-extract --source osm --pbf-path data.osm.pbf --bbox "45.49,-73.59,45.52,-7
 3. Use `↑↓` to select a map
 4. Press `Enter` to use selected map for optimization
 
-### 4. Optimize Route
+### 4. Optimize Route (CPP)
 
 1. Navigate to **Optimize Route** view
 2. Press `c` to set compiled map file (`.rmp`) or select from Browse view
@@ -91,6 +89,22 @@ rmpca-extract --source osm --pbf-path data.osm.pbf --bbox "45.49,-73.59,45.52,-7
 4. Press `d` to set depot coordinates (optional)
 5. Press `Enter` to optimize
 6. Output: `route_YYYYMMDD_HHMMSS.json`
+
+5. VRP Solver (Heuristic)
+
+1. Navigate to **VRP Solver** view
+2. Press `i` to set road network `.rmp` (optional, for map preview)
+3. Press `w` to set waypoints JSON (e.g. `[[lat,lon], ...]`)
+4. Press `v` to set number of vehicles
+5. Press `a` to toggle algorithms (Greedy, Savings, Local Search)
+6. Press `Enter` to solve
+
+6. Neural ONNX Solver
+
+1. Navigate to **Neural ONNX Solver** view
+2. Press `m` to select an ONNX model (defaults to `cvrp50_model.onnx`)
+3. Press `w` to select waypoints JSON file
+4. Press `Enter` to run high-performance GNN-based optimization
 
 ## Binary Format (.rmp)
 
@@ -215,6 +229,10 @@ let result = optimize::run_optimize(&optimize_req)?;
 - Rust 1.70+
 - Internet connection (for Overture Maps extraction)
 - Local OSM PBF file (for OpenStreetMap extraction)
+- **Optional**: `libgdal-dev` (required ONLY if using the `--features extract` flag)
+  - Ubuntu/Debian: `sudo apt-get install libgdal-dev`
+  - macOS: `brew install gdal`
+  - Windows: Ensure `gdal` is in your `PATH` via Conda or OSGeo4W.
 
 ## Contributing
 

@@ -537,10 +537,8 @@ fn handle_tool_call(params: Value) -> Result<Value> {
                 let coords = loc.as_array().context("Invalid coordinate format")?;
                 let lat = coords[0].as_f64().context("Invalid latitude")?;
                 let lon = coords[1].as_f64().context("Invalid longitude")?;
-                // NeuralRouteRequest expects [lon, lat, elevation] based on the doc comment
-                // although the previous code was doing [lat, lon]
-                // Let's stick to [lon, lat, 0.0] as common for GIS
-                locations.push([lon, lat, 0.0]);
+                // NeuralRouteRequest expects [lat, lon, elevation]
+                locations.push([lat, lon, 0.0]);
             }
 
             let demands = arguments
