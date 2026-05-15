@@ -10,7 +10,10 @@ impl FuelCalculator {
     /// - Base fuel consumption on flat terrain (`base_consumption` L/km)
     /// - +15% per 1% uphill grade
     /// - -5% per 1% downhill grade (capped at -20%)
-    pub fn calculate(profile: &ElevationProfile, base_consumption: f64) -> FuelConsumption {
+    pub fn calculate(
+        profile: &ElevationProfile,
+        base_consumption: f64,
+    ) -> FuelConsumption {
         let mut total_fuel = 0.0;
         let mut elevation_penalty = 0.0;
         let mut elevation_benefit = 0.0;

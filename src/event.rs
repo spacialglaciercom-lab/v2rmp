@@ -136,6 +136,7 @@ async fn handle_extract_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) 
         KeyCode::Char('b') | KeyCode::Char('B') => {
             app.start_input(InputField::BoundingBox);
         }
+        #[cfg(feature = "extract")]
         KeyCode::Enter => {
             if let Some(ref bbox) = app.bounding_box {
                 let bbox_vals = bbox.clone();
@@ -475,8 +476,10 @@ async fn handle_vrp_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                 let parsed_depots: Result<Vec<(f64, f64)>, _> = depots
                     .iter()
                     .map(|s| {
-                        let parts: Vec<f64> =
-                            s.split(',').filter_map(|v| v.parse::<f64>().ok()).collect();
+                        let parts: Vec<f64> = s
+                            .split(',')
+                            .filter_map(|v| v.parse::<f64>().ok())
+                            .collect();
                         if parts.len() == 2 {
                             Ok((parts[0], parts[1]))
                         } else {
@@ -498,30 +501,33 @@ async fn handle_vrp_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                         });
 
                         match std::fs::read_to_string(&waypoints_path) {
-                            Ok(wp_data) => match serde_json::from_str::<Vec<[f64; 2]>>(&wp_data) {
-                                Ok(points) => {
-                                    for (i, p) in points.into_iter().enumerate() {
-                                        stops.push(crate::core::vrp::types::VRPSolverStop {
-                                            lat: p[0],
-                                            lon: p[1],
-                                            label: format!("WP {}", i),
-                                            demand: Some(1.0),
-                                            arrival_time: None,
-                                        });
+                            Ok(wp_data) => {
+                                match serde_json::from_str::<Vec<[f64; 2]>>(&wp_data) {
+                                    Ok(points) => {
+                                        for (i, p) in points.into_iter().enumerate() {
+                                            stops.push(crate::core::vrp::types::VRPSolverStop {
+                                                lat: p[0],
+                                                lon: p[1],
+                                                label: format!("WP {}", i),
+                                                demand: Some(1.0),
+                                                arrival_time: None,
+                                            });
+                                        }
+                                    }
+                                    Err(e) => {
+                                        app.vrp_status =
+                                            crate::app::Status::Error(format!(
+                                                "Invalid waypoints JSON: {}",
+                                                e
+                                            ));
+                                        app.log(
+                                            crate::app::LogLevel::Error,
+                                            format!("VRP failed: invalid waypoints: {}", e),
+                                        );
+                                        return;
                                     }
                                 }
-                                Err(e) => {
-                                    app.vrp_status = crate::app::Status::Error(format!(
-                                        "Invalid waypoints JSON: {}",
-                                        e
-                                    ));
-                                    app.log(
-                                        crate::app::LogLevel::Error,
-                                        format!("VRP failed: invalid waypoints: {}", e),
-                                    );
-                                    return;
-                                }
-                            },
+                            }
                             Err(e) => {
                                 app.vrp_status = crate::app::Status::Error(format!(
                                     "Failed to read waypoints: {}",
@@ -576,7 +582,11 @@ async fn handle_vrp_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                                     }
 
                                     for (i, route) in routes.iter().enumerate() {
-                                        let path = format!("{}/vehicle_{}.gpx", output_dir, i + 1);
+                                        let path = format!(
+                                            "{}/vehicle_{}.gpx",
+                                            output_dir,
+                                            i + 1
+                                        );
                                         match crate::core::optimize::write_gpx_multi(
                                             &path,
                                             std::slice::from_ref(route),
@@ -619,13 +629,20 @@ async fn handle_vrp_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                             }
                             Err(e) => {
                                 app.vrp_status = crate::app::Status::Error(e.clone());
-                                app.log(crate::app::LogLevel::Error, format!("VRP failed: {}", e));
+                                app.log(
+                                    crate::app::LogLevel::Error,
+                                    format!("VRP failed: {}", e),
+                                );
                             }
                         }
                     }
                     Err(e) => {
-                        app.vrp_status = crate::app::Status::Error(format!("Invalid depot: {}", e));
-                        app.log(crate::app::LogLevel::Error, format!("VRP failed: {}", e));
+                        app.vrp_status =
+                            crate::app::Status::Error(format!("Invalid depot: {}", e));
+                        app.log(
+                            crate::app::LogLevel::Error,
+                            format!("VRP failed: {}", e),
+                        );
                     }
                 }
             } else {

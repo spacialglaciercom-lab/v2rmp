@@ -4,8 +4,8 @@
 //! swapped for learned models later.  All functions are pure (no I/O) so
 //! they work in MCP handlers, TUI callbacks, and WASM targets.
 
+use super::vrp::types::{VRPSolverInput, VRPSolverOutput, VrpObjective, VRPSolverStop};
 use super::haversine_m;
-use super::vrp::types::{VRPSolverInput, VRPSolverOutput, VRPSolverStop, VrpObjective};
 
 // ── Route feature extraction ───────────────────────────────────────────
 
@@ -135,7 +135,7 @@ pub fn predict_solver(features: &RouteFeatures) -> SolverPrediction {
                 if features.tight_capacity {
                     *score += 0.2;
                 }
-                if n >= 20 && n <= 200 {
+                if (20..=200).contains(&n) {
                     *score += 0.1;
                 }
                 if v >= 2 && v <= 10 {
@@ -190,10 +190,7 @@ pub fn predict_solver(features: &RouteFeatures) -> SolverPrediction {
         recommended: best_id.to_string(),
         confidence: best_score.clamp(0.0, 1.0),
         runner_up,
-        all_scores: scores
-            .into_iter()
-            .map(|(id, s)| (id.to_string(), s.clamp(0.0, 1.0)))
-            .collect(),
+        all_scores: scores.into_iter().map(|(id, s)| (id.to_string(), s.clamp(0.0, 1.0))).collect(),
         features: features.clone(),
     }
 }
@@ -309,9 +306,11 @@ pub fn score_route(input: &VRPSolverInput, output: &VRPSolverOutput) -> RouteQua
     let coverage = (100.0 * assigned as f64 / n_stops as f64).clamp(0.0, 100.0);
 
     // --- Overall ---
-    let overall =
-        (distance_efficiency * 0.35 + load_balance * 0.25 + turn_quality * 0.20 + coverage * 0.20)
-            .clamp(0.0, 100.0);
+    let overall = (distance_efficiency * 0.35
+        + load_balance * 0.25
+        + turn_quality * 0.20
+        + coverage * 0.20)
+        .clamp(0.0, 100.0);
 
     RouteQualityScore {
         distance_efficiency: round2(distance_efficiency),
@@ -375,7 +374,7 @@ pub fn route_feature_vector(features: &RouteFeatures) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::vrp::test_utils::{make_input, make_stop};
+    use crate::core::vrp::test_utils::{make_stop, make_input};
 
     #[test]
     fn test_features_small_instance() {

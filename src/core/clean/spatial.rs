@@ -120,8 +120,12 @@ pub fn merge_nearby_nodes(
                 if nearby.idx != node_idx {
                     // Check actual distance
                     if let Some(other_node) = graph.node_weight(nearby.idx) {
-                        let dist_m =
-                            haversine_m(node.lat, node.lon, other_node.lat, other_node.lon);
+                        let dist_m = haversine_m(
+                            node.lat,
+                            node.lon,
+                            other_node.lat,
+                            other_node.lon,
+                        );
 
                         if dist_m <= node_snap_m {
                             uf.union(node_idx, nearby.idx);

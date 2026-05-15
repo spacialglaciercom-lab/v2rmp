@@ -1,7 +1,11 @@
-mod fuel;
-pub mod local;
 mod types;
+mod fuel;
 
-pub use fuel::FuelCalculator;
-pub use local::LocalDem;
+#[cfg(feature = "gdal-support")]
+pub mod local;
+
 pub use types::*;
+pub use fuel::FuelCalculator;
+
+#[cfg(feature = "gdal-support")]
+pub use local::LocalDem;

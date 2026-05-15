@@ -15,7 +15,7 @@ use tokio::runtime::Runtime;
 use v2rmp::core::haversine_m;
 use v2rmp::core::ml::features::InstanceFeatures;
 use v2rmp::core::vrp::registry::{get_solver_list, solve_with};
-use v2rmp::core::vrp::types::{SolverHyperparams, VRPSolverInput, VRPSolverStop, VrpObjective};
+use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective, SolverHyperparams};
 use v2rmp::core::vrp::utils::build_haversine_matrix;
 
 /// Generate a single synthetic VRP instance with depot at index 0.
@@ -131,11 +131,7 @@ fn star_tour_lower_bound(locations: &[VRPSolverStop]) -> f64 {
     total * 2.0
 }
 
-fn make_input(
-    stops: Vec<VRPSolverStop>,
-    num_vehicles: usize,
-    objective: VrpObjective,
-) -> VRPSolverInput {
+fn make_input(stops: Vec<VRPSolverStop>, num_vehicles: usize, objective: VrpObjective) -> VRPSolverInput {
     let matrix = build_haversine_matrix(&stops, 40.0);
     VRPSolverInput {
         locations: stops,
@@ -169,11 +165,7 @@ fn main() {
     let rt = Runtime::new().expect("Failed to create Tokio runtime");
     let solver_ids = get_solver_list();
 
-    eprintln!(
-        "Generating {} synthetic VRP instances and evaluating {} solvers...",
-        n_instances,
-        solver_ids.len()
-    );
+    eprintln!("Generating {} synthetic VRP instances and evaluating {} solvers...", n_instances, solver_ids.len());
 
     for i in 0..n_instances {
         let stops = generate_instance(i);
@@ -202,7 +194,9 @@ fn main() {
                 hyperparams: input.hyperparams.clone(),
             };
 
-            let result = rt.block_on(async { solve_with(solver_id, &input_clone).await });
+            let result = rt.block_on(async {
+                solve_with(solver_id, &input_clone).await
+            });
 
             match result {
                 Ok(output) => {

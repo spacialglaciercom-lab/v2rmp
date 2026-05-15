@@ -25,10 +25,7 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
                         .pick_file()
                     {
                         app.clean_input_file = Some(path.display().to_string());
-                        app.log(
-                            LogLevel::Success,
-                            format!("Clean input set: {}", path.display()),
-                        );
+                        app.log(LogLevel::Success, format!("Clean input set: {}", path.display()));
                     }
                 }
             });
@@ -45,10 +42,7 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
                         .pick_file()
                     {
                         app.clean_output_file = Some(path.display().to_string());
-                        app.log(
-                            LogLevel::Success,
-                            format!("Clean output set: {}", path.display()),
-                        );
+                        app.log(LogLevel::Success, format!("Clean output set: {}", path.display()));
                     }
                 }
             });
@@ -67,53 +61,30 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
             ui.checkbox(&mut opts.include_polygons, "Include polygons");
             ui.checkbox(&mut opts.include_points, "Include points");
             ui.checkbox(&mut opts.merge_parallel_edges, "Merge parallel edges");
-            ui.checkbox(
-                &mut opts.merge_parallel_edge_properties,
-                "Merge parallel edge properties",
-            );
+            ui.checkbox(&mut opts.merge_parallel_edge_properties, "Merge parallel edge properties");
         });
 
         // Numeric parameters
         ui.group(|ui| {
             ui.heading("Parameters");
             ui.horizontal(|ui| {
-                ui.add(
-                    egui::DragValue::new(&mut app.clean_options.min_length_m)
-                        .speed(0.1)
-                        .range(0.0..=100.0),
-                );
+                ui.add(egui::DragValue::new(&mut app.clean_options.min_length_m).speed(0.1).range(0.0..=100.0));
                 ui.label("Min length (m)");
             });
             ui.horizontal(|ui| {
-                ui.add(
-                    egui::DragValue::new(&mut app.clean_options.node_snap_m)
-                        .speed(0.5)
-                        .range(0.0..=100.0),
-                );
+                ui.add(egui::DragValue::new(&mut app.clean_options.node_snap_m).speed(0.5).range(0.0..=100.0));
                 ui.label("Node snap (m)");
             });
             ui.horizontal(|ui| {
-                ui.add(
-                    egui::DragValue::new(&mut app.clean_options.max_components)
-                        .speed(1)
-                        .range(0..=100),
-                );
+                ui.add(egui::DragValue::new(&mut app.clean_options.max_components).speed(1).range(0..=100));
                 ui.label("Max components");
             });
             ui.horizontal(|ui| {
-                ui.add(
-                    egui::DragValue::new(&mut app.clean_options.simplify_tolerance_m)
-                        .speed(0.5)
-                        .range(0.0..=100.0),
-                );
+                ui.add(egui::DragValue::new(&mut app.clean_options.simplify_tolerance_m).speed(0.5).range(0.0..=100.0));
                 ui.label("Simplify tolerance (m)");
             });
             ui.horizontal(|ui| {
-                ui.add(
-                    egui::DragValue::new(&mut app.clean_options.node_precision_decimals)
-                        .speed(1)
-                        .range(1..=12),
-                );
+                ui.add(egui::DragValue::new(&mut app.clean_options.node_precision_decimals).speed(1).range(1..=12));
                 ui.label("Precision decimals");
             });
         });
@@ -127,10 +98,7 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
                     app.log(LogLevel::Info, "Clean options reset to defaults");
                 }
                 let can_run = app.clean_input_file.is_some();
-                if ui
-                    .add_enabled(can_run, egui::Button::new("🚀 Run Clean"))
-                    .clicked()
-                {
+                if ui.add_enabled(can_run, egui::Button::new("🚀 Run Clean")).clicked() {
                     run_clean(app);
                 }
             });
@@ -147,16 +115,11 @@ fn run_clean(app: &mut GuiApp) {
         }
     };
 
-    app.clean_status = Status::Running {
-        progress: 0,
-        message: "Cleaning…".to_string(),
-    };
+    app.clean_status = Status::Running { progress: 0, message: "Cleaning…".to_string() };
     app.log(LogLevel::Info, "Starting GeoJSON cleaning");
 
     let output_path = app.clean_output_file.clone().unwrap_or_else(|| {
-        input_path
-            .replace(".geojson", ".cleaned.geojson")
-            .replace(".json", ".cleaned.json")
+        input_path.replace(".geojson", ".cleaned.geojson").replace(".json", ".cleaned.json")
     });
 
     let mut input_data = Vec::new();
@@ -194,13 +157,10 @@ fn run_clean(app: &mut GuiApp) {
                     }
                     let summary = stats.summary();
                     app.clean_status = Status::Done(summary.clone());
-                    app.log(
-                        LogLevel::Success,
-                        format!(
-                            "Cleaning complete: {} → {} features",
-                            stats.input_features, stats.output_features
-                        ),
-                    );
+                    app.log(LogLevel::Success, format!(
+                        "Cleaning complete: {} → {} features",
+                        stats.input_features, stats.output_features
+                    ));
                     app.log(LogLevel::Info, format!("Output saved to: {}", output_path));
                 }
                 Err(e) => {

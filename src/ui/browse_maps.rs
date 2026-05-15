@@ -12,12 +12,6 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             "Compile a GeoJSON file to create a .rmp map",
         );
     } else {
-        super::draw_selectable_list(
-            f,
-            area,
-            "Cached Maps",
-            &app.cached_maps,
-            app.browse_selection,
-        );
+        super::draw_selectable_list(f, area, "Cached Maps", &app.cached_maps, app.browse_selection);
     }
 }

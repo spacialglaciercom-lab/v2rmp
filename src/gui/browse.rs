@@ -15,10 +15,7 @@ pub fn draw_maps(ui: &mut egui::Ui, app: &mut GuiApp) {
         });
 
         if app.cached_maps.is_empty() {
-            ui.colored_label(
-                egui::Color32::from_rgb(140, 140, 140),
-                "No cached maps found",
-            );
+            ui.colored_label(egui::Color32::from_rgb(140, 140, 140), "No cached maps found");
             ui.label("Compile a GeoJSON file to create a .rmp map");
         } else {
             egui::ScrollArea::vertical().show(ui, |ui| {
@@ -85,10 +82,7 @@ pub fn draw_routes(ui: &mut egui::Ui, app: &mut GuiApp) {
         });
 
         if app.saved_routes.is_empty() {
-            ui.colored_label(
-                egui::Color32::from_rgb(140, 140, 140),
-                "No saved routes found",
-            );
+            ui.colored_label(egui::Color32::from_rgb(140, 140, 140), "No saved routes found");
             ui.label("Run route optimization to create a saved route");
         } else {
             egui::ScrollArea::vertical().show(ui, |ui| {

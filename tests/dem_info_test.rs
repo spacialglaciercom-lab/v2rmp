@@ -17,8 +17,8 @@ mod dem_info_tests {
             path.display()
         );
 
-        let dem =
-            LocalDem::open(path).expect("Failed to open DEM via GDAL — check GDAL installation");
+        let dem = LocalDem::open(path)
+            .expect("Failed to open DEM via GDAL — check GDAL installation");
 
         let info = dem.info();
 
@@ -39,14 +39,8 @@ mod dem_info_tests {
         assert!(info.height > 0, "Height should be positive");
         assert!(info.pixel_size_x > 0.0, "Pixel size X should be positive");
         assert!(info.pixel_size_y > 0.0, "Pixel size Y should be positive");
-        assert!(
-            info.bbox.min_lon < info.bbox.max_lon,
-            "Longitude range invalid"
-        );
-        assert!(
-            info.bbox.min_lat < info.bbox.max_lat,
-            "Latitude range invalid"
-        );
+        assert!(info.bbox.min_lon < info.bbox.max_lon, "Longitude range invalid");
+        assert!(info.bbox.min_lat < info.bbox.max_lat, "Latitude range invalid");
 
         // This is a 1-arcsecond DEM (~30m) so pixel size should be ~0.000278°
         assert!(

@@ -11,9 +11,9 @@
 #[cfg(feature = "ml")]
 pub mod automl;
 #[cfg(feature = "ml")]
-pub mod features;
-#[cfg(feature = "ml")]
 pub mod feedback;
+#[cfg(feature = "ml")]
+pub mod features;
 #[cfg(feature = "ml")]
 pub mod graph_embed;
 #[cfg(feature = "ml")]

@@ -49,14 +49,11 @@ impl Embedder {
     }
 
     pub fn embed(&mut self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
-        let tokens = self
-            .tokenizer
-            .encode_batch(texts, true)
+        let tokens = self.tokenizer.encode_batch(texts, true)
             .map_err(anyhow::Error::msg)
             .context("Failed to tokenize batch")?;
 
-        let token_ids = tokens
-            .iter()
+        let token_ids = tokens.iter()
             .map(|tokens| {
                 let tokens = tokens.get_ids().to_vec();
                 Ok(Tensor::new(tokens.as_slice(), &self.device)?)
@@ -65,17 +62,17 @@ impl Embedder {
 
         let token_ids = Tensor::stack(&token_ids, 0)?;
         let token_type_ids = token_ids.zeros_like()?;
-
+        
         let embeddings = self.model.forward(&token_ids, &token_type_ids, None)?;
-
+        
         // Mean pooling
         let (_n_batch, n_tokens, _hidden_size) = embeddings.dims3()?;
         let embeddings = (embeddings.sum(1)? / (n_tokens as f64))?;
-
+        
         // Normalize
         let norm = embeddings.sqr()?.sum_keepdim(1)?.sqrt()?;
         let embeddings = embeddings.broadcast_div(&norm)?;
-
+        
         let embeddings = embeddings.to_vec2::<f32>()?;
         Ok(embeddings)
     }

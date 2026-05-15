@@ -1,6 +1,6 @@
 use eframe::egui;
 
-use crate::gui::{BoundingBox, DataSource, GuiApp, LogLevel, Status};
+use crate::gui::{GuiApp, DataSource, BoundingBox, LogLevel, Status};
 
 pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
     ui.vertical(|ui| {
@@ -34,17 +34,12 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
             ui.horizontal(|ui| {
                 ui.label("min_lon,min_lat,max_lon,max_lat:");
                 let response = ui.text_edit_singleline(&mut app.bbox_input);
-                if ui.button("Set BBox").clicked()
-                    || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                {
+                if ui.button("Set BBox").clicked() || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
                     if let Some(bbox) = parse_bbox(&app.bbox_input) {
                         app.bounding_box = Some(bbox.clone());
                         app.log(LogLevel::Success, format!("Bounding box set: {}", bbox));
                     } else {
-                        app.log(
-                            LogLevel::Error,
-                            "Invalid bounding box format. Use: min_lon,min_lat,max_lon,max_lat",
-                        );
+                        app.log(LogLevel::Error, "Invalid bounding box format. Use: min_lon,min_lat,max_lon,max_lat");
                     }
                 }
             });
@@ -76,10 +71,7 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
             super::status_label(ui, &app.extract_status);
 
             let can_run = app.bounding_box.is_some();
-            if ui
-                .add_enabled(can_run, egui::Button::new("🚀 Start Extraction"))
-                .clicked()
-            {
+            if ui.add_enabled(can_run, egui::Button::new("🚀 Start Extraction")).clicked() {
                 run_extract(app);
             }
         });
@@ -119,10 +111,7 @@ fn run_extract(app: &mut GuiApp) {
         progress: 0,
         message: "Starting extraction…".to_string(),
     };
-    app.log(
-        LogLevel::Info,
-        format!("Starting extraction from {}", app.data_source),
-    );
+    app.log(LogLevel::Info, format!("Starting extraction from {}", app.data_source));
 
     let source = match app.data_source {
         DataSource::Osm => crate::core::extract::ExtractSource::Osm,
@@ -143,21 +132,15 @@ fn run_extract(app: &mut GuiApp) {
     };
 
     // Run extraction synchronously (blocking the UI — could be moved to a thread)
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     match rt.block_on(crate::core::extract::run_extract(&req)) {
         Ok(result) => {
-            app.extract_status =
-                Status::Done(format!("{} nodes, {} edges", result.nodes, result.edges));
-            app.log(
-                LogLevel::Success,
-                format!(
-                    "Extraction complete: {} nodes, {} edges",
-                    result.nodes, result.edges
-                ),
-            );
+            app.extract_status = Status::Done(format!("{} nodes, {} edges", result.nodes, result.edges));
+            app.log(LogLevel::Success, format!(
+                "Extraction complete: {} nodes, {} edges",
+                result.nodes,
+                result.edges
+            ));
         }
         Err(e) => {
             app.extract_status = Status::Error(e.to_string());

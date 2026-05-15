@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::clean::{clean_geojson, CleanOptions};
 use crate::core::compile::CompileRequest;
-use crate::core::elevation::{FuelCalculator, LocalDem};
+use crate::core::elevation::FuelCalculator;
+#[cfg(feature = "extract")]
 use crate::core::extract::{BBoxRequest, ExtractRequest, ExtractSource, RoadClass};
 use crate::core::optimize::{OnewayMode, OptimizeRequest, SolverMode, TurnPenalties};
 
@@ -846,20 +847,20 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
             }
         );
     }
-    let req = OptimizeRequest {
-        cache_file: args.input.clone(),
-        route_file: args.output.clone(),
-        turn_penalties: TurnPenalties {
-            left: args.left_penalty,
-            right: args.right_penalty,
-            u_turn: args.uturn_penalty,
-        },
-        depot,
-        oneway_mode,
-        mode,
-        num_vehicles: args.vehicles,
-        solver_id: args.solver,
-        coordinates: None,
+let req = OptimizeRequest {
+    cache_file: args.input.clone(),
+    route_file: args.output.clone(),
+    turn_penalties: TurnPenalties {
+        left: args.left_penalty,
+        right: args.right_penalty,
+        u_turn: args.uturn_penalty,
+    },
+    depot,
+    oneway_mode,
+    mode,
+    num_vehicles: args.vehicles,
+    solver_id: args.solver,
+    coordinates: None,
     };
 
     let result = crate::core::optimize::run_optimize(&req).await?;
@@ -979,8 +980,7 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
         vrp_input.hyperparams = Some(predict_hyperparams(&features));
     }
 
-    let output = crate::core::vrp::registry::solve_with(solver_id, &vrp_input)
-        .await
+    let output = crate::core::vrp::registry::solve_with(solver_id, &vrp_input).await
         .map_err(|e| anyhow::anyhow!("VRP Solver error: {}", e))?;
 
     std::fs::create_dir_all(&args.output_dir)?;
@@ -1207,12 +1207,7 @@ async fn run_embed_cmd(args: EmbedArgs, json: bool) -> Result<()> {
         output_json(&embeddings)?;
     } else {
         for (i, emb) in embeddings.iter().enumerate() {
-            tracing::info!(
-                "Embedding {}: dimension {}, first few values: {:?}",
-                i,
-                emb.len(),
-                &emb[..5.min(emb.len())]
-            );
+            tracing::info!("Embedding {}: dimension {}, first few values: {:?}", i, emb.len(), &emb[..5.min(emb.len())]);
         }
     }
 
@@ -1320,35 +1315,21 @@ fn run_elevation_cmd(args: ElevationArgs, json: bool) -> Result<()> {
             } else {
                 println!("Route Elevation Profile:");
                 println!("  Distance: {:.2} km", profile.distance_km);
-                println!(
-                    "  Elevation: {:.1} - {:.1} m (avg {:.1} m)",
-                    profile.min_elevation, profile.max_elevation, profile.avg_elevation
-                );
-                println!(
-                    "  Ascent: {:.1} m, Descent: {:.1} m",
-                    profile.total_ascent, profile.total_descent
-                );
+                println!("  Elevation: {:.1} - {:.1} m (avg {:.1} m)", profile.min_elevation, profile.max_elevation, profile.avg_elevation);
+                println!("  Ascent: {:.1} m, Descent: {:.1} m", profile.total_ascent, profile.total_descent);
                 println!("  Sample points: {}", profile.points.len());
             }
         }
 
         ElevationCommand::Stats(s) => {
             let (min_lon, min_lat, max_lon, max_lat) = parse_bbox(&s.bbox)?;
-            let bbox = crate::core::elevation::BBox {
-                min_lon,
-                min_lat,
-                max_lon,
-                max_lat,
-            };
+            let bbox = crate::core::elevation::BBox { min_lon, min_lat, max_lon, max_lat };
             let stats = dem.bbox_stats(bbox, s.step)?;
             if json {
                 output_json(&stats)?;
             } else {
                 println!("Elevation Stats:");
-                println!(
-                    "  Range: {:.1} - {:.1} m (avg {:.1} m)",
-                    stats.min_elevation, stats.max_elevation, stats.avg_elevation
-                );
+                println!("  Range: {:.1} - {:.1} m (avg {:.1} m)", stats.min_elevation, stats.max_elevation, stats.avg_elevation);
                 println!("  Coverage: {:.1}%", stats.coverage_percent);
                 println!("  Valid pixels: {}", stats.pixel_count);
             }
@@ -1361,14 +1342,8 @@ fn run_elevation_cmd(args: ElevationArgs, json: bool) -> Result<()> {
             } else {
                 println!("DEM Info:");
                 println!("  Size: {} x {} pixels", info.width, info.height);
-                println!(
-                    "  BBox: [{:.4}, {:.4}, {:.4}, {:.4}]",
-                    info.bbox.min_lon, info.bbox.min_lat, info.bbox.max_lon, info.bbox.max_lat
-                );
-                println!(
-                    "  Pixel size: {:.6} x {:.6}",
-                    info.pixel_size_x, info.pixel_size_y
-                );
+                println!("  BBox: [{:.4}, {:.4}, {:.4}, {:.4}]", info.bbox.min_lon, info.bbox.min_lat, info.bbox.max_lon, info.bbox.max_lat);
+                println!("  Pixel size: {:.6} x {:.6}", info.pixel_size_x, info.pixel_size_y);
                 println!("  NoData: {:?}", info.nodata);
             }
         }
@@ -1395,13 +1370,13 @@ fn run_elevation_cmd(args: ElevationArgs, json: bool) -> Result<()> {
 // ── New ML command handlers ────────────────────────────────────────────
 
 #[cfg(feature = "ml")]
-use crate::core::ml::automl::predict_hyperparams;
-#[cfg(feature = "ml")]
 use crate::core::ml::features::InstanceFeatures;
+#[cfg(feature = "ml")]
+use crate::core::ml::selector::{predict_solver, default_model_path};
 #[cfg(feature = "ml")]
 use crate::core::ml::quality_predictor::predict_quality;
 #[cfg(feature = "ml")]
-use crate::core::ml::selector::{default_model_path, predict_solver};
+use crate::core::ml::automl::predict_hyperparams;
 use crate::core::nlp::{parse_query, to_vrp_json};
 use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
 
@@ -1428,18 +1403,13 @@ async fn run_predict_solver_cmd(args: PredictSolverArgs) -> Result<()> {
         service_time_secs: None,
         use_time_windows: false,
         window_open: None,
-        window_close: None,
-        hyperparams: None,
+        window_close: None, hyperparams: None,
     };
     let pred = predict_solver(&input, Some(&default_model_path()))?;
     if args.json {
         output_json(&pred)?;
     } else {
-        println!(
-            "Recommended solver: {} (confidence: {:.2}%)",
-            pred.recommended,
-            pred.confidence * 100.0
-        );
+        println!("Recommended solver: {} (confidence: {:.2}%)", pred.recommended, pred.confidence * 100.0);
         if let Some((ref id, score)) = pred.runner_up {
             println!("Runner-up: {} ({:.2}%)", id, score as f64 * 100.0);
         }
@@ -1462,8 +1432,7 @@ async fn run_predict_quality_cmd(args: PredictQualityArgs) -> Result<()> {
         service_time_secs: None,
         use_time_windows: false,
         window_open: None,
-        window_close: None,
-        hyperparams: None,
+        window_close: None, hyperparams: None,
     };
     let features = InstanceFeatures::from_input(&input);
     let pred = predict_quality(&features);
@@ -1471,10 +1440,7 @@ async fn run_predict_quality_cmd(args: PredictQualityArgs) -> Result<()> {
         output_json(&pred)?;
     } else {
         println!("Predicted gap to optimal: {:.1}%", pred.predicted_gap_pct);
-        println!(
-            "Predicted tour length:    {:.1} km",
-            pred.predicted_tour_length_km
-        );
+        println!("Predicted tour length:    {:.1} km", pred.predicted_tour_length_km);
         println!("Confidence:               {:.2}", pred.confidence);
     }
     Ok(())
@@ -1492,8 +1458,7 @@ async fn run_tune_hyperparams_cmd(args: TuneHyperparamsArgs) -> Result<()> {
         service_time_secs: None,
         use_time_windows: false,
         window_open: None,
-        window_close: None,
-        hyperparams: None,
+        window_close: None, hyperparams: None,
     };
     let features = InstanceFeatures::from_input(&input);
     let params = predict_hyperparams(&features);

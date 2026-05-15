@@ -26,13 +26,11 @@ impl LocalDem {
         let dataset = Dataset::open(path)
             .with_context(|| format!("Failed to open DEM file: {}", path.display()))?;
 
-        let geo_transform = dataset
-            .geo_transform()
+        let geo_transform = dataset.geo_transform()
             .context("DEM file has no geo transform")?;
         let size = dataset.raster_size();
 
-        let rasterband = dataset
-            .rasterband(1)
+        let rasterband = dataset.rasterband(1)
             .context("DEM file has no raster band")?;
         let nodata = rasterband.no_data_value();
 
@@ -87,7 +85,13 @@ impl LocalDem {
         let band = self.dataset.rasterband(self.band_index)?;
 
         let mut buf = [0.0f64];
-        band.read_into_slice((col, row), (1, 1), (1, 1), &mut buf, None)?;
+        band.read_into_slice(
+            (col, row),
+            (1, 1),
+            (1, 1),
+            &mut buf,
+            None,
+        )?;
 
         let val = buf[0];
         if let Some(nd) = self.nodata {
@@ -141,10 +145,7 @@ impl LocalDem {
 
     /// Get elevations at multiple points.
     pub fn get_elevations(&self, points: &[(f64, f64)]) -> Result<Vec<Option<f64>>> {
-        points
-            .iter()
-            .map(|(lon, lat)| self.get_elevation(*lon, *lat))
-            .collect()
+        points.iter().map(|(lon, lat)| self.get_elevation(*lon, *lat)).collect()
     }
 
     // -----------------------------------------------------------------------
@@ -181,10 +182,7 @@ impl LocalDem {
                 points: vec![RouteElevationPoint {
                     distance_m: 0.0,
                     elevation_m: elev,
-                    point: Point {
-                        lon: route[0].0,
-                        lat: route[0].1,
-                    },
+                    point: Point { lon: route[0].0, lat: route[0].1 },
                 }],
                 total_ascent: 0.0,
                 total_descent: 0.0,
@@ -228,9 +226,7 @@ impl LocalDem {
 
             if i > 0 {
                 if let (Some(prev_e), Some(curr_e)) = (
-                    points
-                        .last()
-                        .and_then(|p: &RouteElevationPoint| p.elevation_m),
+                    points.last().and_then(|p: &RouteElevationPoint| p.elevation_m),
                     elevation,
                 ) {
                     let diff = curr_e - prev_e;

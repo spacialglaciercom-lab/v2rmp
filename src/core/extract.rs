@@ -129,9 +129,7 @@ async fn run_osm_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> 
         .collect();
 
     // Priority: 1. CLI/Request path, 2. Env var, 3. Default file, 4. Overpass API
-    let pbf_path_candidate = req
-        .pbf_path
-        .clone()
+    let pbf_path_candidate = req.pbf_path.clone()
         .or_else(|| std::env::var("OSM_PBF_PATH").ok());
 
     let segments = if let Some(pbf_path) = pbf_path_candidate {
@@ -140,10 +138,7 @@ async fn run_osm_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> 
             let extractor = OsmExtractor::new(pbf_path)?;
             extractor.extract_bbox(&bbox, &classes)?
         } else {
-            tracing::info!(
-                "PBF file not found at {}, falling back to Overpass",
-                pbf_path
-            );
+            tracing::info!("PBF file not found at {}, falling back to Overpass", pbf_path);
             let extractor = OverpassExtractor::new();
             extractor.extract_bbox(&bbox, &classes).await?
         }

@@ -1,51 +1,31 @@
-# rmpca - Route Optimization TUI & Agent Engine
+# rmpca - Route Optimization TUI
 
 [![Crates.io](https://img.shields.io/crates/v/v2rmp.svg)](https://crates.io/crates/v2rmp)
 [![Documentation](https://docs.rs/v2rmp/badge.svg)](https://docs.rs/v2rmp)
 [![License](https://img.shields.io/crates/l/v2rmp.svg)](LICENSE)
 
-A powerful Terminal User Interface (TUI) and Command-Line Interface (CLI) for route optimization using both the Chinese Postman Problem (CPP) and multi-vehicle Vehicle Routing Problem (VRP) algorithms. Extract road networks from Overture Maps or OpenStreetMap, compile them into efficient binary formats, and optimize routes with turn penalties and depot constraints.
+A powerful Terminal User Interface (TUI) for route optimization using the Chinese Postman Problem (CPP) algorithm. Extract road networks from Overture Maps or OpenStreetMap, compile them into efficient binary formats, and optimize routes with turn penalties and depot constraints.
 
 ## Features
 
-- 🖥️ **Interactive TUI**: Beautiful terminal interface built with `ratatui`
-- 🖼️ **Graphical UI (egui)**: Full-featured desktop GUI with map visualization, file dialogs, and drag-and-drop controls
-- 📐 **BBox Filtering**: Optimize only a subset of a large map by specifying a bounding box — no need to compile a separate .rmp for each area
-- 🤖 **Agent-First CLI**: Purpose-built `agent` command for JSON-task automation
 - 🗺️ **Data Extraction**: Extract road networks from Overture Maps S3 (Parquet) or OpenStreetMap PBF files
-- 🧹 **GeoJSON Cleaning**: Repair geometries, deduplicate edges, and optimize graph topology
 - 🔧 **Binary Compilation**: Convert GeoJSON to optimized `.rmp` binary format with CRC32 integrity checking
-- 🚗 **Route Optimization (CPP)**: Solve the Chinese Postman Problem with turn penalties and oneway support
-- 🚛 **VRP Engine**: Multi-vehicle routing with multiple solvers:
-  - **Clarke-Wright Savings**: Classic heuristic for capacity and distance
-  - **Sweep Algorithm**: Geometric partitioning
-  - **Local Search**: 2-Opt path improvements
-  - **Simulated Annealing**: Or-Opt metaheuristic
-- 🧠 **AI/ML Engine (Pure Rust)**: Learned models via `candle` for:
-  - **AutoML**: Instance-aware hyperparameter tuning (max iterations, temperature, tabu tenure, cooling rate, neighbourhood radius)
-  - **Solver Selection**: Neural ensemble recommending the best algorithm for your instance
-  - **Route Quality**: Predicting gap-to-optimal and tour length before solving
-  - **Neural-Guided Search**: MLP-scored candidate moves for local search refinement
-  - **NLP Query Parser**: Natural language to structured VRP JSON (Regex + local LLM via Qwen2.5)
-- ⛰️ **Elevation & Terrain**: DEM GeoTIFF queries (point, profile, stats, fuel calculation)
-- 🌐 **Headless Server**: JSON-RPC/STDIO `serve` mode for frontend integrations
-- 🤝 **MCP Server**: Model Context Protocol server with 20+ tools for AI agent integration (AutoML, Solver Prediction, NLP parsing, and full routing stack)
-- 📁 **Resource Discovery**: `list` command to discover maps and routes programmatically
-- ⚡ **Asynchronous Runtime**: Fully non-blocking I/O with `tokio` for high-performance extraction and processing
+- 🚗 **Route Optimization**: Solve the Chinese Postman Problem with:
+  - Eulerian circuit finding (Hierholzer's algorithm)
+  - Turn penalties (left, right, u-turn)
+  - Depot location support
+  - Oneway street handling (ignore/respect/reverse modes)
+  - Efficiency metrics and turn statistics
+- 🖥️ **Interactive TUI**: Beautiful terminal interface built with `ratatui`
+- 📁 **Cached Maps Browser**: Automatically scans for compiled `.rmp` files
+- ⚡ **Performance**: Concurrent S3 file processing, efficient graph algorithms
 
 ## Installation
 
 ### From crates.io
 
 ```bash
-# TUI + CLI (Standard - no heavy ML dependencies)
-cargo install v2rmp --no-default-features --features cli
-
-# Full TUI + CLI + AI/ML Features
 cargo install v2rmp
-
-# Everything (GUI + ML + extraction)
-cargo install v2rmp --all-features
 ```
 
 ### From source
@@ -53,274 +33,68 @@ cargo install v2rmp --all-features
 ```bash
 git clone https://github.com/spacialglaciercom-lab/v2rmp.git
 cd v2rmp
-
-# Standard build
-cargo build --release --no-default-features --features cli
-
-# Build with AI/ML support
-cargo build --release --features ml
+cargo build --release
 ```
 
-### Feature Flags
+## Quick Start
 
-| Feature    | Default | Description |
-|------------|---------|-------------|
-| `cli`      | ✅      | TUI + CLI (ratatui, crossterm) |
-| `gui`      |         | Desktop GUI with map visualization (eframe, egui, rfd) |
-| `extract`  | ✅      | Road network extraction from Overture/OSM |
-| `ml`       |         | AI/ML stack: AutoML, Neural-Guided Solvers, LLM-based NLP (candle, tokenizers) |
-
-## Modes of Operation
-
-### 1. Interactive TUI
-Launch the full interface by running `rmpca` without arguments.
+### Launch the TUI
 
 ```bash
 rmpca
 ```
 
-### 2. Graphical UI (egui)
-Launch the desktop GUI with map visualization, file pickers, and all workflow views. Requires the `gui` feature.
+### Command-line extraction (alternative)
 
 ```bash
-cargo run --release --features gui --bin web-ui
+# Extract from Overture Maps
+rmpca-extract --bbox "45.49,-73.59,45.52,-73.55" --output montreal.geojson
+
+# Extract from OSM PBF file
+rmpca-extract --source osm --pbf-path data.osm.pbf --bbox "45.49,-73.59,45.52,-73.55" --output montreal.geojson
 ```
 
-The GUI includes all the same views as the TUI — Extract, Clean, Compile, Optimize, VRP — plus an interactive map canvas with zoom/pan, native file dialogs, and a **Bounding Box Filter** on the Optimize page to limit optimization to a sub-region of a large .rmp file.
-
-### 3. Command-Line Interface (CLI)
-Use `rmpca <COMMAND>` for scripts, agents, and batch processing. All commands support a `--json` flag for structured output.
-
-```bash
-# Discover resources
-rmpca list maps --json
-rmpca list routes --json
-
-# Run a task via Agent (JSON payload)
-rmpca agent --task task.json --json
-
-# Multi-vehicle VRP
-rmpca vrp -i map.rmp --vehicles 5 --algo savings --coordinates stops.csv --depot "40.71,-74.01" --output-dir routes/
-
-# Single-vehicle CPP Optimization (Outputs GPX)
-rmpca optimize -i map.rmp -o route.gpx --depot "40.71,-74.01"
-```
-
-## CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `extract` | Fetch data from Overture Maps or OSM |
-| `clean` | Repair and simplify GeoJSON networks |
-| `compile` | Convert GeoJSON to efficient `.rmp` binary |
-| `optimize` | Single-vehicle CPP route optimization |
-| `vrp` | Multi-vehicle Routing Problem solver |
-| `agent` | Execute complex tasks from JSON payloads |
-| `list` | Enumerate maps, routes, and solvers |
-| `pipeline` | Run extract → clean → compile → optimize |
-| `elevation` | DEM GeoTIFF queries (point, profile, stats, fuel) |
-| `embed` | Generate text embeddings via fastembed |
-| `predict` | ML predictions: `solver`, `quality`, `hyperparams` |
-| `nlp` | Parse natural language queries to VRP JSON |
-| `serve` | Headless JSON-RPC/STDIO server |
-
-### MCP Server
-
-rmpca ships an MCP (Model Context Protocol) server that exposes the route optimization pipeline as tools for AI agents. Compatible with Claude Desktop, Claude Code, Cursor, Continue, and any MCP-compliant client.
-
-#### Quick Start
-
-1. **Add to your MCP client config.** The `cargo run` command handles building automatically — no separate build step needed.
-
-   **Claude Desktop** — edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
-
-   ```json
-   {
-     "mcpServers": {
-       "rmpca": {
-         "command": "cargo",
-         "args": ["run", "--bin", "rmpca-mcp-server", "--release"],
-         "cwd": "/path/to/v2rmp"
-       }
-     }
-   }
-   ```
-
-   **Claude Code** — run in your project directory:
-
-   ```bash
-   claude mcp add rmpca -- cargo run --bin rmpca-mcp-server --release
-   ```
-
-   **Cursor / Continue / other clients** — add the same JSON to your client's MCP server config under `mcpServers`.
-
-2. **Restart your MCP client** (or reload the server list).
-
-3. **Ask your AI agent to use the tools.** The agent will discover all tools automatically.
-
-#### Available Tools
-
-| Tool | Required Params | Description |
-|------|----------------|-------------|
-| `extract_overture` | `bbox` | Extract road network from Overture Maps S3 by bounding box |
-| `extract_osm` | `bbox` | Extract road network from OSM (local PBF or Overpass API) |
-| `compile` | `input`, `output` | Convert GeoJSON to binary `.rmp` format with optional cleaning |
-| `optimize` | `input` | Run CPP (edge coverage) or VRP (multi-vehicle) route optimization |
-| `clean` | `input`, `output` | Full 11-stage GeoJSON cleaning pipeline with all CleanOptions |
-| `vrp_solve` | `stops` | Solve VRP from explicit lat/lon stop coordinates (no .rmp needed) |
-| `elevation_query` | `dem_path`, `points` | Query elevation at lat/lon points from a local DEM GeoTIFF |
-| `elevation_profile` | `dem_path`, `route` | Sample elevation along a route at fixed intervals |
-| `elevation_stats` | `dem_path`, `bbox` | Elevation statistics (min, max, avg, coverage) in a bbox |
-| `dem_info` | `dem_path` | Return DEM metadata (width, height, bbox, nodata, pixel size) |
-| `fuel_estimate` | `samples` | Calculate fuel consumption from an elevation profile |
-| `inspect_rmp` | `input` | Parse .rmp binary: node count, edge count, bbox |
-| `pipeline` | `bbox` | End-to-end: extract → clean → compile → optimize |
-| `get_valhalla_matrix` | `locations` | Fetch real-road distance/time matrix from Valhalla/OSRM |
-| `list_solvers` | — | Return available VRP solver IDs and labels |
-| `predict_solver` | `stops` | **ML**: Recommend best solver algorithm for an instance |
-| `predict_quality` | `stops` | **ML**: Predict gap-to-optimal and tour length before solving |
-| `tune_hyperparams` | `stops` | **AutoML**: Predict instance-aware solver hyperparameters |
-| `score_route` | `stops`, `routes` | Evaluate a solved route across 4 quality dimensions |
-| `parse_routing_query`| `query` | **NLP/LLM**: Convert natural language to VRP JSON config |
-| `haversine_distance` | `from`, `to` | Calculate great-circle distance between two points |
-
-#### Example Conversation
-
-```
-User:  Extract Overture data for Monaco, compile it, and optimize a sweeper route
-
-Agent: [calls extract_overture with bbox {min_lon:7.409, min_lat:43.723, max_lon:7.439, max_lat:43.751}]
-       → 2340 nodes, 3102 edges, 45.6 km → extract-output.geojson
-       [calls compile with input="extract-output.geojson", output="monaco.rmp"]
-       → 1500 nodes, 2100 edges, 12 KB
-       [calls optimize with input="monaco.rmp", mode="cpp"]
-       → 52.3 km total, 92% efficiency, 12ms
-```
-
-### AI Agent Task Format
-The `agent` command consumes a JSON payload, allowing agents to trigger complex workflows without manual flag management.
-
-```json
-{
-  "type": "optimize",
-  "input": "manhattan.rmp",
-  "output": "delivery_route.gpx",
-  "num_vehicles": 1,
-  "solver_id": "clarke_wright",
-  "oneway": "respect",
-  "left_penalty": 1.5,
-  "depot": [40.7128, -74.0060]
-}
-```
-
-## Usage (TUI)
+## Usage
 
 ### 1. Extract Road Network
-- Navigate to **Extract Data** view
-- Set bounding box (format: `min_lon,min_lat,max_lon,max_lat`)
-- Toggle between OSM and Overture sources
-- Output: `extract_YYYYMMDD_HHMMSS.geojson`
+
+1. Navigate to **Extract Data** view
+2. Press `b` to set bounding box (format: `min_lat,min_lon,max_lat,max_lon`)
+3. Press `Tab` or `s` to toggle between OSM and Overture data sources
+4. For OSM: Press `p` to set path to local `.osm.pbf` file
+5. Press `Enter` to start extraction
+6. Output: `extract_YYYYMMDD_HHMMSS.geojson`
 
 ### 2. Compile to Binary
-- Navigate to **Compile Map** view
-- Set input GeoJSON file path
-- Output: `.rmp` binary file
 
-### 3. Browse & Optimize
-- Use **Browse Cached Maps** to select a compiled map
-- Configure turn penalties and depot in the **Optimize Route** view
-- Run optimization to generate a GPX/GeoJSON route
+1. Navigate to **Compile Map** view
+2. Press `i` to set input GeoJSON file path
+3. Press `o` to set output path (optional, auto-derived from input)
+4. Press `Enter` to compile
+5. Output: `.rmp` binary file
 
-#### Bounding Box Filter
-When working with large maps (e.g., a full city), you can restrict optimization to a smaller area instead of running CPP on the entire network. In the **Optimize Route** view (TUI or GUI), set a bounding box in `min_lon,min_lat,max_lon,max_lat` format. Only nodes and edges within that box are included in the optimization. This dramatically reduces solve time for large datasets.
+### 3. Browse Cached Maps
 
-The core function is also available programmatically:
+1. Navigate to **Browse Cached Maps** view
+2. View all `.rmp` files in current directory
+3. Use `↑↓` to select a map
+4. Press `Enter` to use selected map for optimization
 
-```rust
-use v2rmp::core::optimize::filter_bbox;
-use v2rmp::core::geo_types::BBox;
+### 4. Optimize Route
 
-let bbox = Some(BBox {
-    min_lon: -73.6,
-    min_lat: 45.5,
-    max_lon: -73.5,
-    max_lat: 45.6,
-});
-let (sub_nodes, sub_edges) = filter_bbox(
-    &nodes,
-    &edges,
-    bbox
-);
-
-// Pass None to use the full map
-```
-
-## Elevation & Fuel
-
-Query DEM GeoTIFF files from the CLI or MCP server. Supported via GDAL — works with any GDAL-compatible raster format.
-
-```bash
-# DEM metadata
-rmpca elevation --dem dem.tif info
-
-# Single point query
-rmpca elevation --dem dem.tif point --lon -73.58 --lat 45.50
-
-# Batch point query from JSON file (or stdin)
-echo '[[-73.58,45.50],[-73.57,45.51]]' | rmpca elevation --dem dem.tif points
-
-# Route elevation profile
-echo '[[-73.58,45.50],[-73.57,45.51],[-73.56,45.52]]' | rmpca elevation --dem dem.tif profile -s 100
-
-# Bbox elevation statistics
-rmpca elevation --dem dem.tif stats --bbox "-73.60,45.48,-73.55,45.52" --step 10
-
-# Fuel consumption from a route (base consumption L/km)
-echo '[[-73.58,45.50],[-73.57,45.51]]' | rmpca elevation --dem dem.tif fuel -s 100 --base-consumption 0.08
-```
-
-All subcommands support `--json` for machine-readable output. See the MCP server section above for the corresponding `elevation_query`, `elevation_profile`, `elevation_stats`, `dem_info`, and `fuel_estimate` tools.
-
-## VRP Coordinate Input
-
-The VRP solver accepts a **CSV file** of coordinates as its primary input. This replaces the previous JSON waypoints format.
-
-### CSV Format
-
-The file must have a header row. Required columns are `lat` and `lon`; `label`, `demand`, and `type` are optional.
-
-| Column   | Required | Description |
-|----------|----------|-------------|
-| `lat`    | ✅        | Latitude (WGS-84) |
-| `lon`    | ✅        | Longitude (WGS-84) |
-| `label`  |          | Human-readable name (auto-generated if omitted) |
-| `demand` |          | Per-stop demand (default: 0 for depots, 1 for stops) |
-| `type`   |          | `depot` or `stop` (default: `stop`; first row becomes depot if no `type` column) |
-
-### Example
-
-```csv
-lat,lon,label,demand,type
-45.5017,-73.5673,Montreal Depot,0,depot
-45.5032,-73.5701,Customer A,5,stop
-45.5100,-73.5800,Customer B,3,stop
-45.4980,-73.5750,Customer C,2,stop
-45.5050,-73.5900,Customer D,4,stop
-```
-
-Minimal (just coordinates — first row is automatically treated as the depot):
-
-```csv
-lat,lon
-45.5017,-73.5673
-45.5032,-73.5701
-45.5100,-73.5800
-45.4980,-73.5750
-```
+1. Navigate to **Optimize Route** view
+2. Press `c` to set compiled map file (`.rmp`) or select from Browse view
+3. Configure turn penalties:
+   - `l` - Left turn penalty (default: 1.0)
+   - `R` - Right turn penalty (default: 0.0)
+   - `u` - U-turn penalty (default: 5.0)
+4. Press `d` to set depot coordinates (optional)
+5. Press `Enter` to optimize
+6. Output: `route_YYYYMMDD_HHMMSS.json`
 
 ## Binary Format (.rmp)
 
-The `.rmp` format is a compact binary representation optimized for graph traversals:
+The `.rmp` format is a compact binary representation:
 
 ```
 [4 bytes]  Magic "RMP1"
@@ -331,63 +105,126 @@ The `.rmp` format is a compact binary representation optimized for graph travers
 [4 bytes]  CRC32 checksum
 ```
 
+## Keyboard Shortcuts
+
+### Global
+- `q` - Quit application
+- `Esc` - Return to home
+- `h` / `F1` - Toggle help
+- `↑↓` - Navigate menus
+- `Enter` - Select / confirm
+
+### View-specific
+- **Extract**: `Tab`/`s` toggle source, `b` set bbox, `p` set PBF path (OSM only)
+- **Compile**: `i` input file, `o` output file
+- **Browse Maps**: `↑↓` navigate, `Enter` select
+- **Optimize**: `c` cache file, `l`/`R`/`u` penalties, `d` depot
+
 ## Library Usage
 
 ```rust
-use v2rmp::core::{extract, compile, optimize, vrp};
+use v2rmp::core::{extract, compile, optimize};
 
-// VRP Solver Example
-let vrp_input = vrp::VRPSolverInput {
-    stops: my_stops,
-    vehicles: 3,
-    ..Default::default()
+// Extract from Overture Maps
+let extract_req = extract::ExtractRequest {
+    source: extract::ExtractSource::Overture,
+    bbox: extract::BBoxRequest {
+        min_lon: -73.59,
+        min_lat: 45.49,
+        max_lon: -73.55,
+        max_lat: 45.52,
+    },
+    road_classes: extract::RoadClass::all_vehicle(),
+    output_path: "output.geojson".to_string(),
+    pbf_path: None,
 };
-let solver = vrp::get_solver("clarke-wright")?;
-let output = solver.solve(&vrp_input).await?;
+let result = extract::run_extract(&extract_req)?;
+
+// Extract from OSM PBF
+let extract_req = extract::ExtractRequest {
+    source: extract::ExtractSource::Osm,
+    bbox: extract::BBoxRequest {
+        min_lon: -73.59,
+        min_lat: 45.49,
+        max_lon: -73.55,
+        max_lat: 45.52,
+    },
+    road_classes: extract::RoadClass::all_vehicle(),
+    output_path: "output.geojson".to_string(),
+    pbf_path: Some("data.osm.pbf".to_string()),
+};
+let result = extract::run_extract(&extract_req)?;
+
+// Compile to binary
+let compile_req = compile::CompileRequest {
+    input_geojson: "output.geojson".to_string(),
+    output_rmp: "map.rmp".to_string(),
+    compress: false,
+    road_classes: vec![],
+};
+let result = compile::run_compile(&compile_req)?;
+
+// Optimize route
+let optimize_req = optimize::OptimizeRequest {
+    cache_file: "map.rmp".to_string(),
+    route_file: Some("route.json".to_string()),
+    turn_penalties: optimize::TurnPenalties::default(),
+    depot: None,
+    oneway_mode: optimize::OnewayMode::Respect,
+};
+let result = optimize::run_optimize(&optimize_req)?;
 ```
 
-## Models on Hugging Face 🤗
+## Algorithms
 
-Trained safetensors models are published to the Hugging Face Hub for download and reuse:
+### Chinese Postman Problem (CPP)
+1. Build graph from road network
+2. Find odd-degree vertices
+3. Minimum weight perfect matching (greedy nearest-neighbor)
+4. Add duplicate edges to make all vertices even-degree
+5. Find Eulerian circuit (Hierholzer's algorithm)
+6. Calculate efficiency metrics
 
-**[aerialblancaservices/v2rmp-routing-ml](https://huggingface.co/aerialblancaservices/v2rmp-routing-ml)**
-
-| Model | Architecture | Purpose |
-|-------|-------------|---------|
-| `automl_v2` | 28 → 64 → 5 MLP | Instance-aware solver hyperparameters |
-| `solver_selector_v2` | 28 → 128 → 64 → 6 MLP | Best algorithm classification |
-| `quality_predictor_v2` | 28 → 64 → 32 → 2 MLP | Gap-to-optimal & tour length prediction |
-| `move_scorer_v2` | 16 → 32 → 16 → 1 MLP | Neural-guided 2-Opt / Or-Opt move scoring |
-| `graph_embed` | 2-layer GraphSAGE | Road network edge embeddings (64-dim) |
-
-Built with [Candle](https://github.com/huggingface/candle) — pure Rust, no Python dependencies required.
+### Turn Classification
+- Bearing-based turn detection
+- Categories: straight (±45°), left/right (45-135°), u-turn (>135°)
 
 ## Data Sources
 
 ### Overture Maps
-- **Status**: ✅ Production Ready
-- **Source**: AWS S3 public bucket (`overturemaps-us-west-2`)
-- **Format**: Parquet/WKB via `reqwest` and `parquet` crates
+- Source: AWS S3 public bucket (`overturemaps-us-west-2`)
+- Format: Parquet with WKB geometry
+- Release: 2026-04-15.0
+- No authentication required
+- **Status**: ✅ Fully functional
 
 ### OpenStreetMap
-- **Status**: ✅ Production Ready
-- **Source**: Local `.osm.pbf` files
-- **Parser**: `osmpbf` crate
+- Format: PBF (Protocol Buffer Format)
+- Source: Local `.osm.pbf` files (download from Geofabrik, BBBike, etc.)
+- **Status**: ✅ Fully functional
 
 ## Performance
-- **Snapping**: 1-meter precision node deduplication
-- **Compression**: ~90% reduction vs GeoJSON
-- **Speed**: Optimization on 10,000+ edges in <500ms
 
-## Roadmap
-- [x] **v0.3.0**: VRP Engine Integration (Clarke-Wright, Sweep, 2-Opt)
-- [x] **v0.3.5**: Agent & List commands for machine-to-machine workflows
-- [x] **v0.4.0**: Fully Async pipeline and OSM PBF support
-- [x] **v0.4.1**: Multi-vehicle VRP CLI command operational with CSV coordinates input
-- [x] **v0.4.2**: Elevation engine (DEM GeoTIFF), Embedding engine (fastembed), Headless serve mode
-- [x] **v0.4.3**: BBox deduplication, TUI version auto-sync, FileBrowser ESC fix, CLI guard
-- [x] **v0.4.4**: MCP server with 20+ tools (AutoML, Solver Prediction, NLP parsing) and feature-gated AI/ML stack
-- [ ] **v0.5.0**: Time Window support (VRPTW) and 3D terrain-aware routing
+- **Concurrent S3 Processing**: Up to 10 files in parallel
+- **Node Deduplication**: 1-meter precision snapping
+- **Binary Format**: ~90% compression vs GeoJSON
+- **Graph Algorithms**: O(E log V) for matching, O(E) for Eulerian circuit
+
+## Requirements
+
+- Rust 1.70+
+- Internet connection (for Overture Maps extraction)
+- Local OSM PBF file (for OpenStreetMap extraction)
+
+## Contributing
+
+Contributions welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new functionality
+4. Submit a pull request
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 ## License
 
@@ -396,3 +233,24 @@ Licensed under either of:
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
 
 at your option.
+
+## Acknowledgments
+
+- [Overture Maps Foundation](https://overturemaps.org/) for open road network data
+- [OpenStreetMap](https://www.openstreetmap.org/) contributors for global map data
+- [ratatui](https://github.com/ratatui-org/ratatui) for the excellent TUI framework
+- Chinese Postman Problem algorithm based on classical graph theory
+
+## Roadmap
+
+- [x] **v0.1.0**: Overture extraction, OSM PBF extraction, cached maps browser, basic optimization, TUI
+- [ ] **v0.2.0**: Async/threaded operations, comprehensive tests, performance optimizations
+- [ ] **v0.3.0**: Multi-depot support, advanced features
+- [ ] **v0.4.0+**: Time windows, capacity constraints
+- [ ] **v1.0.0**: Stable API, backward compatibility guarantees
+
+## Support
+
+- Documentation: [docs.rs/v2rmp](https://docs.rs/v2rmp)
+- Issues: [GitHub Issues](https://github.com/spacialglaciercom-lab/v2rmp/issues)
+- Discussions: [GitHub Discussions](https://github.com/spacialglaciercom-lab/v2rmp/discussions)

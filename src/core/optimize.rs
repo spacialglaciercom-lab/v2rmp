@@ -19,7 +19,10 @@ pub fn filter_bbox(
     };
 
     // Mark which old-node indices are inside the bbox
-    let inside: Vec<bool> = nodes.iter().map(|n| bbox.contains(n.lon, n.lat)).collect();
+    let inside: Vec<bool> = nodes
+        .iter()
+        .map(|n| bbox.contains(n.lon, n.lat))
+        .collect();
 
     // Build old->new index map
     let mut old_to_new = vec![u32::MAX; nodes.len()];
@@ -310,12 +313,7 @@ pub fn solve_cpp(
                 total_segments: 0,
                 deadhead_distance_km: 0.0,
                 efficiency_pct: 100.0,
-                turns: TurnSummary {
-                    left: 0,
-                    right: 0,
-                    u_turn: 0,
-                    straight: 0,
-                },
+                turns: TurnSummary { left: 0, right: 0, u_turn: 0, straight: 0 },
                 elapsed_ms: 0,
                 num_routes: 1,
             },
@@ -331,43 +329,23 @@ pub fn solve_cpp(
         let from = edge.from as usize;
         let to = edge.to as usize;
 
-        adj[from].push(AdjEntry {
-            to: edge.to,
-            weight_m: edge.weight_m,
-            edge_idx: idx,
-        });
+        adj[from].push(AdjEntry { to: edge.to, weight_m: edge.weight_m, edge_idx: idx });
 
         match oneway {
             OnewayMode::Ignore => {
-                adj[to].push(AdjEntry {
-                    to: edge.from,
-                    weight_m: edge.weight_m,
-                    edge_idx: idx,
-                });
+                adj[to].push(AdjEntry { to: edge.from, weight_m: edge.weight_m, edge_idx: idx });
             }
             OnewayMode::Respect => {
                 if edge.oneway == 0 {
-                    adj[to].push(AdjEntry {
-                        to: edge.from,
-                        weight_m: edge.weight_m,
-                        edge_idx: idx,
-                    });
+                    adj[to].push(AdjEntry { to: edge.from, weight_m: edge.weight_m, edge_idx: idx });
                 }
             }
             OnewayMode::Reverse => {
                 if edge.oneway == 1 {
-                    adj[to].push(AdjEntry {
-                        to: edge.from,
-                        weight_m: edge.weight_m,
-                        edge_idx: idx,
-                    });
+                    adj[to].push(AdjEntry { to: edge.from, weight_m: edge.weight_m, edge_idx: idx });
                     adj[from].retain(|e| e.edge_idx != idx);
                 } else {
-                    adj[to].push(AdjEntry {
-                        to: edge.from,
-                        weight_m: edge.weight_m,
-                        edge_idx: idx,
-                    });
+                    adj[to].push(AdjEntry { to: edge.from, weight_m: edge.weight_m, edge_idx: idx });
                 }
             }
         }
@@ -387,8 +365,8 @@ pub fn solve_cpp(
     let num_odd = odd_vertices.len();
 
     if num_odd > 0 {
-        use std::cmp::Ordering;
         use std::collections::BinaryHeap;
+        use std::cmp::Ordering;
 
         #[derive(Copy, Clone, PartialEq)]
         struct State {
@@ -399,10 +377,7 @@ pub fn solve_cpp(
         impl Eq for State {}
         impl Ord for State {
             fn cmp(&self, other: &Self) -> Ordering {
-                other
-                    .cost
-                    .partial_cmp(&self.cost)
-                    .unwrap_or(Ordering::Equal)
+                other.cost.partial_cmp(&self.cost).unwrap_or(Ordering::Equal)
             }
         }
         impl PartialOrd for State {
@@ -488,7 +463,7 @@ pub fn solve_cpp(
                 if dists[v] < f64::MAX {
                     dist_matrix[i][j] = dists[v];
                     dist_matrix[j][i] = dists[v];
-
+                    
                     let mut path = Vec::new();
                     let mut curr = v;
                     while let Some((p, weight, eidx)) = prev[curr] {
@@ -502,7 +477,7 @@ pub fn solve_cpp(
 
         // 2. Minimum Weight Perfect Matching
         let mut pairs = Vec::new();
-
+        
         if num_odd <= 24 {
             // Exact DP (Bitmask DP)
             let mut memo = vec![f64::MAX; 1 << num_odd];
@@ -510,21 +485,15 @@ pub fn solve_cpp(
             memo[0] = 0.0;
 
             for mask in 0..(1 << num_odd) {
-                if memo[mask] == f64::MAX {
-                    continue;
-                }
-
+                if memo[mask] == f64::MAX { continue; }
+                
                 // Find first unmatched vertex
                 let mut i = 0;
                 while i < num_odd {
-                    if (mask & (1 << i)) == 0 {
-                        break;
-                    }
+                    if (mask & (1 << i)) == 0 { break; }
                     i += 1;
                 }
-                if i == num_odd {
-                    continue;
-                }
+                if i == num_odd { continue; }
 
                 for j in (i + 1)..num_odd {
                     if (mask & (1 << j)) == 0 && dist_matrix[i][j] < f64::MAX {
@@ -542,20 +511,15 @@ pub fn solve_cpp(
             let mut curr = (1 << num_odd) - 1;
             while curr > 0 {
                 let prev_mask = parent[curr];
-                if prev_mask == usize::MAX {
-                    break;
-                } // Safety against disconnected components
+                if prev_mask == usize::MAX { break; } // Safety against disconnected components
                 let diff = curr ^ prev_mask;
-
+                
                 let mut u = usize::MAX;
                 let mut v = usize::MAX;
                 for i in 0..num_odd {
                     if (diff & (1 << i)) != 0 {
-                        if u == usize::MAX {
-                            u = i;
-                        } else {
-                            v = i;
-                        }
+                        if u == usize::MAX { u = i; }
+                        else { v = i; }
                     }
                 }
                 pairs.push((u, v));
@@ -565,19 +529,17 @@ pub fn solve_cpp(
             // Greedy fallback for very large odd-vertex counts
             let mut matched = vec![false; num_odd];
             for i in 0..num_odd {
-                if matched[i] {
-                    continue;
-                }
+                if matched[i] { continue; }
                 let mut best_j = None;
                 let mut best_dist = f64::MAX;
-
+                
                 for j in (i + 1)..num_odd {
                     if !matched[j] && dist_matrix[i][j] < best_dist {
                         best_dist = dist_matrix[i][j];
                         best_j = Some(j);
                     }
                 }
-
+                
                 if let Some(j) = best_j {
                     matched[i] = true;
                     matched[j] = true;
@@ -588,11 +550,7 @@ pub fn solve_cpp(
 
         // Add the paths for all matched pairs into duplicate_edges
         for (u_idx, v_idx) in pairs {
-            let (i, j) = if u_idx < v_idx {
-                (u_idx, v_idx)
-            } else {
-                (v_idx, u_idx)
-            };
+            let (i, j) = if u_idx < v_idx { (u_idx, v_idx) } else { (v_idx, u_idx) };
             for &(p, c, weight, eidx) in &path_matrix[i][j] {
                 duplicate_edges.push((p, c, weight, eidx));
             }
@@ -602,16 +560,8 @@ pub fn solve_cpp(
     // Add duplicate edges
     for (i, &(u, v, weight, _eidx)) in duplicate_edges.iter().enumerate() {
         let deadhead_edge_idx = edges.len() + i;
-        adj[u].push(AdjEntry {
-            to: v as u32,
-            weight_m: weight,
-            edge_idx: deadhead_edge_idx,
-        });
-        adj[v].push(AdjEntry {
-            to: u as u32,
-            weight_m: weight,
-            edge_idx: deadhead_edge_idx,
-        });
+        adj[u].push(AdjEntry { to: v as u32, weight_m: weight, edge_idx: deadhead_edge_idx });
+        adj[v].push(AdjEntry { to: u as u32, weight_m: weight, edge_idx: deadhead_edge_idx });
     }
 
     // Find Eulerian circuit using Hierholzer's algorithm
@@ -620,10 +570,7 @@ pub fn solve_cpp(
         let mut best_dist = f64::MAX;
         for (i, node) in nodes.iter().enumerate() {
             let dist = haversine_m(dep_lat, dep_lon, node.lat, node.lon);
-            if dist < best_dist {
-                best_dist = dist;
-                best_node = i;
-            }
+            if dist < best_dist { best_dist = dist; best_node = i; }
         }
         best_node
     } else if !odd_vertices.is_empty() {
@@ -656,12 +603,7 @@ pub fn solve_cpp(
     let mut total_distance_m = 0.0;
     let mut deadhead_distance_m = 0.0;
     let mut total_segments = 0usize;
-    let mut turns = TurnSummary {
-        left: 0,
-        right: 0,
-        u_turn: 0,
-        straight: 0,
-    };
+    let mut turns = TurnSummary { left: 0, right: 0, u_turn: 0, straight: 0 };
     let mut edge_traversal_count = vec![0u32; edges.len()];
 
     for entry in circuit_with_edges.iter().skip(1) {
@@ -685,21 +627,9 @@ pub fn solve_cpp(
             let prev = circuit[i - 1] as usize;
             let curr = circuit[i] as usize;
             let next = circuit[i + 1] as usize;
-            if prev == curr || curr == next {
-                continue;
-            }
-            let b_in = bearing(
-                nodes[prev].lat,
-                nodes[prev].lon,
-                nodes[curr].lat,
-                nodes[curr].lon,
-            );
-            let b_out = bearing(
-                nodes[curr].lat,
-                nodes[curr].lon,
-                nodes[next].lat,
-                nodes[next].lon,
-            );
+            if prev == curr || curr == next { continue; }
+            let b_in = bearing(nodes[prev].lat, nodes[prev].lon, nodes[curr].lat, nodes[curr].lon);
+            let b_out = bearing(nodes[curr].lat, nodes[curr].lon, nodes[next].lat, nodes[next].lon);
             let delta = b_out - b_in;
             match classify_turn(delta) {
                 "left" => turns.left += 1,
@@ -746,13 +676,7 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     }
     let (nodes, edges) = read_rmp_file(&file_data)?;
 
-    let output = solve_cpp(
-        &nodes,
-        &edges,
-        req.oneway_mode,
-        req.depot,
-        req.turn_penalties,
-    )?;
+    let output = solve_cpp(&nodes, &edges, req.oneway_mode, req.depot, req.turn_penalties)?;
 
     if let Some(ref route_path) = req.route_file {
         if route_path.ends_with(".json") {
@@ -829,13 +753,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
     let matrix = if !edges.is_empty() {
         #[cfg(feature = "ml")]
         {
-            super::vrp::utils::build_graph_matrix(
-                &stops,
-                &nodes,
-                &edges,
-                embeddings.as_deref(),
-                40.0,
-            )
+            super::vrp::utils::build_graph_matrix(&stops, &nodes, &edges, embeddings.as_deref(), 40.0)
         }
         #[cfg(not(feature = "ml"))]
         {
@@ -960,26 +878,20 @@ pub(crate) fn write_gpx_multi(path: &str, routes: &[Vec<VRPSolverStop>]) -> anyh
     Ok(())
 }
 
+
 /// Write a GPX track file from a CPP circuit.
 #[allow(dead_code)]
 pub fn write_gpx_cpp(path: &str, nodes: &[RmpNode], circuit: &[u32]) -> anyhow::Result<()> {
     use std::io::Write;
     let mut file = std::fs::File::create(path)?;
     writeln!(file, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>")?;
-    writeln!(
-        file,
-        "<gpx version=\"1.1\" creator=\"rmpca\" xmlns=\"http://www.topografix.com/GPX/1/1\">"
-    )?;
+    writeln!(file, "<gpx version=\"1.1\" creator=\"rmpca\" xmlns=\"http://www.topografix.com/GPX/1/1\">")?;
     writeln!(file, "  <trk>")?;
     writeln!(file, "    <name>CPP Route</name>")?;
     writeln!(file, "    <trkseg>")?;
     for &idx in circuit {
         if (idx as usize) < nodes.len() {
-            writeln!(
-                file,
-                "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"></trkpt>",
-                nodes[idx as usize].lat, nodes[idx as usize].lon
-            )?;
+            writeln!(file, "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"></trkpt>", nodes[idx as usize].lat, nodes[idx as usize].lon)?;
         }
     }
     writeln!(file, "    </trkseg>")?;
@@ -1077,523 +989,415 @@ mod tests {
         let _ = std::fs::remove_file(temp_path);
     }
 
-    // ── Mathematical correctness tests (equivalent to Lean 4 theorems) ────
+// ── Mathematical correctness tests (equivalent to Lean 4 theorems) ────
 
-    /// Helper: build RmpNode/RmpEdge vectors from raw tuples.
-    fn make_graph(
-        coords: &[(f64, f64)],
-        edge_defs: &[(u32, u32, f64, u8)],
-    ) -> (Vec<RmpNode>, Vec<RmpEdge>) {
-        let nodes: Vec<RmpNode> = coords
-            .iter()
-            .map(|&(lat, lon)| RmpNode { lat, lon })
-            .collect();
-        let edges: Vec<RmpEdge> = edge_defs
-            .iter()
-            .map(|&(from, to, weight_m, oneway)| RmpEdge {
-                from,
-                to,
-                weight_m,
-                oneway,
-            })
-            .collect();
-        (nodes, edges)
-    }
+/// Helper: build RmpNode/RmpEdge vectors from raw tuples.
+fn make_graph(
+    coords: &[(f64, f64)],
+    edge_defs: &[(u32, u32, f64, u8)],
+) -> (Vec<RmpNode>, Vec<RmpEdge>) {
+    let nodes: Vec<RmpNode> = coords
+        .iter()
+        .map(|&(lat, lon)| RmpNode { lat, lon })
+        .collect();
+    let edges: Vec<RmpEdge> = edge_defs
+        .iter()
+        .map(|&(from, to, weight_m, oneway)| RmpEdge { from, to, weight_m, oneway })
+        .collect();
+    (nodes, edges)
+}
 
-    /// **Theorem (Eulerian circuit exists)**:
-    /// After the CPP solver adds duplicate edges to make all vertex degrees even,
-    /// an Eulerian circuit must exist. This is a direct consequence of Euler's theorem:
-    /// A connected graph has an Eulerian circuit iff every vertex has even degree.
-    ///
-    /// Test: for any connected graph, after running solve_cpp, verify that the
-    /// output circuit is a valid closed walk that traverses every edge.
-    #[test]
-    fn test_cpp_circuit_is_eulerian() {
-        // Triangle graph - already Eulerian (every vertex degree 2)
-        let (nodes, edges) = make_graph(
-            &[(45.0, -73.0), (45.01, -73.0), (45.005, -73.01)],
-            &[(0, 1, 1100.0, 0), (1, 2, 1100.0, 0), (2, 0, 1100.0, 0)],
-        );
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
+/// **Theorem (Eulerian circuit exists)**:
+/// After the CPP solver adds duplicate edges to make all vertex degrees even,
+/// an Eulerian circuit must exist. This is a direct consequence of Euler's theorem:
+/// A connected graph has an Eulerian circuit iff every vertex has even degree.
+///
+/// Test: for any connected graph, after running solve_cpp, verify that the
+/// output circuit is a valid closed walk that traverses every edge.
+#[test]
+fn test_cpp_circuit_is_eulerian() {
+    // Triangle graph - already Eulerian (every vertex degree 2)
+    let (nodes, edges) = make_graph(
+        &[(45.0, -73.0), (45.01, -73.0), (45.005, -73.01)],
+        &[
+            (0, 1, 1100.0, 0),
+            (1, 2, 1100.0, 0),
+            (2, 0, 1100.0, 0),
+        ],
+    );
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None, TurnPenalties::default()).unwrap();
 
-        // Property 1: circuit is non-empty
-        assert!(!out.circuit.is_empty(), "circuit must not be empty");
+    // Property 1: circuit is non-empty
+    assert!(!out.circuit.is_empty(), "circuit must not be empty");
 
-        // Property 2: circuit is a closed walk (first == last)
-        assert_eq!(
-            out.circuit.first(),
-            out.circuit.last(),
-            "circuit must be closed"
-        );
+    // Property 2: circuit is a closed walk (first == last)
+    assert_eq!(
+        out.circuit.first(), out.circuit.last(),
+        "circuit must be closed"
+    );
 
-        // Property 3: every node in the circuit is a valid node index
-        for &v in &out.circuit {
-            assert!(
-                (v as usize) < nodes.len(),
-                "circuit node {} out of range (max {})",
-                v,
-                nodes.len() - 1
-            );
-        }
-
-        // Property 4: every consecutive pair in the circuit is connected by an edge
-        let mut adj: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
-        for e in &edges {
-            adj.insert((e.from, e.to));
-            if e.oneway == 0 {
-                adj.insert((e.to, e.from));
-            }
-        }
-        for window in out.circuit.windows(2) {
-            let (a, b) = (window[0], window[1]);
-            assert!(
-                adj.contains(&(a, b)),
-                "circuit edge ({}, {}) is not in the graph",
-                a,
-                b
-            );
-        }
-    }
-
-    /// **Theorem (Edge coverage)**:
-    /// The CPP circuit must traverse every edge in the original graph at least once.
-    /// This is the defining property of the Chinese Postman Problem.
-    #[test]
-    fn test_cpp_covers_all_edges() {
-        // 4 nodes, 5 edges (node 0 has degree 3 = odd)
-        let (nodes, edges) = make_graph(
-            &[
-                (45.0, -73.0),
-                (45.01, -73.0),
-                (45.0, -73.01),
-                (45.01, -73.01),
-            ],
-            &[
-                (0, 1, 1100.0, 0),
-                (0, 2, 1100.0, 0),
-                (1, 3, 1100.0, 0),
-                (2, 3, 1100.0, 0),
-                (0, 3, 1500.0, 0),
-            ],
-        );
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
-
-        // Build a multiset of traversed directed edges from the circuit
-        let mut traversed: std::collections::HashMap<(u32, u32), u32> =
-            std::collections::HashMap::new();
-        for window in out.circuit.windows(2) {
-            *traversed.entry((window[0], window[1])).or_insert(0) += 1;
-        }
-
-        // Every original undirected edge must appear at least once (in either direction)
-        for (i, e) in edges.iter().enumerate() {
-            let forward_count = traversed.get(&(e.from, e.to)).copied().unwrap_or(0);
-            let reverse_count = if e.oneway == 0 {
-                traversed.get(&(e.to, e.from)).copied().unwrap_or(0)
-            } else {
-                0
-            };
-            assert!(
-                forward_count + reverse_count >= 1,
-                "edge {} ({}, {}) not traversed in circuit",
-                i,
-                e.from,
-                e.to
-            );
-        }
-    }
-
-    /// **Theorem (Handshaking lemma / Parity correction)**:
-    /// In any graph, the number of odd-degree vertices is even.
-    /// The CPP algorithm must add duplicate edges that pair up all odd-degree vertices,
-    /// making every vertex even-degree. This is a necessary condition for Eulerian circuit.
-    #[test]
-    fn test_cpp_handshaking_lemma() {
-        // Path graph: A-B-C-D (3 edges, 2 odd-degree endpoints)
-        let (nodes, edges) = make_graph(
-            &[
-                (45.0, -73.0),
-                (45.01, -73.0),
-                (45.02, -73.0),
-                (45.03, -73.0),
-            ],
-            &[(0, 1, 1100.0, 0), (1, 2, 1100.0, 0), (2, 3, 1100.0, 0)],
-        );
-
-        let n = nodes.len();
-        let mut degree = vec![0u32; n];
-        for e in &edges {
-            degree[e.from as usize] += 1;
-            if e.oneway == 0 {
-                degree[e.to as usize] += 1;
-            }
-        }
-        let odd_count = degree.iter().filter(|&&d| d % 2 == 1).count();
-        assert_eq!(
-            odd_count % 2,
-            0,
-            "handshaking lemma: odd-degree count must be even"
-        );
-
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
-
-        // In an Eulerian circuit, every node must have even degree in the walk.
-        // Degree = number of times a node appears as "from" endpoint + "to" endpoint.
-        // For circuit [v0, v1, ..., vk] with v0 == vk, edges are (vi, vi+1).
-        let mut walk_degree = vec![0u32; n];
-        for window in out.circuit.windows(2) {
-            walk_degree[window[0] as usize] += 1; // "from" endpoint
-            walk_degree[window[1] as usize] += 1; // "to" endpoint
-        }
-        for i in 0..n {
-            assert_eq!(
-                walk_degree[i] % 2,
-                0,
-                "node {} has odd walk-degree {} in Eulerian circuit - parity violation",
-                i,
-                walk_degree[i]
-            );
-        }
-    }
-
-    /// **Theorem (Optimality on Eulerian graphs)**:
-    /// If the original graph is already Eulerian (all vertices even degree),
-    /// the CPP solution must equal the Eulerian circuit with zero deadhead.
-    /// No edges need to be duplicated.
-    #[test]
-    fn test_cpp_eulerian_graph_zero_deadhead() {
-        // Square: A-B-C-D-A - all vertices degree 2 (Eulerian)
-        let (nodes, edges) = make_graph(
-            &[
-                (45.0, -73.0),
-                (45.01, -73.0),
-                (45.01, -73.01),
-                (45.0, -73.01),
-            ],
-            &[
-                (0, 1, 1100.0, 0),
-                (1, 2, 1100.0, 0),
-                (2, 3, 1100.0, 0),
-                (3, 0, 1100.0, 0),
-            ],
-        );
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
-
-        let sum_weights_km: f64 = edges.iter().map(|e| e.weight_m / 1000.0).sum();
-        let tolerance = 0.01;
-
+    // Property 3: every node in the circuit is a valid node index
+    for &v in &out.circuit {
         assert!(
-            (out.summary.deadhead_distance_km - 0.0).abs() < tolerance,
-            "Eulerian graph must have zero deadhead, got {:.6} km",
-            out.summary.deadhead_distance_km
-        );
-        assert!(
-            (out.summary.total_distance_km - sum_weights_km).abs() < tolerance,
-            "Eulerian graph: total distance {:.6} km should equal sum of weights {:.6} km",
-            out.summary.total_distance_km,
-            sum_weights_km
-        );
-        assert!(
-            out.summary.efficiency_pct > 99.9,
-            "Eulerian graph must have ~100% efficiency, got {:.1}%",
-            out.summary.efficiency_pct
+            (v as usize) < nodes.len(),
+            "circuit node {} out of range (max {})",
+            v,
+            nodes.len() - 1
         );
     }
 
-    /// **Theorem (Deadhead correctness on non-Eulerian graphs)**:
-    /// If the graph is not Eulerian, the CPP solver must add deadhead edges.
-    /// The total distance must equal the sum of original edge weights plus
-    /// deadhead distance. This is a conservation law.
-    #[test]
-    fn test_cpp_distance_conservation() {
-        // Path graph (non-Eulerian): A-B-C
-        let (nodes, edges) = make_graph(
-            &[(45.0, -73.0), (45.01, -73.0), (45.02, -73.0)],
-            &[(0, 1, 1100.0, 0), (1, 2, 1100.0, 0)],
-        );
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
-
-        let sum_weights_km: f64 = edges.iter().map(|e| e.weight_m / 1000.0).sum();
-        let expected_total = sum_weights_km + out.summary.deadhead_distance_km;
-        let tolerance = 0.01;
-
-        assert!(
-            (out.summary.total_distance_km - expected_total).abs() < tolerance,
-            "distance conservation: total ({:.6}) should equal original ({:.6}) + deadhead ({:.6})",
-            out.summary.total_distance_km,
-            sum_weights_km,
-            out.summary.deadhead_distance_km
-        );
-
-        assert!(
-            out.summary.deadhead_distance_km > 0.0,
-            "non-Eulerian graph must have positive deadhead, got 0"
-        );
-    }
-
-    /// **Theorem (Circuit connectivity / Valid walk)**:
-    /// Every consecutive pair in the circuit must correspond to an actual edge
-    /// in the graph (original or duplicate). This is the "valid walk" property.
-    #[test]
-    fn test_cpp_circuit_is_valid_walk() {
-        // Cycle graph (Eulerian): A-B-C-D-E-A - all vertices degree 2
-        // Using an Eulerian graph means no deadhead edges are added,
-        // so every circuit step must be an original edge.
-        let (nodes, edges) = make_graph(
-            &[
-                (45.0, -73.0),
-                (45.01, -73.0),
-                (45.01, -73.01),
-                (45.0, -73.02),
-                (44.99, -73.01),
-            ],
-            &[
-                (0, 1, 1100.0, 0),
-                (1, 2, 1100.0, 0),
-                (2, 3, 1100.0, 0),
-                (3, 4, 1100.0, 0),
-                (4, 0, 1100.0, 0),
-            ],
-        );
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
-
-        let mut adj: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
-        for e in &edges {
-            adj.insert((e.from, e.to));
-            if e.oneway == 0 {
-                adj.insert((e.to, e.from));
-            }
-        }
-
-        for (i, window) in out.circuit.windows(2).enumerate() {
-            let (a, b) = (window[0], window[1]);
-            assert!(
-                adj.contains(&(a, b)),
-                "circuit step {}: ({}, {}) is not a valid edge",
-                i,
-                a,
-                b
-            );
-        }
-
-        assert_eq!(
-            out.circuit.first(),
-            out.circuit.last(),
-            "circuit must start and end at the same node"
-        );
-    }
-
-    /// **Theorem (Single edge graph)**:
-    /// The CPP algorithm must handle the degenerate case of a single edge.
-    /// The circuit should traverse it forward and back (deadhead = edge weight).
-    #[test]
-    fn test_cpp_single_edge() {
-        let (nodes, edges) = make_graph(&[(45.0, -73.0), (45.01, -73.0)], &[(0, 1, 1100.0, 0)]);
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
-
-        assert!(
-            out.circuit.len() >= 2,
-            "circuit must have at least 2 nodes for 1 edge"
-        );
-        assert_eq!(
-            out.circuit.first(),
-            out.circuit.last(),
-            "circuit must be closed"
-        );
-        assert!(out.circuit.contains(&0), "node 0 must appear in circuit");
-        assert!(out.circuit.contains(&1), "node 1 must appear in circuit");
-
-        let edge_km = 1100.0 / 1000.0;
-        assert!(
-            out.summary.total_distance_km >= edge_km - 0.01,
-            "total distance must be at least the edge weight"
-        );
-    }
-
-    /// **Theorem (One-way constraint)**:
-    /// When one-way streets are respected, the circuit must never traverse
-    /// a one-way edge in the reverse direction.
-    #[test]
-    fn test_cpp_oneway_respected() {
-        let (nodes, edges) = make_graph(
-            &[(45.0, -73.0), (45.01, -73.0)],
-            &[(0, 1, 1100.0, 1)], // oneway = 1
-        );
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Respect,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
-
-        for window in out.circuit.windows(2) {
-            let (a, b) = (window[0], window[1]);
-            assert!(
-                !(a == 1 && b == 0),
-                "circuit traverses one-way edge backwards: (1, 0)"
-            );
+    // Property 4: every consecutive pair in the circuit is connected by an edge
+    let mut adj: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
+    for e in &edges {
+        adj.insert((e.from, e.to));
+        if e.oneway == 0 {
+            adj.insert((e.to, e.from));
         }
     }
-
-    /// **Theorem (Empty graph base case)**:
-    /// The CPP algorithm must return an empty circuit for an empty graph
-    /// without panicking.
-    #[test]
-    fn test_cpp_empty_graph() {
-        let nodes: Vec<RmpNode> = vec![];
-        let edges: Vec<RmpEdge> = vec![];
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
-
+    for window in out.circuit.windows(2) {
+        let (a, b) = (window[0], window[1]);
         assert!(
-            out.circuit.is_empty(),
-            "empty graph must produce empty circuit"
+            adj.contains(&(a, b)),
+            "circuit edge ({}, {}) is not in the graph",
+            a, b
         );
-        assert_eq!(out.summary.total_distance_km, 0.0);
-        assert_eq!(out.summary.total_segments, 0);
-        assert_eq!(out.summary.deadhead_distance_km, 0.0);
-    }
-
-    /// **Theorem (Depot snapping)**:
-    /// When a depot is specified, the CPP circuit must start at the node
-    /// closest to the depot coordinates.
-    #[test]
-    fn test_cpp_depot_snapping() {
-        let (nodes, edges) = make_graph(
-            &[(45.0, -73.0), (45.01, -73.0), (45.02, -73.0)],
-            &[(0, 1, 1100.0, 0), (1, 2, 1100.0, 0)],
-        );
-
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            Some((45.01, -73.0)),
-            TurnPenalties::default(),
-        )
-        .unwrap();
-
-        assert_eq!(
-            out.circuit.first().copied(),
-            Some(1u32),
-            "circuit must start at node closest to depot"
-        );
-        assert_eq!(
-            out.circuit.last().copied(),
-            Some(1u32),
-            "circuit must end at depot node (closed tour)"
-        );
-    }
-
-    /// **Theorem (No edge left behind / Completeness)**:
-    /// For a graph with many edges, every single edge must be traversed at least once.
-    /// This is the completeness guarantee of CPP.
-    #[test]
-    fn test_cpp_completeness_large() {
-        // Grid: 3x3 nodes, 12 edges
-        let coords: Vec<(f64, f64)> = (0..3)
-            .flat_map(|r| (0..3).map(move |c| (45.0 + r as f64 * 0.01, -73.0 + c as f64 * 0.01)))
-            .collect();
-        let mut edge_defs: Vec<(u32, u32, f64, u8)> = Vec::new();
-        for r in 0u32..3 {
-            for c in 0u32..3 {
-                let idx = r * 3 + c;
-                if c < 2 {
-                    edge_defs.push((idx, idx + 1, 1100.0, 0));
-                }
-                if r < 2 {
-                    edge_defs.push((idx, idx + 3, 1100.0, 0));
-                }
-            }
-        }
-
-        let (nodes, edges) = make_graph(&coords, &edge_defs);
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
-
-        let mut traversed: std::collections::HashMap<(u32, u32), u32> =
-            std::collections::HashMap::new();
-        for window in out.circuit.windows(2) {
-            *traversed.entry((window[0], window[1])).or_insert(0) += 1;
-        }
-
-        for (i, e) in edges.iter().enumerate() {
-            let fwd = traversed.get(&(e.from, e.to)).copied().unwrap_or(0);
-            let rev = if e.oneway == 0 {
-                traversed.get(&(e.to, e.from)).copied().unwrap_or(0)
-            } else {
-                0
-            };
-            assert!(
-                fwd + rev >= 1,
-                "edge {} ({}, {}) not covered - CPP completeness violation",
-                i,
-                e.from,
-                e.to
-            );
-        }
     }
 }
+
+/// **Theorem (Edge coverage)**:
+/// The CPP circuit must traverse every edge in the original graph at least once.
+/// This is the defining property of the Chinese Postman Problem.
+#[test]
+fn test_cpp_covers_all_edges() {
+    // 4 nodes, 5 edges (node 0 has degree 3 = odd)
+    let (nodes, edges) = make_graph(
+        &[(45.0, -73.0), (45.01, -73.0), (45.0, -73.01), (45.01, -73.01)],
+        &[
+            (0, 1, 1100.0, 0),
+            (0, 2, 1100.0, 0),
+            (1, 3, 1100.0, 0),
+            (2, 3, 1100.0, 0),
+            (0, 3, 1500.0, 0),
+        ],
+    );
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None, TurnPenalties::default()).unwrap();
+
+    // Build a multiset of traversed directed edges from the circuit
+    let mut traversed: std::collections::HashMap<(u32, u32), u32> = std::collections::HashMap::new();
+    for window in out.circuit.windows(2) {
+        *traversed.entry((window[0], window[1])).or_insert(0) += 1;
+    }
+
+    // Every original undirected edge must appear at least once (in either direction)
+    for (i, e) in edges.iter().enumerate() {
+        let forward_count = traversed.get(&(e.from, e.to)).copied().unwrap_or(0);
+        let reverse_count = if e.oneway == 0 {
+            traversed.get(&(e.to, e.from)).copied().unwrap_or(0)
+        } else {
+            0
+        };
+        assert!(
+            forward_count + reverse_count >= 1,
+            "edge {} ({}, {}) not traversed in circuit",
+            i, e.from, e.to
+        );
+    }
+}
+
+/// **Theorem (Handshaking lemma / Parity correction)**:
+/// In any graph, the number of odd-degree vertices is even.
+/// The CPP algorithm must add duplicate edges that pair up all odd-degree vertices,
+/// making every vertex even-degree. This is a necessary condition for Eulerian circuit.
+#[test]
+fn test_cpp_handshaking_lemma() {
+    // Path graph: A-B-C-D (3 edges, 2 odd-degree endpoints)
+    let (nodes, edges) = make_graph(
+        &[(45.0, -73.0), (45.01, -73.0), (45.02, -73.0), (45.03, -73.0)],
+        &[
+            (0, 1, 1100.0, 0),
+            (1, 2, 1100.0, 0),
+            (2, 3, 1100.0, 0),
+        ],
+    );
+
+    let n = nodes.len();
+    let mut degree = vec![0u32; n];
+    for e in &edges {
+        degree[e.from as usize] += 1;
+        if e.oneway == 0 {
+            degree[e.to as usize] += 1;
+        }
+    }
+    let odd_count = degree.iter().filter(|&&d| d % 2 == 1).count();
+    assert_eq!(odd_count % 2, 0, "handshaking lemma: odd-degree count must be even");
+
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None, TurnPenalties::default()).unwrap();
+
+    // In an Eulerian circuit, every node must have even degree in the walk.
+    // Degree = number of times a node appears as "from" endpoint + "to" endpoint.
+    // For circuit [v0, v1, ..., vk] with v0 == vk, edges are (vi, vi+1).
+    let mut walk_degree = vec![0u32; n];
+    for window in out.circuit.windows(2) {
+        walk_degree[window[0] as usize] += 1; // "from" endpoint
+        walk_degree[window[1] as usize] += 1; // "to" endpoint
+    }
+    for i in 0..n {
+        assert_eq!(
+            walk_degree[i] % 2, 0,
+            "node {} has odd walk-degree {} in Eulerian circuit - parity violation",
+            i, walk_degree[i]
+        );
+    }
+}
+
+/// **Theorem (Optimality on Eulerian graphs)**:
+/// If the original graph is already Eulerian (all vertices even degree),
+/// the CPP solution must equal the Eulerian circuit with zero deadhead.
+/// No edges need to be duplicated.
+#[test]
+fn test_cpp_eulerian_graph_zero_deadhead() {
+    // Square: A-B-C-D-A - all vertices degree 2 (Eulerian)
+    let (nodes, edges) = make_graph(
+        &[(45.0, -73.0), (45.01, -73.0), (45.01, -73.01), (45.0, -73.01)],
+        &[
+            (0, 1, 1100.0, 0),
+            (1, 2, 1100.0, 0),
+            (2, 3, 1100.0, 0),
+            (3, 0, 1100.0, 0),
+        ],
+    );
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None, TurnPenalties::default()).unwrap();
+
+    let sum_weights_km: f64 = edges.iter().map(|e| e.weight_m / 1000.0).sum();
+    let tolerance = 0.01;
+
+    assert!(
+        (out.summary.deadhead_distance_km - 0.0).abs() < tolerance,
+        "Eulerian graph must have zero deadhead, got {:.6} km",
+        out.summary.deadhead_distance_km
+    );
+    assert!(
+        (out.summary.total_distance_km - sum_weights_km).abs() < tolerance,
+        "Eulerian graph: total distance {:.6} km should equal sum of weights {:.6} km",
+        out.summary.total_distance_km, sum_weights_km
+    );
+    assert!(
+        out.summary.efficiency_pct > 99.9,
+        "Eulerian graph must have ~100% efficiency, got {:.1}%",
+        out.summary.efficiency_pct
+    );
+}
+
+/// **Theorem (Deadhead correctness on non-Eulerian graphs)**:
+/// If the graph is not Eulerian, the CPP solver must add deadhead edges.
+/// The total distance must equal the sum of original edge weights plus
+/// deadhead distance. This is a conservation law.
+#[test]
+fn test_cpp_distance_conservation() {
+    // Path graph (non-Eulerian): A-B-C
+    let (nodes, edges) = make_graph(
+        &[(45.0, -73.0), (45.01, -73.0), (45.02, -73.0)],
+        &[
+            (0, 1, 1100.0, 0),
+            (1, 2, 1100.0, 0),
+        ],
+    );
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None, TurnPenalties::default()).unwrap();
+
+    let sum_weights_km: f64 = edges.iter().map(|e| e.weight_m / 1000.0).sum();
+    let expected_total = sum_weights_km + out.summary.deadhead_distance_km;
+    let tolerance = 0.01;
+
+    assert!(
+        (out.summary.total_distance_km - expected_total).abs() < tolerance,
+        "distance conservation: total ({:.6}) should equal original ({:.6}) + deadhead ({:.6})",
+        out.summary.total_distance_km, sum_weights_km, out.summary.deadhead_distance_km
+    );
+
+    assert!(
+        out.summary.deadhead_distance_km > 0.0,
+        "non-Eulerian graph must have positive deadhead, got 0"
+    );
+}
+
+/// **Theorem (Circuit connectivity / Valid walk)**:
+/// Every consecutive pair in the circuit must correspond to an actual edge
+/// in the graph (original or duplicate). This is the "valid walk" property.
+#[test]
+fn test_cpp_circuit_is_valid_walk() {
+    // Cycle graph (Eulerian): A-B-C-D-E-A - all vertices degree 2
+    // Using an Eulerian graph means no deadhead edges are added,
+    // so every circuit step must be an original edge.
+    let (nodes, edges) = make_graph(
+        &[
+            (45.0, -73.0),
+            (45.01, -73.0),
+            (45.01, -73.01),
+            (45.0, -73.02),
+            (44.99, -73.01),
+        ],
+        &[
+            (0, 1, 1100.0, 0),
+            (1, 2, 1100.0, 0),
+            (2, 3, 1100.0, 0),
+            (3, 4, 1100.0, 0),
+            (4, 0, 1100.0, 0),
+        ],
+    );
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None, TurnPenalties::default()).unwrap();
+
+    let mut adj: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
+    for e in &edges {
+        adj.insert((e.from, e.to));
+        if e.oneway == 0 {
+            adj.insert((e.to, e.from));
+        }
+    }
+
+    for (i, window) in out.circuit.windows(2).enumerate() {
+        let (a, b) = (window[0], window[1]);
+        assert!(
+            adj.contains(&(a, b)),
+            "circuit step {}: ({}, {}) is not a valid edge",
+            i, a, b
+        );
+    }
+
+    assert_eq!(
+        out.circuit.first(), out.circuit.last(),
+        "circuit must start and end at the same node"
+    );
+}
+
+/// **Theorem (Single edge graph)**:
+/// The CPP algorithm must handle the degenerate case of a single edge.
+/// The circuit should traverse it forward and back (deadhead = edge weight).
+#[test]
+fn test_cpp_single_edge() {
+    let (nodes, edges) = make_graph(
+        &[(45.0, -73.0), (45.01, -73.0)],
+        &[(0, 1, 1100.0, 0)],
+    );
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None, TurnPenalties::default()).unwrap();
+
+    assert!(out.circuit.len() >= 2, "circuit must have at least 2 nodes for 1 edge");
+    assert_eq!(out.circuit.first(), out.circuit.last(), "circuit must be closed");
+    assert!(out.circuit.contains(&0), "node 0 must appear in circuit");
+    assert!(out.circuit.contains(&1), "node 1 must appear in circuit");
+
+    let edge_km = 1100.0 / 1000.0;
+    assert!(
+        out.summary.total_distance_km >= edge_km - 0.01,
+        "total distance must be at least the edge weight"
+    );
+}
+
+/// **Theorem (One-way constraint)**:
+/// When one-way streets are respected, the circuit must never traverse
+/// a one-way edge in the reverse direction.
+#[test]
+fn test_cpp_oneway_respected() {
+    let (nodes, edges) = make_graph(
+        &[(45.0, -73.0), (45.01, -73.0)],
+        &[(0, 1, 1100.0, 1)], // oneway = 1
+    );
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Respect, None, TurnPenalties::default()).unwrap();
+
+    for window in out.circuit.windows(2) {
+        let (a, b) = (window[0], window[1]);
+        assert!(
+            !(a == 1 && b == 0),
+            "circuit traverses one-way edge backwards: (1, 0)"
+        );
+    }
+}
+
+/// **Theorem (Empty graph base case)**:
+/// The CPP algorithm must return an empty circuit for an empty graph
+/// without panicking.
+#[test]
+fn test_cpp_empty_graph() {
+    let nodes: Vec<RmpNode> = vec![];
+    let edges: Vec<RmpEdge> = vec![];
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None, TurnPenalties::default()).unwrap();
+
+    assert!(out.circuit.is_empty(), "empty graph must produce empty circuit");
+    assert_eq!(out.summary.total_distance_km, 0.0);
+    assert_eq!(out.summary.total_segments, 0);
+    assert_eq!(out.summary.deadhead_distance_km, 0.0);
+}
+
+/// **Theorem (Depot snapping)**:
+/// When a depot is specified, the CPP circuit must start at the node
+/// closest to the depot coordinates.
+#[test]
+fn test_cpp_depot_snapping() {
+    let (nodes, edges) = make_graph(
+        &[(45.0, -73.0), (45.01, -73.0), (45.02, -73.0)],
+        &[
+            (0, 1, 1100.0, 0),
+            (1, 2, 1100.0, 0),
+        ],
+    );
+
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, Some((45.01, -73.0)), TurnPenalties::default()).unwrap();
+
+    assert_eq!(
+        out.circuit.first().copied(),
+        Some(1u32),
+        "circuit must start at node closest to depot"
+    );
+    assert_eq!(
+        out.circuit.last().copied(),
+        Some(1u32),
+        "circuit must end at depot node (closed tour)"
+    );
+}
+
+/// **Theorem (No edge left behind / Completeness)**:
+/// For a graph with many edges, every single edge must be traversed at least once.
+/// This is the completeness guarantee of CPP.
+#[test]
+fn test_cpp_completeness_large() {
+    // Grid: 3x3 nodes, 12 edges
+    let coords: Vec<(f64, f64)> = (0..3)
+        .flat_map(|r| (0..3).map(move |c| (45.0 + r as f64 * 0.01, -73.0 + c as f64 * 0.01)))
+        .collect();
+    let mut edge_defs: Vec<(u32, u32, f64, u8)> = Vec::new();
+    for r in 0u32..3 {
+        for c in 0u32..3 {
+            let idx = r * 3 + c;
+            if c < 2 {
+                edge_defs.push((idx, idx + 1, 1100.0, 0));
+            }
+            if r < 2 {
+                edge_defs.push((idx, idx + 3, 1100.0, 0));
+            }
+        }
+    }
+
+    let (nodes, edges) = make_graph(&coords, &edge_defs);
+    let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None, TurnPenalties::default()).unwrap();
+
+    let mut traversed: std::collections::HashMap<(u32, u32), u32> = std::collections::HashMap::new();
+    for window in out.circuit.windows(2) {
+        *traversed.entry((window[0], window[1])).or_insert(0) += 1;
+    }
+
+    for (i, e) in edges.iter().enumerate() {
+        let fwd = traversed.get(&(e.from, e.to)).copied().unwrap_or(0);
+        let rev = if e.oneway == 0 {
+            traversed.get(&(e.to, e.from)).copied().unwrap_or(0)
+        } else {
+            0
+        };
+        assert!(
+            fwd + rev >= 1,
+            "edge {} ({}, {}) not covered - CPP completeness violation",
+            i, e.from, e.to
+        );
+    }
+}
+
+}
+

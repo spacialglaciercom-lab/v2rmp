@@ -134,8 +134,8 @@ pub fn get_algorithm_options() -> Vec<(String, String)> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::core::vrp::test_utils::{make_input, make_stop};
+    use super::*;
 
     #[test]
     fn test_builtin_solvers_registered() {

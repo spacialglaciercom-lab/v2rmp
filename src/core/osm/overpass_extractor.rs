@@ -37,11 +37,7 @@ impl OverpassExtractor {
     }
 
     /// Extract road network from Overpass API with endpoint fallback
-    pub async fn extract_bbox(
-        &self,
-        bbox: &BBox,
-        road_classes: &[String],
-    ) -> Result<Vec<OsmSegment>> {
+    pub async fn extract_bbox(&self, bbox: &BBox, road_classes: &[String]) -> Result<Vec<OsmSegment>> {
         let classes_filter = if road_classes.is_empty() {
             "way[\"highway\"]".to_string()
         } else {
@@ -55,7 +51,8 @@ impl OverpassExtractor {
         // 4. Output body and skeleton
         let query = format!(
             "[out:json][timeout:300];\n(\n  {}({},{},{},{});\n);\nout body;\n>;\nout skel qt;",
-            classes_filter, bbox.min_lat, bbox.min_lon, bbox.max_lat, bbox.max_lon
+            classes_filter,
+            bbox.min_lat, bbox.min_lon, bbox.max_lat, bbox.max_lon
         );
 
         let mut last_error = None;
@@ -64,11 +61,7 @@ impl OverpassExtractor {
             tracing::info!("Attempting Overpass extraction from: {}", endpoint);
             match self.query_endpoint(endpoint, &query).await {
                 Ok(segments) => {
-                    tracing::info!(
-                        "Successfully extracted {} segments from {}",
-                        segments.len(),
-                        endpoint
-                    );
+                    tracing::info!("Successfully extracted {} segments from {}", segments.len(), endpoint);
                     return Ok(segments);
                 }
                 Err(e) => {
@@ -83,8 +76,7 @@ impl OverpassExtractor {
     }
 
     async fn query_endpoint(&self, endpoint: &str, query: &str) -> Result<Vec<OsmSegment>> {
-        let response = self
-            .client
+        let response = self.client
             .post(endpoint)
             .form(&[("data", query)])
             .send()
@@ -93,29 +85,18 @@ impl OverpassExtractor {
 
         if !response.status().is_success() {
             let status = response.status();
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            anyhow::bail!(
-                "Overpass endpoint {} returned error {}: {}",
-                endpoint,
-                status,
-                error_text
-            );
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            anyhow::bail!("Overpass endpoint {} returned error {}: {}", endpoint, status, error_text);
         }
 
-        let data: Value = response
-            .json()
-            .await
+        let data: Value = response.json().await
             .with_context(|| format!("Failed to parse JSON response from {}", endpoint))?;
 
         self.parse_overpass_json(data)
     }
 
     fn parse_overpass_json(&self, data: Value) -> Result<Vec<OsmSegment>> {
-        let elements = data["elements"]
-            .as_array()
+        let elements = data["elements"].as_array()
             .context("Overpass response missing 'elements' array")?;
 
         let mut nodes: HashMap<i64, (f64, f64)> = HashMap::new();
@@ -124,9 +105,11 @@ impl OverpassExtractor {
         // First pass: collect nodes
         for el in elements {
             if el["type"] == "node" {
-                if let (Some(id), Some(lat), Some(lon)) =
-                    (el["id"].as_i64(), el["lat"].as_f64(), el["lon"].as_f64())
-                {
+                if let (Some(id), Some(lat), Some(lon)) = (
+                    el["id"].as_i64(),
+                    el["lat"].as_f64(),
+                    el["lon"].as_f64()
+                ) {
                     nodes.insert(id, (lon, lat));
                 }
             } else if el["type"] == "way" {
@@ -140,12 +123,11 @@ impl OverpassExtractor {
         for way in ways_data {
             let id = way["id"].as_i64().context("Way missing ID")?;
             let tags = &way["tags"];
-
-            let highway = tags["highway"]
-                .as_str()
+            
+            let highway = tags["highway"].as_str()
                 .unwrap_or("unclassified")
                 .to_string();
-
+            
             let name = tags["name"].as_str().map(|s| s.to_string());
             let oneway = tags["oneway"].as_str().map(|s| s.to_string());
             let surface = tags["surface"].as_str().map(|s| s.to_string());

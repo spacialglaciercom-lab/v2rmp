@@ -6,10 +6,10 @@
 //! Research basis: GAIN (2107.07791) + RRNCO (2503.16159)
 
 use crate::core::optimize::{RmpEdge, RmpNode};
-use anyhow::{Context, Result};
-use candle_core::{DType, Device, Tensor};
-use candle_nn::{Linear, Module, VarBuilder};
 use serde::{Deserialize, Serialize};
+use candle_core::{Device, Tensor, DType};
+use candle_nn::{Linear, Module, VarBuilder};
+use anyhow::{Context, Result};
 use std::path::Path;
 
 /// Embedding dimension for road segments.
@@ -46,7 +46,7 @@ fn aggregate_neighbors(x: &Tensor, adj: &[Vec<usize>]) -> Result<Tensor> {
     let (num_nodes, in_dim) = x.dims2()?;
     let x_vec = x.to_vec2::<f32>()?;
     let mut x_neigh = vec![vec![0.0f32; in_dim]; num_nodes];
-
+    
     for i in 0..num_nodes {
         let neighbors = &adj[i];
         if neighbors.is_empty() {
@@ -63,12 +63,8 @@ fn aggregate_neighbors(x: &Tensor, adj: &[Vec<usize>]) -> Result<Tensor> {
             x_neigh[i][d] = sum[d] / count;
         }
     }
-
-    Ok(Tensor::from_vec(
-        x_neigh.into_iter().flatten().collect(),
-        (num_nodes, in_dim),
-        x.device(),
-    )?)
+    
+    Ok(Tensor::from_vec(x_neigh.into_iter().flatten().collect(), (num_nodes, in_dim), x.device())?)
 }
 
 struct GraphSAGE {
@@ -83,24 +79,20 @@ impl GraphSAGE {
         let tensors = candle_core::safetensors::load(path, &device)
             .with_context(|| format!("Failed to load safetensors from {}", path.display()))?;
         let vb = VarBuilder::from_tensors(tensors, DType::F32, &device);
-
+        
         let conv1 = SAGEConv::new(10, 64, vb.pp("conv1"))?;
         let conv2 = SAGEConv::new(64, 64, vb.pp("conv2"))?;
-
-        Ok(Self {
-            conv1,
-            conv2,
-            device,
-        })
+        
+        Ok(Self { conv1, conv2, device })
     }
-
+    
     fn forward(&self, x: &Tensor, adj: &[Vec<usize>]) -> Result<Tensor> {
         let x_neigh1 = aggregate_neighbors(x, adj)?;
         let h1 = self.conv1.forward(x, &x_neigh1)?.relu()?;
-
+        
         let x_neigh2 = aggregate_neighbors(&h1, adj)?;
         let h2 = self.conv2.forward(&h1, &x_neigh2)?.relu()?;
-
+        
         Ok(h2)
     }
 }
@@ -114,11 +106,7 @@ pub fn default_model_path() -> std::path::PathBuf {
         .join("graph_embed.safetensors")
 }
 
-fn try_embed_network(
-    nodes: &[RmpNode],
-    edges: &[RmpEdge],
-    path: &Path,
-) -> Result<Vec<RoadEmbedding>> {
+fn try_embed_network(nodes: &[RmpNode], edges: &[RmpEdge], path: &Path) -> Result<Vec<RoadEmbedding>> {
     if edges.is_empty() {
         return Ok(Vec::new());
     }
@@ -132,18 +120,14 @@ fn try_embed_network(
         node_to_edges[edge.from as usize].push(i);
         node_to_edges[edge.to as usize].push(i);
     }
-
+    
     let mut adj = vec![Vec::new(); num_edges];
     for (i, edge) in edges.iter().enumerate() {
         for &e in &node_to_edges[edge.from as usize] {
-            if e != i {
-                adj[i].push(e);
-            }
+            if e != i { adj[i].push(e); }
         }
         for &e in &node_to_edges[edge.to as usize] {
-            if e != i {
-                adj[i].push(e);
-            }
+            if e != i { adj[i].push(e); }
         }
         adj[i].sort_unstable();
         adj[i].dedup();
@@ -154,10 +138,8 @@ fn try_embed_network(
     for edge in edges {
         x_features.push((edge.weight_m / 1000.0) as f32); // length
         x_features.push(edge.oneway as f32); // oneway flag
-                                             // padding to 10 dims
-        for _ in 0..8 {
-            x_features.push(0.0);
-        }
+        // padding to 10 dims
+        x_features.resize(x_features.len() + 8, 0.0);
     }
     let x = Tensor::from_vec(x_features, (num_edges, 10), &model.device)?;
 
@@ -197,10 +179,7 @@ pub fn embed_network(
     match try_embed_network(nodes, edges, &path) {
         Ok(embs) => embs,
         Err(e) => {
-            tracing::warn!(
-                "GraphSAGE embedding failed: {}. Returning empty embeddings.",
-                e
-            );
+            tracing::warn!("GraphSAGE embedding failed: {}. Returning empty embeddings.", e);
             Vec::new()
         }
     }
