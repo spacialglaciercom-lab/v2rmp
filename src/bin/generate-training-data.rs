@@ -9,13 +9,12 @@
 //!
 //! Usage: cargo run --bin generate-training-data --release > training_data.jsonl
 
-use std::sync::Arc;
 use tokio::runtime::Runtime;
 
 use v2rmp::core::haversine_m;
 use v2rmp::core::ml::features::InstanceFeatures;
 use v2rmp::core::vrp::registry::{get_solver_list, solve_with};
-use v2rmp::core::vrp::types::{SolverHyperparams, VRPSolverInput, VRPSolverStop, VrpObjective};
+use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
 use v2rmp::core::vrp::utils::build_haversine_matrix;
 
 /// Generate a single synthetic VRP instance with depot at index 0.
@@ -31,8 +30,8 @@ fn generate_instance(seed_offset: usize) -> Vec<VRPSolverStop> {
     let pattern = seed_offset % 4;
     let n_stops = match seed_offset % 10 {
         0 | 1 => rng.range(10, 25),
-        2 | 3 | 4 => rng.range(20, 60),
-        5 | 6 | 7 => rng.range(50, 150),
+        2..=4 => rng.range(20, 60),
+        5..=7 => rng.range(50, 150),
         _ => rng.range(100, 250),
     };
 
@@ -58,7 +57,7 @@ fn generate_instance(seed_offset: usize) -> Vec<VRPSolverStop> {
             }
             1 => {
                 // Clustered around 2-4 centres
-                let num_clusters = rng.range(2, 5) as usize;
+                let _num_clusters = rng.range(2, 5) as usize;
                 let cx = depot_lat + (rng.unit() - 0.5) * 1.5;
                 let cy = depot_lon + (rng.unit() - 0.5) * 1.5;
                 let lat = cx + (rng.unit() - 0.5) * 0.3;
@@ -238,7 +237,7 @@ fn main() {
             "solver_dists": solver_dists.into_iter().map(|(id, d)| serde_json::json!({"solver": id, "distance": d})).collect::<Vec<_>>(),
         });
 
-        println!("{}", record.to_string());
+        println!("{}", record);
 
         if i > 0 && i % 100 == 0 {
             eprintln!("  Completed {} instances...", i);

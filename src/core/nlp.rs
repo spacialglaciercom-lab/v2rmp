@@ -314,7 +314,7 @@ impl QwenNLParser {
             tokens.push(next_token);
             pos += context_size;
 
-            if let Some(text) = self.tokenizer.decode(&[next_token], true).ok() {
+            if let Ok(text) = self.tokenizer.decode(&[next_token], true) {
                 output_text.push_str(&text);
                 if output_text.contains("<|im_end|>") {
                     break;

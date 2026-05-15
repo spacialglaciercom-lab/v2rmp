@@ -608,7 +608,7 @@ pub fn draw_map_canvas(ui: &mut egui::Ui, app: &mut GuiApp) {
                     n.lon,
                     canvas_center,
                     canvas_size,
-                    &bbox,
+                    bbox,
                     app.map_zoom,
                     app.map_pan,
                 )

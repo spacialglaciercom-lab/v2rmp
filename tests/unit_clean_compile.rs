@@ -125,7 +125,7 @@ fn test_compile_city_grid() {
         "read_rmp edge count mismatch"
     );
 
-    let (min_lat, max_lat, min_lon, max_lon) = nodes.iter().fold(
+    let (min_lat, max_lat, _min_lon, max_lon) = nodes.iter().fold(
         (f64::MAX, f64::MIN, f64::MAX, f64::MIN),
         |(mn_lat, mx_lat, mn_lon, mx_lon), n| {
             (
