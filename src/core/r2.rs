@@ -37,8 +37,8 @@ impl R2Storage {
             .context("R2_ACCESS_KEY_ID not found in environment")?;
         let secret_access_key = std::env::var("R2_SECRET_ACCESS_KEY")
             .context("R2_SECRET_ACCESS_KEY not found in environment")?;
-        let endpoint = std::env::var("R2_ENDPOINT")
-            .context("R2_ENDPOINT not found in environment")?;
+        let endpoint =
+            std::env::var("R2_ENDPOINT").context("R2_ENDPOINT not found in environment")?;
 
         Self::new(bucket, &access_key_id, &secret_access_key, &endpoint)
     }
@@ -67,12 +67,16 @@ impl R2Storage {
 
     pub async fn download_object(&self, path: &str) -> Result<Vec<u8>> {
         let location = object_store::path::Path::from(path);
-        let result = self.store
+        let result = self
+            .store
             .get(&location)
             .await
             .context("Failed to download object from R2")?;
-        
-        let bytes = result.bytes().await.context("Failed to read bytes from R2 get result")?;
+
+        let bytes = result
+            .bytes()
+            .await
+            .context("Failed to read bytes from R2 get result")?;
         Ok(bytes.to_vec())
     }
 
@@ -87,11 +91,12 @@ impl R2Storage {
 
     pub async fn get_object_info(&self, path: &str) -> Result<serde_json::Value> {
         let location = object_store::path::Path::from(path);
-        let meta = self.store
+        let meta = self
+            .store
             .head(&location)
             .await
             .context("Failed to get object info from R2")?;
-        
+
         Ok(serde_json::json!({
             "path": meta.location.to_string(),
             "size": meta.size,

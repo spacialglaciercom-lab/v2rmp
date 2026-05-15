@@ -14,7 +14,7 @@ pub struct DroneSpec {
     pub max_payload_kg: f64,
     pub battery_capacity_wh: f64,
     pub cruise_speed_ms: f64,
-    pub power_no_load_w: f64, // P_p in Dorling et al.
+    pub power_no_load_w: f64,  // P_p in Dorling et al.
     pub power_max_load_w: f64, // P_l in Dorling et al.
 }
 
@@ -48,13 +48,14 @@ impl DroneSpec {
     /// Energy (Wh) = (Power * Distance / Speed) / 3600
     pub fn calculate_energy_wh(&self, distance_m: f64, payload_kg: f64, wind_ms: f64) -> f64 {
         let payload_ratio = (payload_kg / self.max_payload_kg).clamp(0.0, 1.0);
-        let base_power = self.power_no_load_w + (self.power_max_load_w - self.power_no_load_w) * payload_ratio;
-        
+        let base_power =
+            self.power_no_load_w + (self.power_max_load_w - self.power_no_load_w) * payload_ratio;
+
         // Simplified wind impact: power scales with (relative_speed / cruise_speed)^3
         // For simplicity here, we adjust the effective speed
         let ground_speed = (self.cruise_speed_ms - wind_ms).max(1.0);
         let time_h = (distance_m / ground_speed) / 3600.0;
-        
+
         base_power * time_h
     }
 }
@@ -100,7 +101,7 @@ mod tests {
     fn test_energy_model_empty() {
         let fc = DroneSpec::flycart30();
         let energy = fc.calculate_energy_wh(15000.0, 0.0, 0.0); // 15km at 15m/s = 1000s = ~0.27h
-        // 500W * 0.27h = 138.8 Wh
+                                                                // 500W * 0.27h = 138.8 Wh
         assert!(energy > 130.0 && energy < 145.0);
     }
 
@@ -124,7 +125,7 @@ mod tests {
     fn test_wing_energy() {
         let wing = DroneSpec::wing();
         let energy = wing.calculate_energy_wh(30000.0, 0.0, 0.0); // 30km at 30m/s = 1000s
-        // 80W * 0.27h = 22.2 Wh
+                                                                  // 80W * 0.27h = 22.2 Wh
         assert!(energy > 20.0 && energy < 25.0);
     }
 

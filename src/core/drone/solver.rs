@@ -1,5 +1,5 @@
+use crate::core::drone::{DroneModel, DroneSpec, DroneVrpInstance, DroneVrpResult};
 use anyhow::Result;
-use crate::core::drone::{DroneSpec, DroneVrpInstance, DroneVrpResult, DroneModel};
 
 pub struct DroneSolver;
 
@@ -19,7 +19,10 @@ impl DroneSolver {
             let mut current_route = Vec::new();
             let mut current_loc = instance.depot;
             let mut current_battery = spec.battery_capacity_wh;
-            let mut current_payload = unvisited.iter().map(|&i| instance.demands_kg[i]).sum::<f64>();
+            let mut current_payload = unvisited
+                .iter()
+                .map(|&i| instance.demands_kg[i])
+                .sum::<f64>();
 
             while !unvisited.is_empty() {
                 let nearest_idx = Self::find_nearest(current_loc, &unvisited, &instance.customers);
@@ -29,9 +32,13 @@ impl DroneSolver {
                 // Check if customer is in a no-fly zone
                 let mut in_no_fly_zone = false;
                 for nfz in &instance.no_fly_zones {
-                    let dist_to_nfz = Self::haversine_m(customer_loc, [nfz.center_lat, nfz.center_lon]);
+                    let dist_to_nfz =
+                        Self::haversine_m(customer_loc, [nfz.center_lat, nfz.center_lon]);
                     if dist_to_nfz <= nfz.radius_m {
-                        violations.push(format!("Customer {} is inside no-fly zone {}", customer_idx, nfz.id));
+                        violations.push(format!(
+                            "Customer {} is inside no-fly zone {}",
+                            customer_idx, nfz.id
+                        ));
                         in_no_fly_zone = true;
                         break;
                     }
@@ -43,11 +50,17 @@ impl DroneSolver {
                 }
 
                 let dist = Self::haversine_m(current_loc, customer_loc);
-                let energy_to_customer = spec.calculate_energy_wh(dist, current_payload, instance.wind_speed_ms);
-                
+                let energy_to_customer =
+                    spec.calculate_energy_wh(dist, current_payload, instance.wind_speed_ms);
+
                 // Return to home energy check
-                let dist_to_depot = Self::haversine_m(instance.customers[customer_idx], instance.depot);
-                let energy_to_depot = spec.calculate_energy_wh(dist_to_depot, current_payload - instance.demands_kg[customer_idx], instance.wind_speed_ms);
+                let dist_to_depot =
+                    Self::haversine_m(instance.customers[customer_idx], instance.depot);
+                let energy_to_depot = spec.calculate_energy_wh(
+                    dist_to_depot,
+                    current_payload - instance.demands_kg[customer_idx],
+                    instance.wind_speed_ms,
+                );
 
                 if current_battery >= (energy_to_customer + energy_to_depot) {
                     current_battery -= energy_to_customer;
@@ -59,16 +72,23 @@ impl DroneSolver {
                 } else {
                     // Cannot reach next customer and return safely, go back to depot
                     let dist_to_depot = Self::haversine_m(current_loc, instance.depot);
-                    let energy_to_depot = spec.calculate_energy_wh(dist_to_depot, current_payload, instance.wind_speed_ms);
+                    let energy_to_depot = spec.calculate_energy_wh(
+                        dist_to_depot,
+                        current_payload,
+                        instance.wind_speed_ms,
+                    );
                     total_energy += energy_to_depot;
                     break;
                 }
             }
-            
+
             if !current_route.is_empty() {
                 routes.push(current_route);
             } else if !unvisited.is_empty() {
-                violations.push(format!("Customer {} unreachable with battery limits", unvisited[0]));
+                violations.push(format!(
+                    "Customer {} unreachable with battery limits",
+                    unvisited[0]
+                ));
                 unvisited.remove(0);
             }
         }
@@ -100,8 +120,8 @@ impl DroneSolver {
         let d_phi = (p2[0] - p1[0]).to_radians();
         let d_lambda = (p2[1] - p1[1]).to_radians();
 
-        let a = (d_phi / 2.0).sin().powi(2)
-            + phi1.cos() * phi2.cos() * (d_lambda / 2.0).sin().powi(2);
+        let a =
+            (d_phi / 2.0).sin().powi(2) + phi1.cos() * phi2.cos() * (d_lambda / 2.0).sin().powi(2);
         let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
 
         r * c

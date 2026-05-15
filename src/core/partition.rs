@@ -311,6 +311,7 @@ fn zone_weights_from_labels(
     zone_weights
 }
 
+#[allow(clippy::needless_range_loop)]
 fn zone_weights_from_node_weights(labels: &[usize], node_weights: &[f64], k: usize) -> Vec<f64> {
     let mut zone_weights = vec![0.0f64; k];
     for (i, &w) in node_weights.iter().enumerate() {
@@ -398,6 +399,7 @@ fn balance_postprocess(
     labels
 }
 
+#[allow(clippy::needless_range_loop)]
 fn balance_postprocess_node_weights(
     mut labels: Vec<usize>,
     node_weights: &[f64],
@@ -496,8 +498,7 @@ fn convex_hull_ring(coords: &[[f64; 2]], indices: &[usize]) -> Option<Vec<[f64; 
 
     // Sort by polar angle
     pts[1..].sort_by(|a, b| {
-        let cross = (a[0] - pivot[0]) * (b[1] - pivot[1])
-            - (a[1] - pivot[1]) * (b[0] - pivot[0]);
+        let cross = (a[0] - pivot[0]) * (b[1] - pivot[1]) - (a[1] - pivot[1]) * (b[0] - pivot[0]);
         if cross > 0.0 {
             std::cmp::Ordering::Less
         } else if cross < 0.0 {
@@ -576,6 +577,7 @@ fn points_to_knn_graph(points: &[PointInput], knn_neighbors: usize) -> Vec<EdgeI
 // ── Main partition function ───────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::needless_range_loop)]
 pub fn partition_graph(
     edges: &[EdgeInput],
     node_count: usize,
@@ -588,7 +590,7 @@ pub fn partition_graph(
     let n = node_count;
     let k_eff = truck_count.min(n);
     let mut warnings: Vec<String> = Vec::new();
-    let use_node_weights = node_weights.is_some() && node_weights.map_or(false, |w| w.len() >= n);
+    let use_node_weights = node_weights.is_some() && node_weights.is_some_and(|w| w.len() >= n);
 
     // Pure points path: no edges → KMeans on coordinates
     if edges.is_empty() {
@@ -605,24 +607,34 @@ pub fn partition_graph(
                 };
 
                 return build_zone_output(
-                    &labels, truck_count, k_eff,
-                    node_weights, edges, node_coords, include_polygons, &warnings,
+                    &labels,
+                    truck_count,
+                    k_eff,
+                    node_weights,
+                    edges,
+                    node_coords,
+                    include_polygons,
+                    &warnings,
                 );
             }
         }
 
         let labels: Vec<usize> = (0..n).map(|i| i % k_eff).collect();
         return build_zone_output(
-            &labels, truck_count, k_eff,
-            node_weights, edges, node_coords, include_polygons, &warnings,
+            &labels,
+            truck_count,
+            k_eff,
+            node_weights,
+            edges,
+            node_coords,
+            include_polygons,
+            &warnings,
         );
     }
 
     // Validate node coverage
-    let referenced: std::collections::HashSet<usize> = edges
-        .iter()
-        .flat_map(|e| [e.u, e.v])
-        .collect();
+    let referenced: std::collections::HashSet<usize> =
+        edges.iter().flat_map(|e| [e.u, e.v]).collect();
     let unreferenced: Vec<usize> = (0..n).filter(|i| !referenced.contains(i)).collect();
     if !unreferenced.is_empty() {
         warnings.push(format!(
@@ -696,7 +708,10 @@ pub fn partition_graph(
             let mut sub_labels = spectral_partition(&sub_adj, &sub_degs, sub_k);
 
             if use_node_weights {
-                let sub_nw: Vec<f64> = connected.iter().map(|&i| node_weights.unwrap()[i]).collect();
+                let sub_nw: Vec<f64> = connected
+                    .iter()
+                    .map(|&i| node_weights.unwrap()[i])
+                    .collect();
                 sub_labels = balance_postprocess_node_weights(sub_labels, &sub_nw, sub_k, 50);
             } else {
                 sub_labels = balance_postprocess(sub_labels, &sub_edges, sub_k, 50);
@@ -727,7 +742,8 @@ pub fn partition_graph(
         } else {
             if n > SPECTRAL_MAX_NODES {
                 warnings.push(format!(
-                    "Graph has {} nodes; using fast degree-based clustering.", n
+                    "Graph has {} nodes; using fast degree-based clustering.",
+                    n
                 ));
             }
             let mut labels = spectral_partition(&adj, &adj_degs, k_eff);
@@ -741,11 +757,18 @@ pub fn partition_graph(
     };
 
     build_zone_output(
-        &labels, truck_count, k_eff,
-        node_weights, edges, node_coords, include_polygons, &warnings,
+        &labels,
+        truck_count,
+        k_eff,
+        node_weights,
+        edges,
+        node_coords,
+        include_polygons,
+        &warnings,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_zone_output(
     labels: &[usize],
     truck_count: usize,
@@ -766,10 +789,8 @@ fn build_zone_output(
             let weight_sum = if let Some(nw) = node_weights {
                 node_ids.iter().map(|&i| nw[i]).sum()
             } else if !edges.is_empty() {
-                let ew: Vec<(usize, usize, f64)> = edges
-                    .iter()
-                    .map(|e| (e.u, e.v, e.length))
-                    .collect();
+                let ew: Vec<(usize, usize, f64)> =
+                    edges.iter().map(|e| (e.u, e.v, e.length)).collect();
                 zone_weights_from_labels(labels, &ew, k_eff)[z]
             } else {
                 node_ids.len() as f64
@@ -816,7 +837,15 @@ pub fn partition_edges(
     truck_count: usize,
     balance_metric: &str,
 ) -> PartitionResponse {
-    partition_graph(edges, node_count, truck_count, balance_metric, None, None, false)
+    partition_graph(
+        edges,
+        node_count,
+        truck_count,
+        balance_metric,
+        None,
+        None,
+        false,
+    )
 }
 
 /// Partition from points.

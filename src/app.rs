@@ -680,7 +680,10 @@ impl App {
             }
             InputField::VrpWaypointsFile => {
                 self.vrp_waypoints_file = Some(value.clone());
-                self.log(LogLevel::Success, format!("VRP waypoints file set: {}", value));
+                self.log(
+                    LogLevel::Success,
+                    format!("VRP waypoints file set: {}", value),
+                );
             }
             InputField::DepotCoordinates => {
                 let parts: Vec<&str> = value.split(',').collect();
@@ -812,7 +815,6 @@ mod tests {
         app.navigate_up();
         assert_eq!(app.workflow_selection, 0);
     }
-
 
     #[test]
     fn test_app_cancel_input() {

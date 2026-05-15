@@ -44,13 +44,24 @@ fn lonlat_to_tile(lon: f64, lat: f64, zoom: u8) -> (u32, u32) {
 }
 
 /// Convert MVT tile-local coordinates to WGS84 lon/lat.
-fn tile_to_wgs84(tile_x: u32, tile_y: u32, zoom: u8, extent: u32, local_x: f64, local_y: f64) -> (f64, f64) {
+fn tile_to_wgs84(
+    tile_x: u32,
+    tile_y: u32,
+    zoom: u8,
+    extent: u32,
+    local_x: f64,
+    local_y: f64,
+) -> (f64, f64) {
     let n = 2u32.pow(zoom as u32) as f64;
     let lon_min = tile_x as f64 / n * 360.0 - 180.0;
     let lon_max = (tile_x + 1) as f64 / n * 360.0 - 180.0;
-    let lat_max_rad = (std::f64::consts::PI * (1.0 - 2.0 * tile_y as f64 / n)).sinh().atan();
+    let lat_max_rad = (std::f64::consts::PI * (1.0 - 2.0 * tile_y as f64 / n))
+        .sinh()
+        .atan();
     let lat_max = lat_max_rad.to_degrees();
-    let lat_min_rad = (std::f64::consts::PI * (1.0 - 2.0 * (tile_y + 1) as f64 / n)).sinh().atan();
+    let lat_min_rad = (std::f64::consts::PI * (1.0 - 2.0 * (tile_y + 1) as f64 / n))
+        .sinh()
+        .atan();
     let lat_min = lat_min_rad.to_degrees();
 
     let lon = lon_min + (local_x / extent as f64) * (lon_max - lon_min);
@@ -60,7 +71,13 @@ fn tile_to_wgs84(tile_x: u32, tile_y: u32, zoom: u8, extent: u32, local_x: f64, 
 }
 
 /// Check if any coordinate of a geometry falls within the bbox.
-fn geometry_intersects_bbox(geom: &Geometry<f64>, min_lon: f64, min_lat: f64, max_lon: f64, max_lat: f64) -> bool {
+fn geometry_intersects_bbox(
+    geom: &Geometry<f64>,
+    min_lon: f64,
+    min_lat: f64,
+    max_lon: f64,
+    max_lat: f64,
+) -> bool {
     match geom {
         Geometry::LineString(ls) => {
             for c in &ls.0 {
@@ -88,23 +105,40 @@ fn geometry_intersects_bbox(geom: &Geometry<f64>, min_lon: f64, min_lat: f64, ma
 }
 
 /// Convert an MVT feature's geometry to WGS84 GeoJSON geometry.
-fn convert_geometry(geom: &Geometry<f64>, tile_x: u32, tile_y: u32, zoom: u8, extent: u32) -> Option<geojson::Geometry> {
+fn convert_geometry(
+    geom: &Geometry<f64>,
+    tile_x: u32,
+    tile_y: u32,
+    zoom: u8,
+    extent: u32,
+) -> Option<geojson::Geometry> {
     match geom {
         Geometry::LineString(ls) => {
-            let coords: Vec<Vec<f64>> = ls.0.iter().map(|c| {
-                let (lon, lat) = tile_to_wgs84(tile_x, tile_y, zoom, extent, c.x, c.y);
-                vec![lon, lat]
-            }).collect();
+            let coords: Vec<Vec<f64>> =
+                ls.0.iter()
+                    .map(|c| {
+                        let (lon, lat) = tile_to_wgs84(tile_x, tile_y, zoom, extent, c.x, c.y);
+                        vec![lon, lat]
+                    })
+                    .collect();
             Some(geojson::Geometry::new(GeoJsonValue::LineString(coords)))
         }
         Geometry::MultiLineString(mls) => {
-            let coords: Vec<Vec<Vec<f64>>> = mls.0.iter().map(|ls| {
-                ls.0.iter().map(|c| {
-                    let (lon, lat) = tile_to_wgs84(tile_x, tile_y, zoom, extent, c.x, c.y);
-                    vec![lon, lat]
-                }).collect()
-            }).collect();
-            Some(geojson::Geometry::new(GeoJsonValue::MultiLineString(coords)))
+            let coords: Vec<Vec<Vec<f64>>> = mls
+                .0
+                .iter()
+                .map(|ls| {
+                    ls.0.iter()
+                        .map(|c| {
+                            let (lon, lat) = tile_to_wgs84(tile_x, tile_y, zoom, extent, c.x, c.y);
+                            vec![lon, lat]
+                        })
+                        .collect()
+                })
+                .collect();
+            Some(geojson::Geometry::new(GeoJsonValue::MultiLineString(
+                coords,
+            )))
         }
         Geometry::Point(p) => {
             let (lon, lat) = tile_to_wgs84(tile_x, tile_y, zoom, extent, p.x(), p.y());
@@ -122,15 +156,17 @@ fn geojson_geom_to_geo_types(geom: &geojson::Geometry) -> Geometry<f64> {
             Geometry::LineString(LineString(c))
         }
         GeoJsonValue::MultiLineString(coords) => {
-            let lines: Vec<LineString<f64>> = coords.iter().map(|ring| {
-                let c: Vec<Coord<f64>> = ring.iter().map(|p| Coord { x: p[0], y: p[1] }).collect();
-                LineString(c)
-            }).collect();
+            let lines: Vec<LineString<f64>> = coords
+                .iter()
+                .map(|ring| {
+                    let c: Vec<Coord<f64>> =
+                        ring.iter().map(|p| Coord { x: p[0], y: p[1] }).collect();
+                    LineString(c)
+                })
+                .collect();
             Geometry::MultiLineString(MultiLineString(lines))
         }
-        GeoJsonValue::Point(coords) => {
-            Geometry::Point(geo_types::Point::new(coords[0], coords[1]))
-        }
+        GeoJsonValue::Point(coords) => Geometry::Point(geo_types::Point::new(coords[0], coords[1])),
         _ => Geometry::Point(geo_types::Point::new(0.0, 0.0)),
     }
 }
@@ -139,25 +175,33 @@ fn geojson_geom_to_geo_types(geom: &geojson::Geometry) -> Geometry<f64> {
 fn convert_geom_to_f64(geom: &Geometry<f32>) -> Geometry<f64> {
     match geom {
         Geometry::LineString(ls) => {
-            let coords: Vec<Coord<f64>> = ls.0.iter().map(|c| Coord {
-                x: c.x as f64,
-                y: c.y as f64,
-            }).collect();
+            let coords: Vec<Coord<f64>> =
+                ls.0.iter()
+                    .map(|c| Coord {
+                        x: c.x as f64,
+                        y: c.y as f64,
+                    })
+                    .collect();
             Geometry::LineString(LineString(coords))
         }
         Geometry::MultiLineString(mls) => {
-            let lines: Vec<LineString<f64>> = mls.0.iter().map(|ls| {
-                let coords: Vec<Coord<f64>> = ls.0.iter().map(|c| Coord {
-                    x: c.x as f64,
-                    y: c.y as f64,
-                }).collect();
-                LineString(coords)
-            }).collect();
+            let lines: Vec<LineString<f64>> = mls
+                .0
+                .iter()
+                .map(|ls| {
+                    let coords: Vec<Coord<f64>> =
+                        ls.0.iter()
+                            .map(|c| Coord {
+                                x: c.x as f64,
+                                y: c.y as f64,
+                            })
+                            .collect();
+                    LineString(coords)
+                })
+                .collect();
             Geometry::MultiLineString(MultiLineString(lines))
         }
-        Geometry::Point(p) => {
-            Geometry::Point(geo_types::Point::new(p.x() as f64, p.y() as f64))
-        }
+        Geometry::Point(p) => Geometry::Point(geo_types::Point::new(p.x() as f64, p.y() as f64)),
         _ => Geometry::Point(geo_types::Point::new(0.0, 0.0)), // fallback
     }
 }
@@ -190,23 +234,33 @@ pub async fn run_pmtiles_extract(req: &PmtilesExtractRequest) -> Result<PmtilesE
 
     tracing::info!(
         "Extracting PMTiles bbox [{:.4},{:.4},{:.4},{:.4}] at zoom {} from {}",
-        req.min_lon, req.min_lat, req.max_lon, req.max_lat,
-        zoom, req.pmtiles_path
+        req.min_lon,
+        req.min_lat,
+        req.max_lon,
+        req.max_lat,
+        zoom,
+        req.pmtiles_path
     );
 
     // Compute tile range
     let (x1, y1) = lonlat_to_tile(req.min_lon, req.max_lat, zoom); // top-left
     let (x2, y2) = lonlat_to_tile(req.max_lon, req.min_lat, zoom); // bottom-right
 
-    tracing::info!("Tile range: z={}, x=[{}..{}], y=[{}..{}]", zoom, x1, x2, y1, y2);
+    tracing::info!(
+        "Tile range: z={}, x=[{}..{}], y=[{}..{}]",
+        zoom,
+        x1,
+        x2,
+        y1,
+        y2
+    );
 
     let mut all_features: Vec<Feature> = Vec::new();
     let mut tiles_fetched: usize = 0;
 
     for tx in x1..=x2 {
         for ty in y1..=y2 {
-            let coord = TileCoord::new(zoom, tx, ty)
-                .context("Invalid tile coordinate")?;
+            let coord = TileCoord::new(zoom, tx, ty).context("Invalid tile coordinate")?;
 
             let tile_data = match reader.get_tile_decompressed(coord).await {
                 Ok(Some(data)) => data,
@@ -265,8 +319,10 @@ pub async fn run_pmtiles_extract(req: &PmtilesExtractRequest) -> Result<PmtilesE
                     let wgs84_geom = geojson_geom_to_geo_types(&geojson_geom);
                     if !geometry_intersects_bbox(
                         &wgs84_geom,
-                        req.min_lon, req.min_lat,
-                        req.max_lon, req.max_lat,
+                        req.min_lon,
+                        req.min_lat,
+                        req.max_lon,
+                        req.max_lat,
                     ) {
                         continue;
                     }
@@ -276,7 +332,9 @@ pub async fn run_pmtiles_extract(req: &PmtilesExtractRequest) -> Result<PmtilesE
                     if let Some(ref mvt_props) = mvt_feat.properties {
                         for (key, val) in mvt_props {
                             let json_val = match val {
-                                mvt_reader::feature::Value::String(s) => serde_json::Value::String(s.clone()),
+                                mvt_reader::feature::Value::String(s) => {
+                                    serde_json::Value::String(s.clone())
+                                }
                                 mvt_reader::feature::Value::Float(f) => serde_json::json!(f),
                                 mvt_reader::feature::Value::Double(d) => serde_json::json!(d),
                                 mvt_reader::feature::Value::Int(i) => serde_json::json!(i),
@@ -288,16 +346,22 @@ pub async fn run_pmtiles_extract(req: &PmtilesExtractRequest) -> Result<PmtilesE
                             props.insert(key.clone(), json_val);
                         }
                     }
-                    props.insert("_layer".to_string(), serde_json::Value::String(layer_name.clone()));
+                    props.insert(
+                        "_layer".to_string(),
+                        serde_json::Value::String(layer_name.clone()),
+                    );
                     props.insert("_zoom".to_string(), serde_json::json!(zoom));
                     props.insert("_tile_x".to_string(), serde_json::json!(tx));
                     props.insert("_tile_y".to_string(), serde_json::json!(ty));
 
-                    let mut feature = Feature::default();
-                    feature.geometry = Some(geojson_geom);
-                    feature.properties = Some(props);
+                    let mut feature = Feature {
+                        geometry: Some(geojson_geom),
+                        properties: Some(props),
+                        ..Default::default()
+                    };
                     if let Some(id) = mvt_feat.id {
-                        feature.id = Some(geojson::feature::Id::Number(serde_json::Number::from(id)));
+                        feature.id =
+                            Some(geojson::feature::Id::Number(serde_json::Number::from(id)));
                     }
 
                     all_features.push(feature);
@@ -315,15 +379,15 @@ pub async fn run_pmtiles_extract(req: &PmtilesExtractRequest) -> Result<PmtilesE
         foreign_members: None,
     };
 
-    let geojson_str = serde_json::to_string(&fc)
-        .context("Failed to serialize GeoJSON")?;
+    let geojson_str = serde_json::to_string(&fc).context("Failed to serialize GeoJSON")?;
 
-    std::fs::write(&req.output_path, geojson_str)
-        .context("Failed to write output GeoJSON")?;
+    std::fs::write(&req.output_path, geojson_str).context("Failed to write output GeoJSON")?;
 
     tracing::info!(
         "Extracted {} features from {} tiles → {}",
-        feature_count, tiles_fetched, req.output_path
+        feature_count,
+        tiles_fetched,
+        req.output_path
     );
 
     Ok(PmtilesExtractResult {

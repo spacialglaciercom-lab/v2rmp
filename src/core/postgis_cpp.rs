@@ -60,20 +60,15 @@ pub struct PostGisCppRequest {
     pub output_path: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum OneWayMode {
     #[serde(rename = "ignore")]
     Ignore,
     #[serde(rename = "respect")]
+    #[default]
     Respect,
     #[serde(rename = "reverse")]
     Reverse,
-}
-
-impl Default for OneWayMode {
-    fn default() -> Self {
-        Self::Respect
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,8 +221,7 @@ const NON_VEHICLE_CLASSES: &[&str] = &[
 pub fn run_postgis_cpp(req: &PostGisCppRequest) -> Result<PostGisCppResult> {
     let t_start = Instant::now();
 
-    let runtime = tokio::runtime::Runtime::new()
-        .context("Failed to create Tokio runtime")?;
+    let runtime = tokio::runtime::Runtime::new().context("Failed to create Tokio runtime")?;
 
     let (graph, _node_index_to_str) = runtime.block_on(extract_road_network_from_postgis(req))?;
     let t_extract = t_start.elapsed();
@@ -258,10 +252,7 @@ pub fn run_postgis_cpp(req: &PostGisCppRequest) -> Result<PostGisCppResult> {
     let t_build = t_start.elapsed();
 
     // Efficiency
-    let total_edge_dist: f64 = graph
-        .edge_references()
-        .map(|e| e.weight().length_km)
-        .sum();
+    let total_edge_dist: f64 = graph.edge_references().map(|e| e.weight().length_km).sum();
     let total_dist = route_result.total_distance_km;
     let eff = if total_dist > 0.0 {
         (total_edge_dist / total_dist * 100.0).clamp(0.0, 100.0)
@@ -401,8 +392,14 @@ async fn extract_road_network_from_postgis(
             FROM {}
             WHERE ({}) AND ({}) AND {}
         ) nodes"#,
-        table, class_filter, non_vehicle_filter, spatial_filter,
-        table, class_filter, non_vehicle_filter, spatial_filter,
+        table,
+        class_filter,
+        non_vehicle_filter,
+        spatial_filter,
+        table,
+        class_filter,
+        non_vehicle_filter,
+        spatial_filter,
     );
 
     let nodes_rows = sqlx::query(&nodes_query)
@@ -430,23 +427,19 @@ async fn extract_road_network_from_postgis(
         let source: String = row.get("source_node");
         let target: String = row.get("target_node");
         let is_oneway: bool = row.get("oneway");
-        let is_dual: bool = row.get::<Option<bool>, _>("dual_carriageway").unwrap_or(false);
+        let is_dual: bool = row
+            .get::<Option<bool>, _>("dual_carriageway")
+            .unwrap_or(false);
         let osm_id: Option<String> = row.get("osm_id");
 
         // Ensure both nodes exist (sometimes edges reference nodes outside
         // the bbox-filtered node set)
-        let src_idx = *node_map.entry(source.clone()).or_insert_with(|| {
-            graph.add_node(PgNode {
-                lon: 0.0,
-                lat: 0.0,
-            })
-        });
-        let tgt_idx = *node_map.entry(target.clone()).or_insert_with(|| {
-            graph.add_node(PgNode {
-                lon: 0.0,
-                lat: 0.0,
-            })
-        });
+        let src_idx = *node_map
+            .entry(source.clone())
+            .or_insert_with(|| graph.add_node(PgNode { lon: 0.0, lat: 0.0 }));
+        let tgt_idx = *node_map
+            .entry(target.clone())
+            .or_insert_with(|| graph.add_node(PgNode { lon: 0.0, lat: 0.0 }));
 
         // Bidirectional deduplication: skip reverse direction of two-way streets
         if !is_oneway && !is_dual {
@@ -475,14 +468,12 @@ async fn extract_road_network_from_postgis(
 
         let mut coords: Vec<(f64, f64)> = Vec::new();
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&geom_str) {
-            if let Some(arr) = parsed
-                .get("coordinates")
-                .and_then(|v| v.as_array())
-            {
+            if let Some(arr) = parsed.get("coordinates").and_then(|v| v.as_array()) {
                 for pt in arr {
-                    if let (Some(lon), Some(lat)) =
-                        (pt.get(0).and_then(|v| v.as_f64()), pt.get(1).and_then(|v| v.as_f64()))
-                    {
+                    if let (Some(lon), Some(lat)) = (
+                        pt.get(0).and_then(|v| v.as_f64()),
+                        pt.get(1).and_then(|v| v.as_f64()),
+                    ) {
                         coords.push((lon, lat));
                     }
                 }
@@ -530,15 +521,13 @@ async fn extract_road_network_from_postgis(
 
 /// Find the nearest graph node to a (lat, lon) point.
 fn nearest_node(graph: &RoadGraph, lat: f64, lon: f64) -> Option<NodeIndex> {
-    graph
-        .node_indices()
-        .min_by(|&a, &b| {
-            let na = &graph[a];
-            let nb = &graph[b];
-            let da = haversine_km(lat, lon, na.lat, na.lon);
-            let db = haversine_km(lat, lon, nb.lat, nb.lon);
-            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-        })
+    graph.node_indices().min_by(|&a, &b| {
+        let na = &graph[a];
+        let nb = &graph[b];
+        let da = haversine_km(lat, lon, na.lat, na.lon);
+        let db = haversine_km(lat, lon, nb.lat, nb.lon);
+        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+    })
 }
 
 /// Solve CPP: find odd-degree vertices, compute shortest paths, run
@@ -593,7 +582,8 @@ fn solve_cpp_with_matching(
         // Greedy minimum-weight matching on Dijkstra distances
         if !odd_pair_distances.is_empty() {
             // Sort by distance ascending
-            odd_pair_distances.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+            odd_pair_distances
+                .sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
             let mut matched = vec![false; odd_nodes.len()];
             let mut matched_pairs: Vec<(usize, usize)> = Vec::new();
@@ -649,11 +639,7 @@ fn solve_cpp_with_matching(
 }
 
 /// Reconstruct shortest path between two nodes (node sequence).
-fn shortest_path(
-    graph: &RoadGraph,
-    start: NodeIndex,
-    goal: NodeIndex,
-) -> Option<Vec<NodeIndex>> {
+fn shortest_path(graph: &RoadGraph, start: NodeIndex, goal: NodeIndex) -> Option<Vec<NodeIndex>> {
     let result = petgraph::algo::astar(
         graph,
         start,
@@ -797,10 +783,7 @@ fn build_route_from_nodes(
                 edge_ref.source()
             };
             if other == v {
-                let ekey = (
-                    std::cmp::min(ui, vi),
-                    std::cmp::max(ui, vi),
-                );
+                let ekey = (std::cmp::min(ui, vi), std::cmp::max(ui, vi));
                 if !consumed.contains(&ekey) {
                     consumed.insert(ekey);
                     let e = edge_ref.weight();
@@ -970,7 +953,7 @@ enum TurnType {
 /// Classify a turn from bearing_in to bearing_out.
 fn classify_turn(bearing_in: f64, bearing_out: f64) -> TurnType {
     let diff = (bearing_out - bearing_in + 360.0) % 360.0;
-    if diff < 30.0 || diff > 330.0 {
+    if !(30.0..=330.0).contains(&diff) {
         TurnType::Straight
     } else if (30.0..=150.0).contains(&diff) {
         TurnType::Right
@@ -1118,8 +1101,8 @@ mod tests {
         assert_eq!(odd_nodes.len(), 4, "Expected 4 odd-degree nodes");
 
         // ── Run CPP solver ─────────────────────────────────
-        let (circuit, aug_graph) = solve_cpp_with_matching(&graph, None)
-            .expect("CPP solver should succeed on grid");
+        let (circuit, aug_graph) =
+            solve_cpp_with_matching(&graph, None).expect("CPP solver should succeed on grid");
 
         // Circuit must be at least as long as edge count (one per edge)
         assert!(
@@ -1130,11 +1113,15 @@ mod tests {
         );
 
         // First and last node should be the same (circuit)
-        assert_eq!(circuit.first(), circuit.last(), "Circuit must return to start");
+        assert_eq!(
+            circuit.first(),
+            circuit.last(),
+            "Circuit must return to start"
+        );
 
         // ── Build route ────────────────────────────────────
-        let route = build_route_from_nodes(&aug_graph, &circuit)
-            .expect("Route builder should succeed");
+        let route =
+            build_route_from_nodes(&aug_graph, &circuit).expect("Route builder should succeed");
 
         // Total distance must be >= sum of edge lengths
         assert!(
@@ -1158,10 +1145,7 @@ mod tests {
         );
 
         // Route must have coordinates
-        assert!(
-            !route.route.is_empty(),
-            "Route must have coordinate pairs"
-        );
+        assert!(!route.route.is_empty(), "Route must have coordinate pairs");
 
         // Instructions must exist
         assert!(
@@ -1170,15 +1154,18 @@ mod tests {
         );
 
         // Turn stats should have values
-        assert!(
-            route.turn_stats.total_turns > 0,
-            "Must have some turns"
-        );
+        assert!(route.turn_stats.total_turns > 0, "Must have some turns");
 
         // Each instruction should have a non-empty maneuever type
         for inst in &route.instructions {
-            assert!(!inst.maneuver.is_empty(), "Instruction maneuever must be non-empty");
-            assert!(inst.distance_km > 0.0, "Instruction distance must be positive");
+            assert!(
+                !inst.maneuver.is_empty(),
+                "Instruction maneuever must be non-empty"
+            );
+            assert!(
+                inst.distance_km > 0.0,
+                "Instruction distance must be positive"
+            );
         }
 
         eprintln!("=== Synthetic grid test passed ===");
@@ -1236,11 +1223,15 @@ mod tests {
             );
         }
 
-        let (circuit, aug_graph) = solve_cpp_with_matching(&graph, None).expect("should solve diamond");
+        let (circuit, aug_graph) =
+            solve_cpp_with_matching(&graph, None).expect("should solve diamond");
         let route = build_route_from_nodes(&aug_graph, &circuit).expect("should build route");
 
         // Diamond has 2 odd nodes (0 and 2) → one matched pair → deadhead > 0
-        assert!(route.deadhead_distance_km > 0.0, "Diamond should have deadhead");
+        assert!(
+            route.deadhead_distance_km > 0.0,
+            "Diamond should have deadhead"
+        );
         assert_eq!(circuit.first(), circuit.last(), "Must be a circuit");
     }
 
@@ -1272,7 +1263,8 @@ mod tests {
             },
         );
 
-        let (circuit, _aug) = solve_cpp_with_matching(&graph, None).expect("should solve single edge");
+        let (circuit, _aug) =
+            solve_cpp_with_matching(&graph, None).expect("should solve single edge");
         assert_eq!(circuit.first(), circuit.last(), "Must be a circuit");
         // 2 odd nodes → match them → duplicate the edge → circuit traverses it twice
         assert!(

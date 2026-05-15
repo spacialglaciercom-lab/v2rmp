@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::fs;
-use v2rmp::core::drone::{DroneModel, DroneSpec, DroneVrpInstance};
 use v2rmp::core::drone::solver::DroneSolver;
+use v2rmp::core::drone::{DroneModel, DroneSpec, DroneVrpInstance};
 
 #[derive(Parser)]
 #[command(name = "rmpca-drone")]
@@ -72,7 +72,14 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Solve { drone, customers, depot_lat, depot_lon, wind, output } => {
+        Commands::Solve {
+            drone,
+            customers,
+            depot_lat,
+            depot_lon,
+            wind,
+            output,
+        } => {
             let model = match drone.to_lowercase().as_str() {
                 "flycart30" | "fc30" => DroneModel::FlyCart30,
                 "wing" => DroneModel::Wing,
@@ -80,9 +87,10 @@ fn main() -> Result<()> {
             };
 
             // Load customers from GeoJSON
-            let geojson_str = fs::read_to_string(&customers).context("Failed to read customers file")?;
+            let geojson_str =
+                fs::read_to_string(&customers).context("Failed to read customers file")?;
             let geojson = geojson_str.parse::<geojson::GeoJson>()?;
-            
+
             let mut customer_coords = Vec::new();
             let mut demands = Vec::new();
 
@@ -91,7 +99,8 @@ fn main() -> Result<()> {
                     if let Some(ref geometry) = feature.geometry {
                         if let geojson::Value::Point(ref coords) = geometry.value {
                             customer_coords.push([coords[1], coords[0]]); // lat, lon
-                            let demand = feature.property("demand")
+                            let demand = feature
+                                .property("demand")
                                 .and_then(|v| v.as_f64())
                                 .unwrap_or(1.0);
                             demands.push(demand);
@@ -109,7 +118,11 @@ fn main() -> Result<()> {
                 no_fly_zones: vec![],
             };
 
-            println!("Solving VRP for {} customers using {:?}...", instance.customers.len(), model);
+            println!(
+                "Solving VRP for {} customers using {:?}...",
+                instance.customers.len(),
+                model
+            );
             let result = DroneSolver::solve(&instance)?;
 
             println!("Solution found:");
@@ -125,7 +138,12 @@ fn main() -> Result<()> {
                 println!("Result saved to {}", result.routes.len());
             }
         }
-        Commands::Energy { drone, distance, payload, wind } => {
+        Commands::Energy {
+            drone,
+            distance,
+            payload,
+            wind,
+        } => {
             let spec = match drone.to_lowercase().as_str() {
                 "flycart30" | "fc30" => DroneSpec::flycart30(),
                 "wing" => DroneSpec::wing(),

@@ -1,5 +1,5 @@
-use std::collections::{HashSet, HashMap};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 /// Geometric/topological summary of a CPP route.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -27,7 +27,11 @@ pub fn canon(u: usize, v: usize, directed: bool) -> (usize, usize) {
     if directed {
         (u, v)
     } else {
-        if u < v { (u, v) } else { (v, u) }
+        if u < v {
+            (u, v)
+        } else {
+            (v, u)
+        }
     }
 }
 
@@ -133,7 +137,9 @@ pub fn deadhead_distance_ratio(
         let length = if let Some(&l) = edge_lengths.get(&c) {
             l
         } else {
-            if let (Some(&(lat1, lon1)), Some(&(lat2, lon2))) = (node_coords.get(&u), node_coords.get(&v)) {
+            if let (Some(&(lat1, lon1)), Some(&(lat2, lon2))) =
+                (node_coords.get(&u), node_coords.get(&v))
+            {
                 haversine_km(lat1, lon1, lat2, lon2)
             } else {
                 0.0
@@ -196,6 +202,12 @@ pub fn compute_route_metrics(
         edge_repeat_ratio: repeat,
         immediate_reversals: immediate_reversal_count(route_nodes),
         null_deadhead_cycles: null_deadhead_cycle_count(route_nodes, required_edges, directed),
-        deadhead_distance_ratio: deadhead_distance_ratio(route_nodes, required_edges, edge_lengths, node_coords, directed),
+        deadhead_distance_ratio: deadhead_distance_ratio(
+            route_nodes,
+            required_edges,
+            edge_lengths,
+            node_coords,
+            directed,
+        ),
     }
 }

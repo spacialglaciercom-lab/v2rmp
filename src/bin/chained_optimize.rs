@@ -1,7 +1,7 @@
 /// One-shot binary: PMTiles extract → compile → CPP optimize → GPX
 use anyhow::Result;
 use v2rmp::core::compile::{run_compile, CompileRequest};
-use v2rmp::core::optimize::{run_optimize, OptimizeRequest, OnewayMode, TurnPenalties};
+use v2rmp::core::optimize::{run_optimize, OnewayMode, OptimizeRequest, TurnPenalties};
 use v2rmp::core::pmtiles_extract::{run_pmtiles_extract, PmtilesExtractRequest};
 
 #[tokio::main]
@@ -30,7 +30,10 @@ async fn main() -> Result<()> {
         layer_name: Some("transportation".to_string()),
     };
     let extract_res = run_pmtiles_extract(&extract_req).await?;
-    println!("  → Extracted {} features from {} tiles", extract_res.features, extract_res.tiles_fetched);
+    println!(
+        "  → Extracted {} features from {} tiles",
+        extract_res.features, extract_res.tiles_fetched
+    );
 
     // Step 2: Compile GeoJSON → .rmp
     println!("Step 2/3: Compiling GeoJSON → .rmp...");
@@ -43,7 +46,12 @@ async fn main() -> Result<()> {
         clean_options: None,
     };
     let compile_res = run_compile(&compile_req)?;
-    println!("  → {} nodes, {} edges ({:.1} KB)", compile_res.node_count, compile_res.edge_count, compile_res.output_size_bytes as f64 / 1024.0);
+    println!(
+        "  → {} nodes, {} edges ({:.1} KB)",
+        compile_res.node_count,
+        compile_res.edge_count,
+        compile_res.output_size_bytes as f64 / 1024.0
+    );
 
     // Step 3: CPP optimization → GPX
     println!("Step 3/3: Running CPP optimization...");
@@ -63,8 +71,18 @@ async fn main() -> Result<()> {
     println!("  → Segments: {}", optimize_res.total_segments);
     println!("  → Deadhead: {:.2} km", optimize_res.deadhead_distance_km);
     println!("  → Efficiency: {:.1}%", optimize_res.efficiency_pct);
-    println!("  → Turns: L={} R={} U={} S={}", optimize_res.turns.left, optimize_res.turns.right, optimize_res.turns.u_turn, optimize_res.turns.straight);
+    println!(
+        "  → Turns: L={} R={} U={} S={}",
+        optimize_res.turns.left,
+        optimize_res.turns.right,
+        optimize_res.turns.u_turn,
+        optimize_res.turns.straight
+    );
 
-    println!("\nGPX written to: {}/{}", std::env::current_dir()?.display(), gpx_path);
+    println!(
+        "\nGPX written to: {}/{}",
+        std::env::current_dir()?.display(),
+        gpx_path
+    );
     Ok(())
 }
