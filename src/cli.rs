@@ -4,9 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::clean::{clean_geojson, CleanOptions};
 use crate::core::compile::CompileRequest;
-use crate::core::elevation::FuelCalculator;
 #[cfg(feature = "extract")]
-use crate::core::extract::{BBoxRequest, ExtractRequest, ExtractSource, RoadClass};
+use crate::core::elevation::{FuelCalculator, LocalDem};
+#[cfg(feature = "extract")]
+use crate::core::extract::{BBoxRequest, ExtractRequest, ExtractSource, RoadClass, ExtractResult};
 use crate::core::optimize::{OnewayMode, OptimizeRequest, SolverMode, TurnPenalties};
 
 /// rmpca - Route optimization and data extraction
@@ -25,6 +26,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Extract road network data from Overture Maps
+    #[cfg(feature = "extract")]
     Extract(ExtractArgs),
     /// Compile GeoJSON into binary .rmp format
     Compile(CompileArgs),
@@ -35,6 +37,7 @@ enum Commands {
     /// Solve Vehicle Routing Problem (VRP) for multiple agents
     Vrp(VrpArgs),
     /// Run the full pipeline: extract -> clean -> compile -> optimize
+    #[cfg(feature = "extract")]
     Pipeline(PipelineArgs),
     /// List available resources (maps, routes)
     List(ListArgs),
@@ -46,6 +49,7 @@ enum Commands {
     #[cfg(feature = "ml")]
     Embed(EmbedArgs),
     /// DEM elevation queries from local GeoTIFF
+    #[cfg(feature = "extract")]
     Elevation(ElevationArgs),
     /// Predict the best VRP solver for a set of stops
     #[cfg(feature = "ml")]
@@ -226,14 +230,17 @@ struct AgentArgs {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum AgentTask {
+    #[cfg(feature = "extract")]
     Extract(ExtractArgs),
     Compile(CompileArgs),
     Clean(CleanArgs),
     Optimize(OptimizeArgs),
     Vrp(VrpArgs),
+    #[cfg(feature = "extract")]
     Pipeline(PipelineArgs),
     #[cfg(feature = "ml")]
     Embed(EmbedArgs),
+    #[cfg(feature = "extract")]
     Elevation(ElevationArgs),
 }
 
@@ -588,6 +595,7 @@ struct PipelineArgs {
     pub pbf: Option<String>,
 }
 
+#[cfg(feature = "extract")]
 #[derive(Serialize)]
 struct PipelineResult {
     extract: crate::core::extract::ExtractResult,
@@ -598,6 +606,7 @@ struct PipelineResult {
 
 // ── Parsing helpers ───────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn parse_bbox(s: &str) -> Result<(f64, f64, f64, f64)> {
     let parts: Vec<f64> = s
         .split(',')
@@ -609,6 +618,7 @@ fn parse_bbox(s: &str) -> Result<(f64, f64, f64, f64)> {
     Ok((parts[0], parts[1], parts[2], parts[3]))
 }
 
+#[cfg(feature = "extract")]
 fn parse_road_classes(classes: &[String]) -> Result<Vec<RoadClass>> {
     if classes.is_empty() {
         return Ok(RoadClass::all_vehicle());
@@ -634,6 +644,7 @@ fn parse_road_classes(classes: &[String]) -> Result<Vec<RoadClass>> {
         .collect()
 }
 
+#[cfg(feature = "extract")]
 fn parse_source(s: &str) -> Result<ExtractSource> {
     match s {
         "osm" => Ok(ExtractSource::Osm),
@@ -682,6 +693,7 @@ fn init_tracing() {
 
 // ── Command handlers ──────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 async fn run_extract_cmd(args: ExtractArgs, json: bool) -> Result<()> {
     let (min_lon, min_lat, max_lon, max_lat) = parse_bbox(&args.bbox)?;
     let road_classes = parse_road_classes(&args.road_classes)?;
@@ -998,6 +1010,7 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "extract")]
 async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
     let (min_lon, min_lat, max_lon, max_lat) = parse_bbox(&args.bbox)?;
     let source = parse_source(&args.source)?;
@@ -1130,14 +1143,17 @@ async fn run_agent_cmd(args: AgentArgs, json: bool) -> Result<()> {
         serde_json::from_reader(input).context("Failed to parse agent task JSON")?;
 
     match task {
+        #[cfg(feature = "extract")]
         AgentTask::Extract(a) => run_extract_cmd(a, json).await,
         AgentTask::Compile(a) => run_compile_cmd(a, json),
         AgentTask::Clean(a) => run_clean_cmd(a, json),
         AgentTask::Optimize(a) => run_optimize_cmd(a, json).await,
         AgentTask::Vrp(a) => run_vrp_cmd(a, json).await,
+        #[cfg(feature = "extract")]
         AgentTask::Pipeline(a) => run_pipeline_cmd(a, json).await,
         #[cfg(feature = "ml")]
         AgentTask::Embed(a) => run_embed_cmd(a, json).await,
+        #[cfg(feature = "extract")]
         AgentTask::Elevation(a) => run_elevation_cmd(a, json),
     }
 }
@@ -1168,14 +1184,17 @@ async fn run_serve_cmd(_args: ServeArgs) -> Result<()> {
         match serde_json::from_str::<AgentTask>(&line) {
             Ok(task) => {
                 let res = match task {
+                    #[cfg(feature = "extract")]
                     AgentTask::Extract(a) => run_extract_cmd(a, true).await,
                     AgentTask::Compile(a) => run_compile_cmd(a, true),
                     AgentTask::Clean(a) => run_clean_cmd(a, true),
                     AgentTask::Optimize(a) => run_optimize_cmd(a, true).await,
                     AgentTask::Vrp(a) => run_vrp_cmd(a, true).await,
+                    #[cfg(feature = "extract")]
                     AgentTask::Pipeline(a) => run_pipeline_cmd(a, true).await,
                     #[cfg(feature = "ml")]
                     AgentTask::Embed(a) => run_embed_cmd(a, true).await,
+                    #[cfg(feature = "extract")]
                     AgentTask::Elevation(a) => run_elevation_cmd(a, true),
                 };
                 if let Err(e) = res {
@@ -1255,6 +1274,7 @@ fn run_list_cmd(args: ListArgs, json: bool) -> Result<()> {
 
 // ── Elevation handler ─────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn run_elevation_cmd(args: ElevationArgs, json: bool) -> Result<()> {
     let dem_path = std::path::Path::new(&args.dem);
     if !json {
@@ -1493,6 +1513,7 @@ fn run_parse_query_cmd(args: ParseQueryArgs) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "extract")]
 fn read_json_input<T: serde::de::DeserializeOwned>(path: &str) -> Result<T> {
     let input: Box<dyn std::io::Read> = if path == "-" {
         Box::new(std::io::stdin())
@@ -1509,17 +1530,20 @@ pub async fn run() -> Result<()> {
     init_tracing();
 
     let result = match cli.command {
+        #[cfg(feature = "extract")]
         Commands::Extract(args) => run_extract_cmd(args, cli.json).await,
         Commands::Compile(args) => run_compile_cmd(args, cli.json),
         Commands::Clean(args) => run_clean_cmd(args, cli.json),
         Commands::Optimize(args) => run_optimize_cmd(args, cli.json).await,
         Commands::Vrp(args) => run_vrp_cmd(args, cli.json).await,
+        #[cfg(feature = "extract")]
         Commands::Pipeline(args) => run_pipeline_cmd(args, cli.json).await,
         Commands::List(args) => run_list_cmd(args, cli.json),
         Commands::Agent(args) => run_agent_cmd(args, cli.json).await,
         Commands::Serve(args) => run_serve_cmd(args).await,
         #[cfg(feature = "ml")]
         Commands::Embed(args) => run_embed_cmd(args, cli.json).await,
+        #[cfg(feature = "extract")]
         Commands::Elevation(args) => run_elevation_cmd(args, cli.json),
         #[cfg(feature = "ml")]
         Commands::PredictSolver(args) => run_predict_solver_cmd(args).await,

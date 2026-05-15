@@ -26,7 +26,8 @@ use candle_core::Device;
 
 // Re-export the legacy rule-based module for backwards compatibility.
 // New code should prefer `selector::predict_solver`.
-pub use crate::core::ml_legacy as legacy;
+// #[cfg(feature = "ml")]
+// pub use crate::core::ml_legacy as legacy;
 
 /// Returns the best available device (CUDA > Metal > CPU).
 #[cfg(feature = "ml")]

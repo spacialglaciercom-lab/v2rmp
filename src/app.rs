@@ -305,6 +305,7 @@ pub enum InputField {
     VrpAlgorithm,
     VrpCapacity,
     VrpDepot,
+    VrpVehicles,
     VrpWaypointsFile,
 }
 
@@ -670,6 +671,12 @@ impl App {
             InputField::VrpDepot => {
                 self.vrp_depots.push(value.clone());
                 self.log(LogLevel::Success, format!("VRP depot added: {}", value));
+            }
+            InputField::VrpVehicles => {
+                if let Ok(v) = value.parse::<usize>() {
+                    self.vrp_vehicles = v;
+                    self.log(LogLevel::Success, format!("VRP vehicles set: {}", v));
+                }
             }
             InputField::VrpWaypointsFile => {
                 self.vrp_waypoints_file = Some(value.clone());

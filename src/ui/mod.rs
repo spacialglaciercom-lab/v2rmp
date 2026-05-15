@@ -207,6 +207,7 @@ pub fn draw_input_prompt(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         crate::app::InputField::VrpCsvFile => "VRP coordinates CSV file path",
         crate::app::InputField::VrpAlgorithm => "VRP algorithm (greedy|savings|local_search|simulated_annealing)",
         crate::app::InputField::VrpCapacity => "VRP vehicle capacity",
+        crate::app::InputField::VrpVehicles => "Number of VRP vehicles",
         crate::app::InputField::VrpWaypointsFile => "VRP waypoints file path (.json)",
         crate::app::InputField::VrpDepot => "VRP depot (lat,lon)",
     };

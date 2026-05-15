@@ -1,9 +1,6 @@
 
-mod app;
-mod cli;
-mod core;
-mod event;
-mod ui;
+#[cfg(feature = "cli")]
+use v2rmp::{app, cli, event, ui};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

@@ -316,18 +316,10 @@ async fn handle_optimize_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers)
         KeyCode::Char('d') | KeyCode::Char('D') => {
             app.start_input(InputField::DepotCoordinates);
         }
-        KeyCode::Char('v') | KeyCode::Char('V') => {
-            app.start_input(InputField::NumVehicles);
-        }
-        KeyCode::Char('s') | KeyCode::Char('S') => {
-            app.start_input(InputField::SolverId);
-        }
         KeyCode::Enter => {
             if let Some(cache_path) = app.cache_file.clone() {
                 let penalties = app.turn_penalties;
                 let depot = app.depot_coords;
-                let num_vehicles = app.num_vehicles;
-                let solver_id = app.solver_id.clone();
 
                 app.optimize_status = crate::app::Status::Running {
                     progress: 0,
@@ -335,7 +327,7 @@ async fn handle_optimize_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers)
                 };
                 app.log(
                     crate::app::LogLevel::Info,
-                    format!("Starting optimization (mode: VRP, solver: {})", solver_id),
+                    "Starting optimization (mode: CPP)",
                 );
 
                 // Build optimize request
@@ -356,9 +348,9 @@ async fn handle_optimize_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers)
                     turn_penalties: penalties,
                     depot,
                     oneway_mode: OnewayMode::Respect,
-                    mode: SolverMode::Vrp,
-                    num_vehicles,
-                    solver_id,
+                    mode: SolverMode::Cpp,
+                    num_vehicles: 1,
+                    solver_id: "default".to_string(),
                     coordinates: None,
                 };
 
@@ -424,7 +416,7 @@ async fn handle_vrp_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
             app.start_input(InputField::VrpOutputDir);
         }
         KeyCode::Char('v') | KeyCode::Char('V') => {
-            app.start_input(InputField::NumVehicles);
+            app.start_input(InputField::VrpVehicles);
         }
         KeyCode::Char('a') | KeyCode::Char('A') => {
             app.start_input(InputField::VrpAlgorithm);

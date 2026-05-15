@@ -2,9 +2,10 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
 use v2rmp::core::r2::R2Storage;
+#[cfg(feature = "extract")]
 use v2rmp::core::extract::{ExtractRequest, ExtractSource, BBoxRequest, RoadClass};
 use v2rmp::core::compile::{CompileRequest, run_compile};
-use v2rmp::core::optimize::{OptimizeRequest, OnewayMode, run_optimize, TurnPenalties};
+use v2rmp::core::optimize::{OptimizeRequest, OnewayMode, run_optimize, TurnPenalties, SolverMode};
 use v2rmp::core::postgis_cpp::{PostGisCppRequest, run_postgis_cpp};
 
 fn main() -> Result<()> {
@@ -272,23 +273,30 @@ fn handle_tool_call(params: Value) -> Result<Value> {
             })
         }
         "v2rmp_extract" => {
-            let source = match arguments.get("source").and_then(Value::as_str).unwrap_or("overture") {
-                "osm" => ExtractSource::Osm, "postgres" => ExtractSource::Postgres, "r2" => ExtractSource::R2, _ => ExtractSource::Overture,
-            };
-            let req = ExtractRequest {
-                source,
-                bbox: BBoxRequest {
-                    min_lon: arguments.get("min_lon").and_then(Value::as_f64).unwrap_or(0.0),
-                    min_lat: arguments.get("min_lat").and_then(Value::as_f64).unwrap_or(0.0),
-                    max_lon: arguments.get("max_lon").and_then(Value::as_f64).unwrap_or(0.0),
-                    max_lat: arguments.get("max_lat").and_then(Value::as_f64).unwrap_or(0.0),
-                },
-                road_classes: RoadClass::all_vehicle(),
-                output_path: arguments.get("output_path").and_then(Value::as_str).unwrap_or("out.geojson").to_string(),
-                database_url: None, table_name: None, r2_bucket: None, r2_access_key_id: None, r2_secret_access_key: None, r2_endpoint: None,
-            };
-            let res = v2rmp::core::extract::run_extract(&req)?;
-            Ok(json!({ "content": [{ "type": "text", "text": format!("Extracted {} nodes", res.nodes) }], "isError": false }))
+            #[cfg(feature = "extract")]
+            {
+                let source = match arguments.get("source").and_then(Value::as_str).unwrap_or("overture") {
+                    "osm" => ExtractSource::Osm, "postgres" => ExtractSource::Postgres, "r2" => ExtractSource::R2, _ => ExtractSource::Overture,
+                };
+                let req = ExtractRequest {
+                    source,
+                    bbox: BBoxRequest {
+                        min_lon: arguments.get("min_lon").and_then(Value::as_f64).unwrap_or(0.0),
+                        min_lat: arguments.get("min_lat").and_then(Value::as_f64).unwrap_or(0.0),
+                        max_lon: arguments.get("max_lon").and_then(Value::as_f64).unwrap_or(0.0),
+                        max_lat: arguments.get("max_lat").and_then(Value::as_f64).unwrap_or(0.0),
+                    },
+                    road_classes: RoadClass::all_vehicle(),
+                    output_path: arguments.get("output_path").and_then(Value::as_str).unwrap_or("out.geojson").to_string(),
+                    database_url: None, table_name: None, r2_bucket: None, r2_access_key_id: None, r2_secret_access_key: None, r2_endpoint: None,
+                };
+                let res = v2rmp::core::extract::run_extract(&req)?;
+                Ok(json!({ "content": [{ "type": "text", "text": format!("Extracted {} nodes", res.nodes) }], "isError": false }))
+            }
+            #[cfg(not(feature = "extract"))]
+            {
+                anyhow::bail!("The 'extract' feature is not enabled in this build of the server.")
+            }
         }
         "v2rmp_compile" => {
             let mut opts = v2rmp::core::clean::CleanOptions::default();
@@ -296,7 +304,10 @@ fn handle_tool_call(params: Value) -> Result<Value> {
             let req = CompileRequest {
                 input_geojson: arguments.get("input_geojson").and_then(Value::as_str).context("Missing input")?.to_string(),
                 output_rmp: arguments.get("output_rmp").and_then(Value::as_str).context("Missing output")?.to_string(),
-                compress: true, road_classes: vec![], clean_options: Some(opts),
+                compress: true, 
+                road_classes: vec![], 
+                clean_options: Some(opts),
+                prune_disconnected: arguments.get("prune_disconnected").and_then(Value::as_bool).unwrap_or(false),
             };
             let res = run_compile(&req)?;
             Ok(json!({ "content": [{ "type": "text", "text": format!("Compiled {} nodes", res.node_count) }], "isError": false }))
@@ -305,14 +316,23 @@ fn handle_tool_call(params: Value) -> Result<Value> {
             let mut penalties = TurnPenalties::default();
             penalties.u_turn = arguments.get("u_turn_penalty").and_then(Value::as_f64).unwrap_or(10.0);
             let depot = if let (Some(lat), Some(lon)) = (arguments.get("depot_lat").and_then(Value::as_f64), arguments.get("depot_lon").and_then(Value::as_f64)) { Some((lat, lon)) } else { None };
+            
             let req = OptimizeRequest {
                 cache_file: arguments.get("map_path").and_then(Value::as_str).context("Missing map")?.to_string(),
                 route_file: Some(arguments.get("output_route").and_then(Value::as_str).context("Missing output")?.to_string()),
-                turn_penalties: penalties, depot, oneway_mode: OnewayMode::Respect,
-                database_url: std::env::var("SUPABASE_DB_URL").ok(),
-                table_name: arguments.get("db_export_table").and_then(Value::as_str).map(|s| s.to_string()),
+                turn_penalties: penalties, 
+                depot, 
+                oneway_mode: OnewayMode::Respect,
+                mode: SolverMode::Cpp,
+                num_vehicles: 1,
+                solver_id: "default".to_string(),
+                coordinates: None,
             };
-            let res = run_optimize(&req)?;
+
+            let rt = tokio::runtime::Runtime::new()?;
+            let res = rt.block_on(async {
+                run_optimize(&req).await
+            })?;
             Ok(json!({ "content": [{ "type": "text", "text": format!("Optimized: {:.2} km", res.total_distance_km) }], "isError": false }))
         }
         "v2rmp_postgis_cpp" => {
@@ -378,7 +398,10 @@ fn handle_tool_call(params: Value) -> Result<Value> {
                 let coords = loc.as_array().context("Invalid coordinate format")?;
                 let lat = coords[0].as_f64().context("Invalid latitude")?;
                 let lon = coords[1].as_f64().context("Invalid longitude")?;
-                locations.push([lat, lon]);
+                // NeuralRouteRequest expects [lon, lat, elevation] based on the doc comment
+                // although the previous code was doing [lat, lon]
+                // Let's stick to [lon, lat, 0.0] as common for GIS
+                locations.push([lon, lat, 0.0]);
             }
 
             let demands = arguments.get("demands").and_then(Value::as_array)

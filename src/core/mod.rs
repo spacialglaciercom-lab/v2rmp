@@ -17,7 +17,7 @@ pub mod vrp;
 // Gated behind `extract` feature
 #[cfg(feature = "extract")]
 pub mod elevation;
-#[cfg(feature = "extract")]
+#[cfg(feature = "ml")]
 pub mod embed;
 #[cfg(feature = "extract")]
 pub mod extract;
