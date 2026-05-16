@@ -30,8 +30,11 @@ use std::path::Path;
 use std::path::PathBuf;
 use v2rmp::core::clean::{clean_geojson, CleanOptions};
 use v2rmp::core::compile::{CompileRequest, CompileResult};
+#[cfg(feature = "extract")]
 use v2rmp::core::elevation::local::LocalDem;
+#[cfg(feature = "extract")]
 use v2rmp::core::elevation::FuelCalculator;
+#[cfg(feature = "extract")]
 use v2rmp::core::extract::{BBoxRequest, ExtractRequest, ExtractResult, ExtractSource, RoadClass};
 #[cfg(feature = "ml")]
 use v2rmp::core::ml::automl::predict_hyperparams;
@@ -126,6 +129,7 @@ fn tool_success(id: &Value, result: &Result<Value>) {
 
 fn tool_definitions() -> Vec<ToolDef> {
     vec![
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "extract_overture",
             description: "Extract road network data from Overture Maps S3 Parquet files. \
@@ -159,6 +163,7 @@ fn tool_definitions() -> Vec<ToolDef> {
                 "required": ["bbox"]
             }),
         },
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "extract_osm",
             description: "Extract road network data from OpenStreetMap. Uses a local PBF file \
@@ -284,6 +289,10 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "type": "string",
                         "description": "VRP solver algorithm: default, clarke_wright, sweep, two_opt, or_opt",
                         "default": "default"
+                    },
+                    "google_maps": {
+                        "type": "boolean",
+                        "description": "Generate Google Maps URL links for the routes (default: false)"
                     }
                 },
                 "required": ["input"]
@@ -426,11 +435,16 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "type": "string",
                         "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"],
                         "description": "Optimization objective (default: min_distance)"
+                    },
+                    "google_maps": {
+                        "type": "boolean",
+                        "description": "Generate Google Maps URL links for the routes (default: false)"
                     }
                 },
                 "required": ["stops"]
             }),
         },
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "elevation_query",
             description: "Query elevation at one or more lat/lon points from a local DEM GeoTIFF file. \
@@ -459,6 +473,7 @@ fn tool_definitions() -> Vec<ToolDef> {
                 "required": ["dem_path", "points"]
             }),
         },
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "elevation_profile",
             description: "Sample elevation along a route at fixed intervals from a local DEM GeoTIFF file. \
@@ -500,6 +515,7 @@ fn tool_definitions() -> Vec<ToolDef> {
             }),
         },
         // ── Medium-priority tools ──────────────────────────────────────────
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "elevation_stats",
             description: "Compute elevation statistics (min, max, avg, coverage %) within a bounding box \
@@ -531,6 +547,7 @@ fn tool_definitions() -> Vec<ToolDef> {
                 "required": ["dem_path", "bbox"]
             }),
         },
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "dem_info",
             description: "Return metadata about a DEM GeoTIFF file: width, height, bounding box, \
@@ -546,6 +563,7 @@ fn tool_definitions() -> Vec<ToolDef> {
                 "required": ["dem_path"]
             }),
         },
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "fuel_estimate",
             description: "Calculate fuel consumption from an elevation profile. Takes an array of \
@@ -625,6 +643,10 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "type": "string",
                         "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"],
                         "description": "Optimization objective (default: min_distance)"
+                    },
+                    "google_maps": {
+                        "type": "boolean",
+                        "description": "Generate Google Maps URL links for the routes (default: false)"
                     }
                 },
                 "required": ["stops"]
@@ -712,6 +734,7 @@ fn tool_definitions() -> Vec<ToolDef> {
                 "required": ["stops"]
             }),
         },
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "pipeline",
             description: "End-to-end route optimization pipeline: extract road network → clean → \
@@ -958,6 +981,7 @@ fn tool_definitions() -> Vec<ToolDef> {
 
 // ── Argument parsing helpers ────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn parse_bbox(args: &Value) -> anyhow::Result<BBoxRequest> {
     let bbox = args
         .get("bbox")
@@ -982,6 +1006,7 @@ fn parse_bbox(args: &Value) -> anyhow::Result<BBoxRequest> {
     })
 }
 
+#[cfg(feature = "extract")]
 fn parse_road_classes(args: &Value) -> Vec<RoadClass> {
     let Some(arr) = args.get("road_classes").and_then(|v| v.as_array()) else {
         return RoadClass::all_vehicle();
@@ -1031,6 +1056,7 @@ fn parse_solver_mode(args: &Value) -> SolverMode {
 
 // ── Tool handlers ───────────────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 async fn handle_extract_overture(args: &Value) -> Result<Value> {
     let bbox = parse_bbox(args)?;
     let road_classes = parse_road_classes(args);
@@ -1060,6 +1086,7 @@ async fn handle_extract_overture(args: &Value) -> Result<Value> {
     Ok(serde_json::to_value(result)?)
 }
 
+#[cfg(feature = "extract")]
 async fn handle_extract_osm(args: &Value) -> Result<Value> {
     let bbox = parse_bbox(args)?;
     let road_classes = parse_road_classes(args);
@@ -1188,7 +1215,38 @@ async fn handle_optimize(args: &Value) -> Result<Value> {
     };
 
     let result: OptimizeResult = v2rmp::core::optimize::run_optimize(&req).await?;
-    Ok(serde_json::to_value(result)?)
+
+    let mut response = json!({
+        "total_distance_km": result.total_distance_km,
+        "total_segments": result.total_segments,
+        "num_routes": result.num_routes,
+        "elapsed_ms": result.elapsed_ms,
+    });
+
+    if args.get("google_maps").and_then(|v| v.as_bool()).unwrap_or(false) {
+        let mut urls = Vec::new();
+        for (i, route) in result.routes.iter().enumerate() {
+            let max_points = 20;
+            let sampled_points = if route.len() > max_points {
+                let step = route.len() / max_points;
+                route.iter().step_by(step).take(max_points).collect::<Vec<_>>()
+            } else {
+                route.iter().collect::<Vec<_>>()
+            };
+
+            let mut url = "https://www.google.com/maps/dir/".to_string();
+            for stop in sampled_points {
+                url.push_str(&format!("{:.6},{:.6}/", stop.lat, stop.lon));
+            }
+            urls.push(json!({
+                "vehicle": i + 1,
+                "url": url
+            }));
+        }
+        response.as_object_mut().unwrap().insert("google_maps_urls".to_string(), json!(urls));
+    }
+
+    Ok(response)
 }
 
 // ── Clean handler ─────────────────────────────────────────────────────────
@@ -1480,16 +1538,40 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
         })
         .collect();
 
-    Ok(json!({
+    let mut response = json!({
         "total_distance_km": output.total_distance_km,
         "total_time_min": output.total_time_min,
         "routes": routes_json,
         "unassigned": output.unassigned,
-    }))
+    });
+
+    if args.get("google_maps").and_then(|v| v.as_bool()).unwrap_or(false) {
+        let mut gmaps_urls = Vec::new();
+        if let Some(routes) = output.routes {
+            for (i, route) in routes.iter().enumerate() {
+                let chunks = route.chunks(20);
+                for (chunk_idx, chunk) in chunks.enumerate() {
+                    let mut url = "https://www.google.com/maps/dir/".to_string();
+                    for stop in chunk {
+                        url.push_str(&format!("{:.6},{:.6}/", stop.lat, stop.lon));
+                    }
+                    gmaps_urls.push(json!({
+                        "vehicle": i + 1,
+                        "part": chunk_idx + 1,
+                        "url": url
+                    }));
+                }
+            }
+        }
+        response.as_object_mut().unwrap().insert("google_maps_urls".to_string(), json!(gmaps_urls));
+    }
+
+    Ok(response)
 }
 
 // ── Elevation Query handler ──────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn handle_elevation_query(args: &Value) -> Result<Value> {
     let dem_path = args
         .get("dem_path")
@@ -1545,6 +1627,7 @@ fn handle_elevation_query(args: &Value) -> Result<Value> {
 
 // ── Elevation Profile handler ───────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn handle_elevation_profile(args: &Value) -> Result<Value> {
     let dem_path = args
         .get("dem_path")
@@ -1670,6 +1753,7 @@ fn handle_haversine_distance(args: &Value) -> Result<Value> {
 
 // ── Elevation Stats handler ──────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn handle_elevation_stats(args: &Value) -> Result<Value> {
     let dem_path = args
         .get("dem_path")
@@ -1718,6 +1802,7 @@ fn handle_elevation_stats(args: &Value) -> Result<Value> {
 
 // ── DEM Info handler ─────────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn handle_dem_info(args: &Value) -> Result<Value> {
     let dem_path = args
         .get("dem_path")
@@ -1746,6 +1831,7 @@ fn handle_dem_info(args: &Value) -> Result<Value> {
 
 // ── Fuel Estimate handler ────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn handle_fuel_estimate(args: &Value) -> Result<Value> {
     let samples_val = args
         .get("samples")
@@ -2163,6 +2249,7 @@ fn handle_route_embedding(args: &Value) -> Result<Value> {
 
 // ── Pipeline handler ─────────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 async fn handle_pipeline(args: &Value) -> Result<Value> {
     let bbox = parse_bbox(args)?;
     let output_dir = args
@@ -2779,7 +2866,9 @@ async fn main() -> Result<()> {
                 let args = req.params.get("arguments").cloned().unwrap_or(Value::Null);
 
                 let result = match name {
+                    #[cfg(feature = "extract")]
                     "extract_overture" => handle_extract_overture(&args).await,
+                    #[cfg(feature = "extract")]
                     "extract_osm" => handle_extract_osm(&args).await,
                     "compile" => handle_compile(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
@@ -2789,9 +2878,11 @@ async fn main() -> Result<()> {
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
                     "vrp_solve" => handle_vrp_solve(&args).await,
+                    #[cfg(feature = "extract")]
                     "elevation_query" => handle_elevation_query(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
+                    #[cfg(feature = "extract")]
                     "elevation_profile" => handle_elevation_profile(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
@@ -2801,18 +2892,22 @@ async fn main() -> Result<()> {
                     "haversine_distance" => handle_haversine_distance(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
+                    #[cfg(feature = "extract")]
                     "elevation_stats" => handle_elevation_stats(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
+                    #[cfg(feature = "extract")]
                     "dem_info" => handle_dem_info(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
+                    #[cfg(feature = "extract")]
                     "fuel_estimate" => handle_fuel_estimate(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
                     "inspect_rmp" => handle_inspect_rmp(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
+                    #[cfg(feature = "extract")]
                     "pipeline" => {
                         match tokio::time::timeout(
                             std::time::Duration::from_secs(30),

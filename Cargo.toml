@@ -67,12 +67,10 @@ path = "src/bin/chained_optimize.rs"
 [[bin]]
 name = "rmpca-mcp-server-legacy"
 path = "src/bin/rmpca-mcp-server.rs"
-required-features = ["extract"]
 
 [[bin]]
 name = "zilliz-mcp-server"
 path = "src/bin/zilliz-mcp-server.rs"
-required-features = ["extract"]
 
 [[bin]]
 name = "web-ui"
@@ -143,6 +141,7 @@ eframe = { version = "0.34.2", features = ["glow", "persistence"], optional = tr
 egui = { version = "0.34.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 rfd = { version = "0.15", optional = true }
+urlencoding = "2.1.3"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 log = "0.4.29"

@@ -376,6 +376,11 @@ struct VrpArgs {
     #[arg(long)]
     #[serde(default)]
     coordinates: Option<String>,
+
+    /// Generate Google Maps URL links for the routes
+    #[arg(long, default_value_t = false)]
+    #[serde(default)]
+    google_maps: bool,
 }
 
 // ── Extract ───────────────────────────────────────────────────────────
@@ -557,6 +562,11 @@ struct OptimizeArgs {
     #[arg(long, default_value = "default")]
     #[serde(default = "default_solver", alias = "solver_id")]
     solver: String,
+
+    /// Generate Google Maps URL links for the routes
+    #[arg(long, default_value_t = false)]
+    #[serde(default)]
+    google_maps: bool,
 }
 
 // ── Pipeline ──────────────────────────────────────────────────────────
@@ -895,6 +905,34 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
         if let Some(ref path) = args.output {
             tracing::info!("Route written to: {path}");
         }
+
+        if args.google_maps {
+            if result.routes.is_empty() {
+                tracing::warn!("No routes available for Google Maps URL");
+            } else {
+                for (i, route) in result.routes.iter().enumerate() {
+                    // For long routes (CPP), we might need to sample points
+                    // Google Maps limit is ~20 points for /dir/
+                    let max_points = 20;
+                    let sampled_points = if route.len() > max_points {
+                        let step = route.len() / max_points;
+                        route.iter().step_by(step).take(max_points).collect::<Vec<_>>()
+                    } else {
+                        route.iter().collect::<Vec<_>>()
+                    };
+
+                    let mut url = "https://www.google.com/maps/dir/".to_string();
+                    for stop in sampled_points {
+                        url.push_str(&format!("{:.6},{:.6}/", stop.lat, stop.lon));
+                    }
+                    if result.routes.len() > 1 {
+                        tracing::info!("Route {} Google Maps (Sampled): {}", i + 1, url);
+                    } else {
+                        tracing::info!("Google Maps (Sampled): {}", url);
+                    }
+                }
+            }
+        }
     }
 
     Ok(())
@@ -1003,6 +1041,23 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
             let path = format!("{}/vehicle_{}.gpx", args.output_dir, i + 1);
             crate::core::optimize::write_gpx_multi(&path, std::slice::from_ref(route))?;
             tracing::info!("Wrote route to {}", path);
+
+            if args.google_maps {
+                // Google Maps URL limit is ~20 points for /dir/
+                // Format: https://www.google.com/maps/dir/lat1,lon1/lat2,lon2/...
+                let chunks = route.chunks(20);
+                for (chunk_idx, chunk) in chunks.enumerate() {
+                    let mut url = "https://www.google.com/maps/dir/".to_string();
+                    for stop in chunk {
+                        url.push_str(&format!("{:.6},{:.6}/", stop.lat, stop.lon));
+                    }
+                    if route.chunks(20).count() > 1 {
+                        tracing::info!("Vehicle {} Google Maps (Part {}): {}", i + 1, chunk_idx + 1, url);
+                    } else {
+                        tracing::info!("Vehicle {} Google Maps: {}", i + 1, url);
+                    }
+                }
+            }
         }
     } else {
         tracing::warn!("No routes produced by VRP solver.");

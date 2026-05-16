@@ -442,6 +442,11 @@ pub fn matrix_get_time(matrix: &DistMatrix, i: usize, j: usize) -> f64 {
         .unwrap_or(0.0)
 }
 
+/// Generate an OsmAnd deep link that triggers the import of a GPX file from a URL.
+pub fn generate_osmand_import_url(gpx_url: &str) -> String {
+    format!("osmand://import?url={}", urlencoding::encode(gpx_url))
+}
+
 pub fn build_sweep_routes(
     matrix: &crate::core::vrp::types::DistMatrix,
     locations: &[crate::core::vrp::types::VRPSolverStop],

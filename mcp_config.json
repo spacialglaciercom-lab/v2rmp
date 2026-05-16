@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "v2rmp": {
+      "command": "/home/rmp/v2rmp/target/debug/rmpca-mcp-server-legacy",
+      "args": [],
+      "env": {
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5432/v2rmp",
+        "SUPABASE_DB_URL": "postgresql://postgres:postgres@localhost:5432/postgres",
+        "R2_ACCESS_KEY_ID": "...",
+        "R2_SECRET_ACCESS_KEY": "...",
+        "R2_ENDPOINT": "..."
+      }
+    }
+  }
+}

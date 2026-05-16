@@ -355,6 +355,10 @@ pub struct App {
     pub vrp_waypoints_file: Option<String>,
     pub vrp_model_path: String,
     pub vrp_status: Status,
+
+    /// Generated Google Maps URLs from the last optimization/VRP solve
+    pub google_maps_urls: Vec<String>,
+
     // Browse state
     pub cached_maps: Vec<String>,
     pub saved_routes: Vec<String>,
@@ -418,6 +422,8 @@ impl App {
             vrp_waypoints_file: None,
             vrp_model_path: "cvrp50_model.onnx".to_string(),
             vrp_status: Status::Ready,
+
+            google_maps_urls: Vec::new(),
 
             cached_maps: Vec::new(),
             saved_routes: Vec::new(),

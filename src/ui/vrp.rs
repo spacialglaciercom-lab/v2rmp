@@ -43,7 +43,7 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let status_text = format!("Status: {}", app.vrp_status);
     let status_color = app.vrp_status.color();
 
-    let lines = vec![
+    let mut lines = vec![
         ratatui::text::Line::from(ratatui::text::Span::styled(
             "VRP Solver — Multi-Vehicle Route Planning",
             ratatui::style::Style::default()
@@ -99,6 +99,23 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             capacity_display,
         ]),
         ratatui::text::Line::from(""),
+    ];
+
+    if !app.google_maps_urls.is_empty() {
+        lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+            "Google Maps Links (Clickable in some terminals):",
+            ratatui::style::Style::default().fg(cyan),
+        )));
+        for (i, url) in app.google_maps_urls.iter().enumerate() {
+            lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+                format!("R{}: {}", i + 1, url),
+                ratatui::style::Style::default().fg(green),
+            )));
+        }
+        lines.push(ratatui::text::Line::from(""));
+    }
+
+    lines.extend(vec![
         ratatui::text::Line::from(ratatui::text::Span::raw(
             "────────────────────────────────────",
         )),
@@ -117,7 +134,7 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ratatui::text::Line::from("  [K]  Set vehicle capacity"),
         ratatui::text::Line::from("  [Enter]  Run VRP solver"),
         ratatui::text::Line::from("  [Esc]  Return to home"),
-    ];
+    ]);
 
     let paragraph = ratatui::widgets::Paragraph::new(lines);
     f.render_widget(paragraph, inner);

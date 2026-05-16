@@ -193,6 +193,17 @@ fn handle_message(message: Value) -> Option<Value> {
                             },
                             "required": ["model_path", "locations", "demands", "capacity"]
                         }
+                    },
+                    {
+                        "name": "v2rmp_generate_osmand_link",
+                        "description": "Generate an OsmAnd deep link for importing a GPX file from a public URL.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "gpx_url": { "type": "string", "description": "Publicly accessible URL of the GPX file" }
+                            },
+                            "required": ["gpx_url"]
+                        }
                     }
                 ]
             }),
@@ -568,6 +579,20 @@ fn handle_tool_call(params: Value) -> Result<Value> {
                 "content": [{
                     "type": "text",
                     "text": serde_json::to_string_pretty(&res)?
+                }],
+                "isError": false
+            }))
+        }
+        "v2rmp_generate_osmand_link" => {
+            let gpx_url = arguments
+                .get("gpx_url")
+                .and_then(Value::as_str)
+                .context("Missing gpx_url")?;
+            let link = v2rmp::core::vrp::utils::generate_osmand_import_url(gpx_url);
+            Ok(json!({
+                "content": [{
+                    "type": "text",
+                    "text": link
                 }],
                 "isError": false
             }))

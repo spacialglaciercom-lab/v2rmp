@@ -121,6 +121,7 @@ pub struct OptimizeResult {
     pub turns: TurnSummary,
     pub elapsed_ms: u64,
     pub num_routes: usize,
+    pub routes: Vec<Vec<VRPSolverStop>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -320,6 +321,7 @@ pub fn solve_cpp(
                 },
                 elapsed_ms: 0,
                 num_routes: 1,
+                routes: Vec::new(),
             },
             circuit: Vec::new(),
         });
@@ -722,6 +724,17 @@ pub fn solve_cpp(
 
     let elapsed_ms = start.elapsed().as_millis() as u64;
 
+    let route_points: Vec<VRPSolverStop> = circuit
+        .iter()
+        .map(|&idx| VRPSolverStop {
+            lat: nodes[idx as usize].lat,
+            lon: nodes[idx as usize].lon,
+            label: format!("Node {}", idx),
+            demand: None,
+            arrival_time: None,
+        })
+        .collect();
+
     Ok(CppOutput {
         summary: OptimizeResult {
             total_distance_km: total_distance_m / 1000.0,
@@ -731,6 +744,7 @@ pub fn solve_cpp(
             turns,
             elapsed_ms,
             num_routes: 1,
+            routes: vec![route_points],
         },
         circuit,
     })
@@ -931,10 +945,11 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         turns,
         elapsed_ms: start.elapsed().as_millis() as u64,
         num_routes: output.routes.as_ref().map(|r| r.len()).unwrap_or(1),
+        routes: output.routes.unwrap_or_default(),
     })
 }
 
-pub(crate) fn write_gpx_multi(path: &str, routes: &[Vec<VRPSolverStop>]) -> anyhow::Result<()> {
+pub fn write_gpx_multi(path: &str, routes: &[Vec<VRPSolverStop>]) -> anyhow::Result<()> {
     use std::io::Write;
     let mut file = std::fs::File::create(path)?;
 
