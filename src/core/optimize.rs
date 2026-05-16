@@ -176,14 +176,7 @@ trait NormalizeAngle {
 impl NormalizeAngle for f64 {
     fn normalize(self, lower: f64, upper: f64) -> f64 {
         let width = upper - lower;
-        let mut val = self;
-        while val < lower {
-            val += width;
-        }
-        while val >= upper {
-            val -= width;
-        }
-        val
+        lower + (self - lower).rem_euclid(width)
     }
 }
 
@@ -279,6 +272,7 @@ struct AdjEntry {
     to: u32,
     weight_m: f64,
     edge_idx: usize,
+    bearing: f64,
 }
 
 /// In-memory CPP result: both the summary stats and the ordered node-IDs of the Eulerian circuit.
@@ -335,10 +329,19 @@ pub fn solve_cpp(
         let from = edge.from as usize;
         let to = edge.to as usize;
 
+        let b_fwd = bearing(
+            nodes[from].lat,
+            nodes[from].lon,
+            nodes[to].lat,
+            nodes[to].lon,
+        );
+        let b_rev = (b_fwd + 180.0).rem_euclid(360.0);
+
         adj[from].push(AdjEntry {
             to: edge.to,
             weight_m: edge.weight_m,
             edge_idx: idx,
+            bearing: b_fwd,
         });
 
         match oneway {
@@ -347,6 +350,7 @@ pub fn solve_cpp(
                     to: edge.from,
                     weight_m: edge.weight_m,
                     edge_idx: idx,
+                    bearing: b_rev,
                 });
             }
             OnewayMode::Respect => {
@@ -355,6 +359,7 @@ pub fn solve_cpp(
                         to: edge.from,
                         weight_m: edge.weight_m,
                         edge_idx: idx,
+                        bearing: b_rev,
                     });
                 }
             }
@@ -364,6 +369,7 @@ pub fn solve_cpp(
                         to: edge.from,
                         weight_m: edge.weight_m,
                         edge_idx: idx,
+                        bearing: b_rev,
                     });
                     adj[from].retain(|e| e.edge_idx != idx);
                 } else {
@@ -371,6 +377,7 @@ pub fn solve_cpp(
                         to: edge.from,
                         weight_m: edge.weight_m,
                         edge_idx: idx,
+                        bearing: b_rev,
                     });
                 }
             }
@@ -394,11 +401,18 @@ pub fn solve_cpp(
         use std::cmp::Ordering;
         use std::collections::BinaryHeap;
 
-        #[derive(Copy, Clone, PartialEq)]
+        #[derive(Copy, Clone)]
         struct State {
             cost: f64,
             position: usize,
-            incoming_edge_idx: Option<usize>,
+            incoming_bearing: Option<f64>,
+        }
+        impl PartialEq for State {
+            fn eq(&self, other: &Self) -> bool {
+                self.cost == other.cost
+                    && self.position == other.position
+                    && self.incoming_bearing == other.incoming_bearing
+            }
         }
         impl Eq for State {}
         impl Ord for State {
@@ -429,13 +443,13 @@ pub fn solve_cpp(
             heap.push(State {
                 cost: 0.0,
                 position: u,
-                incoming_edge_idx: None,
+                incoming_bearing: None,
             });
 
             while let Some(State {
                 cost,
                 position,
-                incoming_edge_idx,
+                incoming_bearing,
             }) = heap.pop()
             {
                 if cost > dists[position] {
@@ -444,26 +458,8 @@ pub fn solve_cpp(
 
                 for edge in &adj[position] {
                     let mut penalty = 0.0;
-                    if let Some(prev_idx) = incoming_edge_idx {
-                        let prev_edge = &edges[prev_idx];
-                        let (p_from, p_to) = if prev_edge.to as usize == position {
-                            (prev_edge.from as usize, position)
-                        } else {
-                            (prev_edge.to as usize, position)
-                        };
-
-                        let b_in = bearing(
-                            nodes[p_from].lat,
-                            nodes[p_from].lon,
-                            nodes[p_to].lat,
-                            nodes[p_to].lon,
-                        );
-                        let b_out = bearing(
-                            nodes[position].lat,
-                            nodes[position].lon,
-                            nodes[edge.to as usize].lat,
-                            nodes[edge.to as usize].lon,
-                        );
+                    if let Some(b_in) = incoming_bearing {
+                        let b_out = edge.bearing;
                         let delta = b_out - b_in;
 
                         match classify_turn(delta) {
@@ -481,7 +477,7 @@ pub fn solve_cpp(
                         heap.push(State {
                             cost: next_cost,
                             position: edge.to as usize,
-                            incoming_edge_idx: Some(edge.edge_idx),
+                            incoming_bearing: Some(edge.bearing),
                         });
                     }
                 }
@@ -606,15 +602,20 @@ pub fn solve_cpp(
     // Add duplicate edges
     for (i, &(u, v, weight, _eidx)) in duplicate_edges.iter().enumerate() {
         let deadhead_edge_idx = edges.len() + i;
+        let b_fwd = bearing(nodes[u].lat, nodes[u].lon, nodes[v].lat, nodes[v].lon);
+        let b_rev = (b_fwd + 180.0).rem_euclid(360.0);
+
         adj[u].push(AdjEntry {
             to: v as u32,
             weight_m: weight,
             edge_idx: deadhead_edge_idx,
+            bearing: b_fwd,
         });
         adj[v].push(AdjEntry {
             to: u as u32,
             weight_m: weight,
             edge_idx: deadhead_edge_idx,
+            bearing: b_rev,
         });
     }
 
@@ -684,32 +685,21 @@ pub fn solve_cpp(
     }
 
     // Turn classification
-    if circuit.len() > 2 {
-        for i in 1..circuit.len().saturating_sub(1) {
-            let prev = circuit[i - 1] as usize;
-            let curr = circuit[i] as usize;
-            let next = circuit[i + 1] as usize;
-            if prev == curr || curr == next {
-                continue;
-            }
-            let b_in = bearing(
-                nodes[prev].lat,
-                nodes[prev].lon,
-                nodes[curr].lat,
-                nodes[curr].lon,
-            );
-            let b_out = bearing(
-                nodes[curr].lat,
-                nodes[curr].lon,
-                nodes[next].lat,
-                nodes[next].lon,
-            );
-            let delta = b_out - b_in;
-            match classify_turn(delta) {
-                "left" => turns.left += 1,
-                "right" => turns.right += 1,
-                "u_turn" => turns.u_turn += 1,
-                _ => turns.straight += 1,
+    if circuit_with_edges.len() > 2 {
+        for i in 1..circuit_with_edges.len().saturating_sub(1) {
+            let entry_in = &circuit_with_edges[i];
+            let entry_out = &circuit_with_edges[i + 1];
+
+            if let (Some(e_in), Some(e_out)) = (&entry_in.1, &entry_out.1) {
+                let b_in = e_in.bearing;
+                let b_out = e_out.bearing;
+                let delta = b_out - b_in;
+                match classify_turn(delta) {
+                    "left" => turns.left += 1,
+                    "right" => turns.right += 1,
+                    "u_turn" => turns.u_turn += 1,
+                    _ => turns.straight += 1,
+                }
             }
         }
     }

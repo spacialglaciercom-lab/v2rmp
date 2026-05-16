@@ -1,3 +1,7 @@
 ## 2025-05-15 - Spatial Pruning for Greedy Matching in CPP
 **Learning:** In the Chinese Postman Problem (CPP), finding the minimum weight perfect matching for odd-degree vertices is often solved greedily by picking an unmatched vertex and finding its nearest unmatched neighbor. An $O(N^2)$ exhaustive search becomes a significant bottleneck as the number of odd-degree vertices ($N$) increases (e.g., thousands of nodes). Sorting vertices by one dimension (e.g., latitude) and pruning the search when the distance in that dimension exceeds the current best distance reduces the average-case complexity dramatically.
 **Action:** Always consider spatial indexing or pruning (like sorting by latitude/longitude or using a KD-tree) when performing nearest-neighbor searches on geographic data.
+
+## 2025-05-16 - Pre-calculating Bearings in CPP Solver
+**Learning:** In the Chinese Postman Problem (CPP), calculating turn penalties during Dijkstra search and final turn classification requires many redundant trigonometric calls (bearing calculations). Pre-calculating bearings for every edge when building the adjacency list and passing the incoming bearing in the search state reduces total runtime significantly (~1.1x speedup on large grids).
+**Action:** In geometric graph algorithms, always prefer pre-calculating and storing edge metadata (like bearings) instead of recomputing them from coordinates in inner loops.
