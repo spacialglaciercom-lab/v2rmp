@@ -14,6 +14,7 @@ pub enum View {
     Optimize,
     Vrp,
     Neural,
+    GraphEmbed,
     BrowseMaps,
     BrowseRoutes,
     FileBrowser,
@@ -310,6 +311,16 @@ pub enum InputField {
     VrpWaypointsFile,
     VrpModelPath,
     OsmandBaseUrl,
+    // Graph Embed fields
+    GraphEmbedInputFile,
+    GraphEmbedOutputFile,
+    GraphEmbedMethod,
+    GraphEmbedDimensions,
+    GraphEmbedWalkLength,
+    GraphEmbedNumWalks,
+    GraphEmbedP,
+    GraphEmbedQ,
+    GraphEmbedEpochs,
 }
 
 pub struct App {
@@ -363,6 +374,19 @@ pub struct App {
     pub osmand_links: Vec<String>,
     /// Base URL for OsmAnd links (persisted during session)
     pub osmand_base_url: Option<String>,
+
+    // Graph Embed state
+    pub graph_embed_input: Option<String>,
+    pub graph_embed_output: Option<String>,
+    pub graph_embed_method: String,
+    pub graph_embed_dimensions: usize,
+    pub graph_embed_walk_length: usize,
+    pub graph_embed_num_walks: usize,
+    pub graph_embed_p: f64,
+    pub graph_embed_q: f64,
+    pub graph_embed_epochs: usize,
+    pub graph_embed_include_edges: bool,
+    pub graph_embed_status: Status,
 
     // Browse state
     pub cached_maps: Vec<String>,
@@ -431,6 +455,18 @@ impl App {
             google_maps_urls: Vec::new(),
             osmand_links: Vec::new(),
             osmand_base_url: None,
+
+            graph_embed_input: None,
+            graph_embed_output: None,
+            graph_embed_method: "line".to_string(),
+            graph_embed_dimensions: 64,
+            graph_embed_walk_length: 30,
+            graph_embed_num_walks: 10,
+            graph_embed_p: 1.0,
+            graph_embed_q: 1.0,
+            graph_embed_epochs: 5,
+            graph_embed_include_edges: false,
+            graph_embed_status: Status::Ready,
 
             cached_maps: Vec::new(),
             saved_routes: Vec::new(),
@@ -542,6 +578,22 @@ impl App {
                             format!("VRP waypoints file selected: {}", path_str),
                         );
                         self.current_view = View::Vrp;
+                    }
+                    InputField::GraphEmbedInputFile => {
+                        self.graph_embed_input = Some(path_str.clone());
+                        self.log(
+                            LogLevel::Success,
+                            format!("Graph embed input selected: {}", path_str),
+                        );
+                        self.current_view = View::GraphEmbed;
+                    }
+                    InputField::GraphEmbedOutputFile => {
+                        self.graph_embed_output = Some(path_str.clone());
+                        self.log(
+                            LogLevel::Success,
+                            format!("Graph embed output selected: {}", path_str),
+                        );
+                        self.current_view = View::GraphEmbed;
                     }
                     _ => {
                         self.current_view = View::Home;
@@ -731,6 +783,59 @@ impl App {
                 self.osmand_base_url = Some(value.clone());
                 self.log(LogLevel::Success, format!("OsmAnd base URL set: {}", value));
             }
+            InputField::GraphEmbedInputFile => {
+                self.graph_embed_input = Some(value.clone());
+                self.log(LogLevel::Success, format!("Graph embed input set: {}", value));
+            }
+            InputField::GraphEmbedOutputFile => {
+                self.graph_embed_output = Some(value.clone());
+                self.log(LogLevel::Success, format!("Graph embed output set: {}", value));
+            }
+            InputField::GraphEmbedMethod => {
+                let valid = ["node2vec", "line", "fastrp", "spatial"];
+                if valid.contains(&value.to_lowercase().as_str()) {
+                    self.graph_embed_method = value.to_lowercase();
+                    self.log(LogLevel::Success, format!("Method set: {}", self.graph_embed_method));
+                } else {
+                    self.log(LogLevel::Error, format!("Invalid method '{}'. Use: node2vec, line, fastrp, spatial", value));
+                }
+            }
+            InputField::GraphEmbedDimensions => {
+                if let Ok(v) = value.parse::<usize>() {
+                    self.graph_embed_dimensions = v;
+                    self.log(LogLevel::Success, format!("Dimensions set: {}", v));
+                }
+            }
+            InputField::GraphEmbedWalkLength => {
+                if let Ok(v) = value.parse::<usize>() {
+                    self.graph_embed_walk_length = v;
+                    self.log(LogLevel::Success, format!("Walk length set: {}", v));
+                }
+            }
+            InputField::GraphEmbedNumWalks => {
+                if let Ok(v) = value.parse::<usize>() {
+                    self.graph_embed_num_walks = v;
+                    self.log(LogLevel::Success, format!("Num walks set: {}", v));
+                }
+            }
+            InputField::GraphEmbedP => {
+                if let Ok(v) = value.parse::<f64>() {
+                    self.graph_embed_p = v;
+                    self.log(LogLevel::Success, format!("Return param p set: {}", v));
+                }
+            }
+            InputField::GraphEmbedQ => {
+                if let Ok(v) = value.parse::<f64>() {
+                    self.graph_embed_q = v;
+                    self.log(LogLevel::Success, format!("In-out param q set: {}", v));
+                }
+            }
+            InputField::GraphEmbedEpochs => {
+                if let Ok(v) = value.parse::<usize>() {
+                    self.graph_embed_epochs = v;
+                    self.log(LogLevel::Success, format!("Epochs set: {}", v));
+                }
+            }
         }
         self.input_mode.active = false;
     }
@@ -744,7 +849,7 @@ impl App {
     pub fn navigate_up(&mut self) {
         match self.current_view {
             View::Home => {
-                self.workflow_selection = (self.workflow_selection + 7) % 8;
+                self.workflow_selection = (self.workflow_selection + 8) % 9;
             }
             View::BrowseMaps => {
                 let max = self.cached_maps.len().max(1);
@@ -765,7 +870,7 @@ impl App {
     pub fn navigate_down(&mut self) {
         match self.current_view {
             View::Home => {
-                self.workflow_selection = (self.workflow_selection + 1) % 8;
+                self.workflow_selection = (self.workflow_selection + 1) % 9;
             }
             View::BrowseMaps => {
                 let max = self.cached_maps.len().max(1);

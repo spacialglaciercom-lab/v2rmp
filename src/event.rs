@@ -73,6 +73,7 @@ async fn handle_view_keys(app: &mut App, code: KeyCode, mods: KeyModifiers) {
         View::Optimize => handle_optimize_keys(app, code, mods).await,
         View::Vrp => handle_vrp_keys(app, code, mods).await,
         View::Neural => handle_neural_keys(app, code, mods).await,
+        View::GraphEmbed => handle_graph_embed_keys(app, code, mods).await,
         View::BrowseMaps => handle_browse_maps_keys(app, code),
         View::BrowseRoutes => handle_browse_routes_keys(app, code),
         View::FileBrowser => {} // Handled separately in handle_normal_mode
@@ -115,11 +116,18 @@ fn handle_home_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                 );
             }
             6 => {
+                app.current_view = View::GraphEmbed;
+                app.log(
+                    crate::app::LogLevel::Info,
+                    "Switched to Graph Embeddings view",
+                );
+            }
+            7 => {
                 app.current_view = View::BrowseMaps;
                 app.browse_selection = 0;
                 app.log(crate::app::LogLevel::Info, "Switched to Cached Maps view");
             }
-            7 => {
+            8 => {
                 app.current_view = View::BrowseRoutes;
                 app.browse_selection = 0;
                 app.log(crate::app::LogLevel::Info, "Switched to Saved Routes view");
@@ -787,6 +795,171 @@ async fn handle_neural_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                         format!("Neural solve failed: {}", e),
                     );
                 }
+            }
+        }
+        _ => {}
+    }
+}
+
+async fn handle_graph_embed_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+    match code {
+        KeyCode::Char('i') | KeyCode::Char('I') => {
+            app.start_file_browser(crate::app::InputField::GraphEmbedInputFile);
+        }
+        KeyCode::Char('o') | KeyCode::Char('O') => {
+            app.start_input(crate::app::InputField::GraphEmbedOutputFile);
+        }
+        KeyCode::Char('m') | KeyCode::Char('M') => {
+            // Cycle through methods
+            let methods = ["line", "fastrp", "spatial", "node2vec"];
+            let current = app.graph_embed_method.as_str();
+            let idx = methods.iter().position(|&m| m == current).unwrap_or(0);
+            let next = methods[(idx + 1) % methods.len()];
+            app.graph_embed_method = next.to_string();
+            app.log(
+                crate::app::LogLevel::Info,
+                format!("Method: {}", app.graph_embed_method),
+            );
+        }
+        KeyCode::Char('d') | KeyCode::Char('D') => {
+            app.start_input(crate::app::InputField::GraphEmbedDimensions);
+        }
+        KeyCode::Char('e') | KeyCode::Char('E') => {
+            app.graph_embed_include_edges = !app.graph_embed_include_edges;
+            app.log(
+                crate::app::LogLevel::Info,
+                format!(
+                    "Edge embeddings: {}",
+                    if app.graph_embed_include_edges { "ON" } else { "OFF" }
+                ),
+            );
+        }
+        KeyCode::Enter => {
+            #[cfg(feature = "ml")]
+            {
+                use crate::core::ml::node_embed::{EmbedConfig, EmbedMethod, embed_graph};
+                use crate::core::optimize::read_rmp_file;
+
+                let input_path = match &app.graph_embed_input {
+                    Some(p) => p.clone(),
+                    None => {
+                        app.log(crate::app::LogLevel::Warn, "Set an input .rmp file first (press 'i')");
+                        return;
+                    }
+                };
+
+                // Read .rmp
+                let file_data = match std::fs::read(&input_path) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        app.graph_embed_status = Status::Error(format!("Failed to read: {}", e));
+                        app.log(crate::app::LogLevel::Error, format!("Read error: {}", e));
+                        return;
+                    }
+                };
+                let (nodes, edges) = match read_rmp_file(&file_data) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        app.graph_embed_status = Status::Error(format!("Invalid .rmp: {}", e));
+                        app.log(crate::app::LogLevel::Error, format!("Parse error: {}", e));
+                        return;
+                    }
+                };
+
+                if nodes.is_empty() {
+                    app.graph_embed_status = Status::Error("No nodes in .rmp".into());
+                    app.log(crate::app::LogLevel::Error, "No nodes found");
+                    return;
+                }
+
+                let method = match app.graph_embed_method.as_str() {
+                    "node2vec" => EmbedMethod::Node2Vec,
+                    "line" => EmbedMethod::Line,
+                    "fastrp" => EmbedMethod::FastRp,
+                    "spatial" => EmbedMethod::Spatial,
+                    _ => EmbedMethod::Line,
+                };
+
+                let config = EmbedConfig {
+                    method,
+                    dimensions: app.graph_embed_dimensions,
+                    walk_length: app.graph_embed_walk_length,
+                    num_walks: app.graph_embed_num_walks,
+                    p: app.graph_embed_p,
+                    q: app.graph_embed_q,
+                    window: 5,
+                    negative_samples: 5,
+                    lr: 0.025,
+                    epochs: app.graph_embed_epochs,
+                    threads: 1,
+                    include_edges: app.graph_embed_include_edges,
+                };
+
+                app.graph_embed_status = Status::Running {
+                    progress: 0,
+                    message: format!("{} on {} nodes...", app.graph_embed_method, nodes.len()),
+                };
+                app.log(
+                    crate::app::LogLevel::Info,
+                    format!("Running {} ({} nodes, {} edges)...", app.graph_embed_method, nodes.len(), edges.len()),
+                );
+
+                match embed_graph(&nodes, &edges, &config) {
+                    Ok(result) => {
+                        let output_json = serde_json::to_string_pretty(&result).unwrap_or_default();
+                        let num_nodes = result.num_nodes;
+                        let dims = result.dimensions;
+                        let method_name = result.method.clone();
+
+                        if let Some(ref out_path) = app.graph_embed_output {
+                            match std::fs::write(out_path, &output_json) {
+                                Ok(_) => {
+                                    app.graph_embed_status = Status::Done(
+                                        format!("{}: {} nodes, dim={} → {}", method_name, num_nodes, dims, out_path),
+                                    );
+                                    app.log(
+                                        crate::app::LogLevel::Success,
+                                        format!("Wrote {} embeddings to {}", num_nodes, out_path),
+                                    );
+                                }
+                                Err(e) => {
+                                    app.graph_embed_status = Status::Error(format!("Write error: {}", e));
+                                    app.log(crate::app::LogLevel::Error, format!("Write failed: {}", e));
+                                }
+                            }
+                        } else {
+                            // Print to stdout (not great for TUI, but useful)
+                            app.graph_embed_status = Status::Done(
+                                format!("{}: {} nodes, dim={} (printed to stdout)", method_name, num_nodes, dims),
+                            );
+                            app.log(
+                                crate::app::LogLevel::Success,
+                                format!("{} embedding done: {} nodes, dim={}", method_name, num_nodes, dims),
+                            );
+                            // In TUI mode, save to a default file
+                            let default_out = input_path.replace(".rmp", "_embeddings.json");
+                            match std::fs::write(&default_out, &output_json) {
+                                Ok(_) => {
+                                    app.log(
+                                        crate::app::LogLevel::Success,
+                                        format!("Saved to {}", default_out),
+                                    );
+                                }
+                                Err(e) => {
+                                    app.log(crate::app::LogLevel::Error, format!("Save failed: {}", e));
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        app.graph_embed_status = Status::Error(e.to_string());
+                        app.log(crate::app::LogLevel::Error, format!("Embedding failed: {}", e));
+                    }
+                }
+            }
+            #[cfg(not(feature = "ml"))]
+            {
+                app.log(crate::app::LogLevel::Error, "ML feature not enabled. Build with --features ml");
             }
         }
         _ => {}
