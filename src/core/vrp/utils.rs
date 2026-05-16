@@ -583,10 +583,18 @@ pub fn parse_csv_stops(
 
         // Validation
         if !(-90.0..=90.0).contains(&lat) {
-            return Err(format!("Latitude {} out of bounds at row {}", lat, row_num + 2));
+            return Err(format!(
+                "Latitude {} out of bounds at row {}",
+                lat,
+                row_num + 2
+            ));
         }
         if !(-180.0..=180.0).contains(&lon) {
-            return Err(format!("Longitude {} out of bounds at row {}", lon, row_num + 2));
+            return Err(format!(
+                "Longitude {} out of bounds at row {}",
+                lon,
+                row_num + 2
+            ));
         }
 
         let label = label_idx

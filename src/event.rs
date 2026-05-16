@@ -340,7 +340,9 @@ fn generate_deep_links(
                 "route.gpx".to_string()
             };
             let gpx_url = format!("{}/{}", base.trim_end_matches('/'), filename);
-            osmand.push(crate::core::vrp::utils::generate_osmand_import_url(&gpx_url));
+            osmand.push(crate::core::vrp::utils::generate_osmand_import_url(
+                &gpx_url,
+            ));
         }
     }
     (gmaps, osmand)
@@ -568,7 +570,8 @@ async fn handle_vrp_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                             }
                         }
                         Err(e) => {
-                            app.vrp_status = crate::app::Status::Error(format!("Invalid JSON: {}", e));
+                            app.vrp_status =
+                                crate::app::Status::Error(format!("Invalid JSON: {}", e));
                             return;
                         }
                     },
@@ -614,18 +617,19 @@ async fn handle_vrp_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                         let mut log_routes = Vec::new();
                         for (i, route) in routes.iter().enumerate() {
                             let path = format!("{}/route_v{}.gpx", output_dir, i + 1);
-                            if crate::core::optimize::write_gpx_multi(&path, std::slice::from_ref(route)).is_ok()
+                            if crate::core::optimize::write_gpx_multi(
+                                &path,
+                                std::slice::from_ref(route),
+                            )
+                            .is_ok()
                             {
                                 log_routes.push(path);
                             }
                         }
 
                         // Generate deep links
-                        let (gmaps, osmand) = generate_deep_links(
-                            &routes,
-                            app.osmand_base_url.as_deref(),
-                            true,
-                        );
+                        let (gmaps, osmand) =
+                            generate_deep_links(&routes, app.osmand_base_url.as_deref(), true);
                         app.google_maps_urls = gmaps;
                         app.osmand_links = osmand;
 
@@ -739,7 +743,10 @@ async fn handle_neural_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                 max_iterations: 1,
                 ..Default::default()
             };
-            hyperparams.other.insert("model_path".to_string(), serde_json::Value::String(model_path));
+            hyperparams.other.insert(
+                "model_path".to_string(),
+                serde_json::Value::String(model_path),
+            );
 
             let input = VRPSolverInput {
                 locations,
@@ -761,9 +768,13 @@ async fn handle_neural_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                         let _ = std::fs::create_dir_all(&output_dir);
                         for (i, route) in routes.iter().enumerate() {
                             let path = format!("{}/neural_v{}.gpx", output_dir, i + 1);
-                            let _ = crate::core::optimize::write_gpx_multi(&path, std::slice::from_ref(route));
+                            let _ = crate::core::optimize::write_gpx_multi(
+                                &path,
+                                std::slice::from_ref(route),
+                            );
                         }
-                        app.vrp_status = Status::Done(format!("Neural Solve Done: {} routes", routes.len()));
+                        app.vrp_status =
+                            Status::Done(format!("Neural Solve Done: {} routes", routes.len()));
                         app.log(crate::app::LogLevel::Success, "Neural solving complete");
                     } else {
                         app.vrp_status = Status::Done("No routes produced".into());
@@ -771,7 +782,10 @@ async fn handle_neural_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                 }
                 Err(e) => {
                     app.vrp_status = Status::Error(e.clone());
-                    app.log(crate::app::LogLevel::Error, format!("Neural solve failed: {}", e));
+                    app.log(
+                        crate::app::LogLevel::Error,
+                        format!("Neural solve failed: {}", e),
+                    );
                 }
             }
         }

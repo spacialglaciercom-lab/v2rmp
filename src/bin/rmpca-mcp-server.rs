@@ -1234,13 +1234,21 @@ async fn handle_optimize(args: &Value) -> Result<Value> {
         "elapsed_ms": result.elapsed_ms,
     });
 
-    if args.get("google_maps").and_then(|v| v.as_bool()).unwrap_or(false) {
+    if args
+        .get("google_maps")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
         let mut urls = Vec::new();
         for (i, route) in result.routes.iter().enumerate() {
             let max_points = 20;
             let sampled_points = if route.len() > max_points {
                 let step = route.len() / max_points;
-                route.iter().step_by(step).take(max_points).collect::<Vec<_>>()
+                route
+                    .iter()
+                    .step_by(step)
+                    .take(max_points)
+                    .collect::<Vec<_>>()
             } else {
                 route.iter().collect::<Vec<_>>()
             };
@@ -1254,7 +1262,10 @@ async fn handle_optimize(args: &Value) -> Result<Value> {
                 "url": url
             }));
         }
-        response.as_object_mut().unwrap().insert("google_maps_urls".to_string(), json!(urls));
+        response
+            .as_object_mut()
+            .unwrap()
+            .insert("google_maps_urls".to_string(), json!(urls));
     }
 
     if let Some(base_url) = args.get("osmand_base_url").and_then(|v| v.as_str()) {
@@ -1272,7 +1283,10 @@ async fn handle_optimize(args: &Value) -> Result<Value> {
                 "url": osmand_link
             }));
         }
-        response.as_object_mut().unwrap().insert("osmand_links".to_string(), json!(osmand_links));
+        response
+            .as_object_mut()
+            .unwrap()
+            .insert("osmand_links".to_string(), json!(osmand_links));
     }
 
     Ok(response)
@@ -1574,7 +1588,11 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
         "unassigned": output.unassigned,
     });
 
-    if args.get("google_maps").and_then(|v| v.as_bool()).unwrap_or(false) {
+    if args
+        .get("google_maps")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
         let mut gmaps_urls = Vec::new();
         if let Some(ref routes) = output.routes {
             for (i, route) in routes.iter().enumerate() {
@@ -1592,7 +1610,10 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
                 }
             }
         }
-        response.as_object_mut().unwrap().insert("google_maps_urls".to_string(), json!(gmaps_urls));
+        response
+            .as_object_mut()
+            .unwrap()
+            .insert("google_maps_urls".to_string(), json!(gmaps_urls));
     }
 
     if let Some(base_url) = args.get("osmand_base_url").and_then(|v| v.as_str()) {
@@ -1608,7 +1629,10 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
                 }));
             }
         }
-        response.as_object_mut().unwrap().insert("osmand_links".to_string(), json!(osmand_links));
+        response
+            .as_object_mut()
+            .unwrap()
+            .insert("osmand_links".to_string(), json!(osmand_links));
     }
 
     Ok(response)
@@ -2915,11 +2939,9 @@ async fn main() -> Result<()> {
                     "extract_overture" => handle_extract_overture(&args).await,
                     #[cfg(feature = "extract")]
                     "extract_osm" => handle_extract_osm(&args).await,
-                    "compile" => handle_compile(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "compile" => handle_compile(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     "optimize" => handle_optimize(&args).await,
-                    "clean" => handle_clean(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "clean" => handle_clean(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     "vrp_solve" => handle_vrp_solve(&args).await,
                     #[cfg(feature = "extract")]
                     "elevation_query" => handle_elevation_query(&args)
@@ -2929,10 +2951,12 @@ async fn main() -> Result<()> {
                     "elevation_profile" => handle_elevation_profile(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
-                    "list_solvers" => handle_list_solvers(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "haversine_distance" => handle_haversine_distance(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "list_solvers" => {
+                        handle_list_solvers(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "haversine_distance" => {
+                        handle_haversine_distance(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
                     #[cfg(feature = "extract")]
                     "elevation_stats" => handle_elevation_stats(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
@@ -2945,8 +2969,7 @@ async fn main() -> Result<()> {
                     "fuel_estimate" => handle_fuel_estimate(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
-                    "inspect_rmp" => handle_inspect_rmp(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "inspect_rmp" => handle_inspect_rmp(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     #[cfg(feature = "extract")]
                     "pipeline" => {
                         match tokio::time::timeout(
@@ -2982,20 +3005,25 @@ async fn main() -> Result<()> {
                             })),
                         }
                     }
-                    "predict_solver" => handle_predict_solver(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "score_route" => handle_score_route(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "route_embedding" => handle_route_embedding(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "predict_quality" => handle_predict_quality(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "tune_hyperparams" => handle_tune_hyperparams(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "parse_routing_query" => handle_parse_routing_query(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "submit_feedback" => handle_submit_feedback(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "predict_solver" => {
+                        handle_predict_solver(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "score_route" => handle_score_route(&args).map_err(|e| anyhow::anyhow!("{e}")),
+                    "route_embedding" => {
+                        handle_route_embedding(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "predict_quality" => {
+                        handle_predict_quality(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "tune_hyperparams" => {
+                        handle_tune_hyperparams(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "parse_routing_query" => {
+                        handle_parse_routing_query(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "submit_feedback" => {
+                        handle_submit_feedback(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
                     other => {
                         send_err(&req.id, -32602, &format!("Unknown tool: {other}"));
                         continue;

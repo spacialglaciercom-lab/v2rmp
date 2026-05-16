@@ -926,7 +926,11 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
                     let max_points = 20;
                     let sampled_points = if route.len() > max_points {
                         let step = route.len() / max_points;
-                        route.iter().step_by(step).take(max_points).collect::<Vec<_>>()
+                        route
+                            .iter()
+                            .step_by(step)
+                            .take(max_points)
+                            .collect::<Vec<_>>()
                     } else {
                         route.iter().collect::<Vec<_>>()
                     };
@@ -1074,7 +1078,12 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
                         url.push_str(&format!("{:.6},{:.6}/", stop.lat, stop.lon));
                     }
                     if route.chunks(20).count() > 1 {
-                        tracing::info!("Vehicle {} Google Maps (Part {}): {}", i + 1, chunk_idx + 1, url);
+                        tracing::info!(
+                            "Vehicle {} Google Maps (Part {}): {}",
+                            i + 1,
+                            chunk_idx + 1,
+                            url
+                        );
                     } else {
                         tracing::info!("Vehicle {} Google Maps: {}", i + 1, url);
                     }

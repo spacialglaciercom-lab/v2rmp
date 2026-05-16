@@ -729,10 +729,7 @@ impl App {
             }
             InputField::OsmandBaseUrl => {
                 self.osmand_base_url = Some(value.clone());
-                self.log(
-                    LogLevel::Success,
-                    format!("OsmAnd base URL set: {}", value),
-                );
+                self.log(LogLevel::Success, format!("OsmAnd base URL set: {}", value));
             }
         }
         self.input_mode.active = false;
