@@ -42,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
         let output_dir = "output_routes";
         std::fs::create_dir_all(output_dir)?;
         let output_path = format!("{}/route_20_coords.gpx", output_dir);
-        if let Ok(_) = v2rmp::core::optimize::write_gpx_multi(&output_path, &routes) {
+        if v2rmp::core::optimize::write_gpx_multi(&output_path, &routes).is_ok() {
             println!("\n✅ Route saved to: {}/{}", std::env::current_dir()?.display(), output_path);
             
             // Generate OsmAnd Deep Link

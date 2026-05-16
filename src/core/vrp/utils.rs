@@ -536,16 +536,21 @@ pub fn parse_csv_stops(
 
     let lat_idx = headers
         .iter()
-        .position(|h| h.eq_ignore_ascii_case("lat") || h.eq_ignore_ascii_case("latitude"))
-        .ok_or("CSV must have a 'lat' column")?;
+        .position(|h| {
+            h.eq_ignore_ascii_case("lat")
+                || h.eq_ignore_ascii_case("latitude")
+                || h.eq_ignore_ascii_case("y")
+        })
+        .ok_or("CSV must have a 'lat' or 'y' column")?;
     let lon_idx = headers
         .iter()
         .position(|h| {
             h.eq_ignore_ascii_case("lon")
                 || h.eq_ignore_ascii_case("lng")
                 || h.eq_ignore_ascii_case("longitude")
+                || h.eq_ignore_ascii_case("x")
         })
-        .ok_or("CSV must have a 'lon' column")?;
+        .ok_or("CSV must have a 'lon' or 'x' column")?;
     let label_idx = headers.iter().position(|h| {
         h.eq_ignore_ascii_case("label")
             || h.eq_ignore_ascii_case("name")
@@ -575,6 +580,14 @@ pub fn parse_csv_stops(
             .ok_or_else(|| format!("Missing lon at row {}", row_num + 2))?
             .parse()
             .map_err(|e| format!("Invalid lon at row {}: {}", row_num + 2, e))?;
+
+        // Validation
+        if !(-90.0..=90.0).contains(&lat) {
+            return Err(format!("Latitude {} out of bounds at row {}", lat, row_num + 2));
+        }
+        if !(-180.0..=180.0).contains(&lon) {
+            return Err(format!("Longitude {} out of bounds at row {}", lon, row_num + 2));
+        }
 
         let label = label_idx
             .and_then(|i| record.get(i))

@@ -115,6 +115,20 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         lines.push(ratatui::text::Line::from(""));
     }
 
+    if !app.osmand_links.is_empty() {
+        lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+            "OsmAnd Import Links (Requires GPX hosting):",
+            ratatui::style::Style::default().fg(cyan),
+        )));
+        for (i, url) in app.osmand_links.iter().enumerate() {
+            lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+                format!("R{}: {}", i + 1, url),
+                ratatui::style::Style::default().fg(green),
+            )));
+        }
+        lines.push(ratatui::text::Line::from(""));
+    }
+
     lines.extend(vec![
         ratatui::text::Line::from(ratatui::text::Span::raw(
             "────────────────────────────────────",
@@ -132,6 +146,8 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             "  [A]  Change algorithm (greedy|savings|local_search|simulated_annealing)",
         ),
         ratatui::text::Line::from("  [K]  Set vehicle capacity"),
+        ratatui::text::Line::from("  [L]  Set OsmAnd base URL"),
+        ratatui::text::Line::from("  [X]  Clear depots"),
         ratatui::text::Line::from("  [Enter]  Run VRP solver"),
         ratatui::text::Line::from("  [Esc]  Return to home"),
     ]);

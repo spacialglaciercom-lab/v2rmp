@@ -26,7 +26,6 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
-use std::path::Path;
 use std::path::PathBuf;
 use v2rmp::core::clean::{clean_geojson, CleanOptions};
 use v2rmp::core::compile::{CompileRequest, CompileResult};
@@ -293,6 +292,10 @@ fn tool_definitions() -> Vec<ToolDef> {
                     "google_maps": {
                         "type": "boolean",
                         "description": "Generate Google Maps URL links for the routes (default: false)"
+                    },
+                    "osmand_base_url": {
+                        "type": "string",
+                        "description": "Public base URL for OsmAnd GPX import links (e.g. https://pub-xxx.r2.dev)"
                     }
                 },
                 "required": ["input"]
@@ -439,6 +442,10 @@ fn tool_definitions() -> Vec<ToolDef> {
                     "google_maps": {
                         "type": "boolean",
                         "description": "Generate Google Maps URL links for the routes (default: false)"
+                    },
+                    "osmand_base_url": {
+                        "type": "string",
+                        "description": "Public base URL for OsmAnd GPX import links (e.g. https://pub-xxx.r2.dev)"
                     }
                 },
                 "required": ["stops"]
@@ -647,6 +654,10 @@ fn tool_definitions() -> Vec<ToolDef> {
                     "google_maps": {
                         "type": "boolean",
                         "description": "Generate Google Maps URL links for the routes (default: false)"
+                    },
+                    "osmand_base_url": {
+                        "type": "string",
+                        "description": "Public base URL for OsmAnd GPX import links (e.g. https://pub-xxx.r2.dev)"
                     }
                 },
                 "required": ["stops"]
@@ -1246,6 +1257,24 @@ async fn handle_optimize(args: &Value) -> Result<Value> {
         response.as_object_mut().unwrap().insert("google_maps_urls".to_string(), json!(urls));
     }
 
+    if let Some(base_url) = args.get("osmand_base_url").and_then(|v| v.as_str()) {
+        let mut osmand_links = Vec::new();
+        for i in 0..result.num_routes {
+            let filename = if result.num_routes > 1 {
+                format!("vehicle_{}.gpx", i + 1)
+            } else {
+                "route.gpx".to_string()
+            };
+            let gpx_url = format!("{}/{}", base_url.trim_end_matches('/'), filename);
+            let osmand_link = v2rmp::core::vrp::utils::generate_osmand_import_url(&gpx_url);
+            osmand_links.push(json!({
+                "vehicle": i + 1,
+                "url": osmand_link
+            }));
+        }
+        response.as_object_mut().unwrap().insert("osmand_links".to_string(), json!(osmand_links));
+    }
+
     Ok(response)
 }
 
@@ -1413,7 +1442,7 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
             let label = s
                 .get("label")
                 .and_then(|v| v.as_str())
-                .unwrap_or_else(|| "")
+                .unwrap_or("")
                 .to_string();
             let demand = s.get("demand").and_then(|v| v.as_f64());
             Ok(VRPSolverStop {
@@ -1547,7 +1576,7 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
 
     if args.get("google_maps").and_then(|v| v.as_bool()).unwrap_or(false) {
         let mut gmaps_urls = Vec::new();
-        if let Some(routes) = output.routes {
+        if let Some(ref routes) = output.routes {
             for (i, route) in routes.iter().enumerate() {
                 let chunks = route.chunks(20);
                 for (chunk_idx, chunk) in chunks.enumerate() {
@@ -1564,6 +1593,22 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
             }
         }
         response.as_object_mut().unwrap().insert("google_maps_urls".to_string(), json!(gmaps_urls));
+    }
+
+    if let Some(base_url) = args.get("osmand_base_url").and_then(|v| v.as_str()) {
+        let mut osmand_links = Vec::new();
+        if let Some(ref routes) = output.routes {
+            for i in 0..routes.len() {
+                let filename = format!("vehicle_{}.gpx", i + 1);
+                let gpx_url = format!("{}/{}", base_url.trim_end_matches('/'), filename);
+                let osmand_link = v2rmp::core::vrp::utils::generate_osmand_import_url(&gpx_url);
+                osmand_links.push(json!({
+                    "vehicle": i + 1,
+                    "url": osmand_link
+                }));
+            }
+        }
+        response.as_object_mut().unwrap().insert("osmand_links".to_string(), json!(osmand_links));
     }
 
     Ok(response)
@@ -1969,7 +2014,7 @@ fn handle_predict_solver(args: &Value) -> Result<Value> {
                 let label = s
                     .get("label")
                     .and_then(|v| v.as_str())
-                    .unwrap_or_else(|| "")
+                    .unwrap_or("")
                     .to_string();
                 let demand = s.get("demand").and_then(|v| v.as_f64());
                 Ok(VRPSolverStop {
@@ -2591,12 +2636,12 @@ fn handle_parse_routing_query(args: &Value) -> Result<Value> {
         let parsed = parse_query(query);
         let json = to_vrp_json(&parsed);
 
-        return Ok(json!({
+        Ok(json!({
             "variant": parsed.variant,
             "config": json,
             "entities": parsed.entities,
             "method": "regex",
-        }));
+        }))
     }
 
     #[cfg(not(feature = "ml"))]
@@ -2871,12 +2916,10 @@ async fn main() -> Result<()> {
                     #[cfg(feature = "extract")]
                     "extract_osm" => handle_extract_osm(&args).await,
                     "compile" => handle_compile(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "optimize" => handle_optimize(&args).await,
                     "clean" => handle_clean(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "vrp_solve" => handle_vrp_solve(&args).await,
                     #[cfg(feature = "extract")]
                     "elevation_query" => handle_elevation_query(&args)
@@ -2887,11 +2930,9 @@ async fn main() -> Result<()> {
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
                     "list_solvers" => handle_list_solvers(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "haversine_distance" => handle_haversine_distance(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     #[cfg(feature = "extract")]
                     "elevation_stats" => handle_elevation_stats(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
@@ -2905,8 +2946,7 @@ async fn main() -> Result<()> {
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
                     "inspect_rmp" => handle_inspect_rmp(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     #[cfg(feature = "extract")]
                     "pipeline" => {
                         match tokio::time::timeout(
@@ -2943,26 +2983,19 @@ async fn main() -> Result<()> {
                         }
                     }
                     "predict_solver" => handle_predict_solver(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "score_route" => handle_score_route(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "route_embedding" => handle_route_embedding(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "predict_quality" => handle_predict_quality(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "tune_hyperparams" => handle_tune_hyperparams(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "parse_routing_query" => handle_parse_routing_query(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "submit_feedback" => handle_submit_feedback(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     other => {
                         send_err(&req.id, -32602, &format!("Unknown tool: {other}"));
                         continue;

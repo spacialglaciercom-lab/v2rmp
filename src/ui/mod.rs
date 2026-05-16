@@ -225,6 +225,7 @@ pub fn draw_input_prompt(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         crate::app::InputField::VrpWaypointsFile => "VRP waypoints file path (.json)",
         crate::app::InputField::VrpModelPath => "ONNX model file path (.onnx)",
         crate::app::InputField::VrpDepot => "VRP depot (lat,lon)",
+        crate::app::InputField::OsmandBaseUrl => "OsmAnd Base URL (e.g. https://pub-xxx.r2.dev)",
     };
 
     let popup_area = ratatui::layout::Rect {

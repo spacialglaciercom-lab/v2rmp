@@ -381,6 +381,11 @@ struct VrpArgs {
     #[arg(long, default_value_t = false)]
     #[serde(default)]
     google_maps: bool,
+
+    /// Public base URL for OsmAnd GPX import links (e.g. https://pub-xxx.r2.dev)
+    #[arg(long)]
+    #[serde(default)]
+    osmand_base_url: Option<String>,
 }
 
 // ── Extract ───────────────────────────────────────────────────────────
@@ -567,6 +572,11 @@ struct OptimizeArgs {
     #[arg(long, default_value_t = false)]
     #[serde(default)]
     google_maps: bool,
+
+    /// Public base URL for OsmAnd GPX import links (e.g. https://pub-xxx.r2.dev)
+    #[arg(long)]
+    #[serde(default)]
+    osmand_base_url: Option<String>,
 }
 
 // ── Pipeline ──────────────────────────────────────────────────────────
@@ -933,6 +943,18 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
                 }
             }
         }
+
+        if let Some(ref base_url) = args.osmand_base_url {
+            if let Some(ref path) = args.output {
+                let filename = std::path::Path::new(path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("route.gpx");
+                let gpx_url = format!("{}/{}", base_url.trim_end_matches('/'), filename);
+                let osmand_link = crate::core::vrp::utils::generate_osmand_import_url(&gpx_url);
+                tracing::info!("OsmAnd Link: {}", osmand_link);
+            }
+        }
     }
 
     Ok(())
@@ -1057,6 +1079,13 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
                         tracing::info!("Vehicle {} Google Maps: {}", i + 1, url);
                     }
                 }
+            }
+
+            if let Some(ref base_url) = args.osmand_base_url {
+                let filename = format!("vehicle_{}.gpx", i + 1);
+                let gpx_url = format!("{}/{}", base_url.trim_end_matches('/'), filename);
+                let osmand_link = crate::core::vrp::utils::generate_osmand_import_url(&gpx_url);
+                tracing::info!("Vehicle {} OsmAnd Link: {}", i + 1, osmand_link);
             }
         }
     } else {

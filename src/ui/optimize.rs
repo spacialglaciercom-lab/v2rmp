@@ -107,6 +107,20 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         lines.push(ratatui::text::Line::from(""));
     }
 
+    if !app.osmand_links.is_empty() {
+        lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+            "OsmAnd Import Links:",
+            ratatui::style::Style::default().fg(cyan),
+        )));
+        for url in &app.osmand_links {
+            lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+                url.clone(),
+                ratatui::style::Style::default().fg(green),
+            )));
+        }
+        lines.push(ratatui::text::Line::from(""));
+    }
+
     lines.extend(vec![
         ratatui::text::Line::from(ratatui::text::Span::raw(
             "────────────────────────────────────",

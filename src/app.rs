@@ -309,6 +309,7 @@ pub enum InputField {
     VrpVehicles,
     VrpWaypointsFile,
     VrpModelPath,
+    OsmandBaseUrl,
 }
 
 pub struct App {
@@ -358,6 +359,10 @@ pub struct App {
 
     /// Generated Google Maps URLs from the last optimization/VRP solve
     pub google_maps_urls: Vec<String>,
+    /// Generated OsmAnd links from the last optimization/VRP solve
+    pub osmand_links: Vec<String>,
+    /// Base URL for OsmAnd links (persisted during session)
+    pub osmand_base_url: Option<String>,
 
     // Browse state
     pub cached_maps: Vec<String>,
@@ -424,6 +429,8 @@ impl App {
             vrp_status: Status::Ready,
 
             google_maps_urls: Vec::new(),
+            osmand_links: Vec::new(),
+            osmand_base_url: None,
 
             cached_maps: Vec::new(),
             saved_routes: Vec::new(),
@@ -719,6 +726,13 @@ impl App {
             InputField::SolverId => {
                 self.solver_id = value.clone();
                 self.log(LogLevel::Success, format!("Solver ID set: {}", value));
+            }
+            InputField::OsmandBaseUrl => {
+                self.osmand_base_url = Some(value.clone());
+                self.log(
+                    LogLevel::Success,
+                    format!("OsmAnd base URL set: {}", value),
+                );
             }
         }
         self.input_mode.active = false;
