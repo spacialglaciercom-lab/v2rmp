@@ -1,6 +1,6 @@
 [package]
 name = "v2rmp"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2021"
 authors = ["spacialglaciercom-lab"]
 description = "rmpca — Route Optimization TUI & Agent Engine"
@@ -80,7 +80,6 @@ required-features = ["gui"]
 [[bin]]
 name = "generate-training-data"
 path = "src/bin/generate-training-data.rs"
-required-features = ["extract"]
 
 [[bin]]
 name = "evaluate-selector"
