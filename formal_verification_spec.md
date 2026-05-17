@@ -19,10 +19,10 @@ To verify correctness in Lean 4, the following properties must hold:
     *   `edges_remaining_in(adj) + edges_in(stack) + edges_in(circuit_with_edges) = total_edges`
     *   The elements in `stack` form a continuous path.
     *   The sequence in `circuit_with_edges` forms a sequence of closed cycles correctly attached to the nodes currently in `stack`.
-*   **Termination:** The algorithm is guaranteed to terminate because in each iteration exactly one of two things happens:
-    *   An edge is removed from `adj` and added to `stack`.
-    *   An element is popped from `stack` and added to `circuit_with_edges`.
-    *   Since the number of edges is finite and strictly decreases in `adj`, and elements in `stack` are bounded by the number of edges + 1, the loop must terminate.
+*   **Termination:** The Lean 4 formal verification specification models termination using a well-founded lexicographically decreasing measure based on `(total remaining edges in the adjacency list, stack length)`. The algorithm is guaranteed to terminate because in each iteration exactly one of two things happens:
+    *   An edge is removed from `adj` and added to `stack` (edges in `adj` strictly decreases).
+    *   An element is popped from `stack` and added to `circuit_with_edges` (edges in `adj` remains constant, `stack length` strictly decreases).
+    *   Since both sequences are finite and bounded, the measure strictly decreases, proving the loop must terminate.
 
 ## 3. Boundary Conditions
 
