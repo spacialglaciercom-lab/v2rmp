@@ -1102,7 +1102,8 @@ fn tool_definitions() -> Vec<ToolDef> {
             title: "Parse Natural Language Routing Query",
             description: "Convert a natural-language routing request into a structured VRP JSON config. \
                 Extracts entities such as number of packages, vehicles, depot coordinates, deadlines, \
-                capacity, speed, and optimization objective. Returns a JSON object ready for the vrp_solve tool.",
+                capacity, speed, and optimization objective. Returns a JSON object ready for the vrp_solve tool. \
+                When use_llm is true, uses a fine-tuned v2rmp-agent-1.5b model for complex/ambiguous queries.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -1112,7 +1113,7 @@ fn tool_definitions() -> Vec<ToolDef> {
                     },
                     "use_llm": {
                         "type": "boolean",
-                        "description": "Use a local LLM (Qwen2.5-0.5B) for complex/ambiguous queries. Requires the 'ml' feature and ~1GB RAM. (default: false)",
+                        "description": "Use the fine-tuned v2rmp-agent-1.5b LLM for complex/ambiguous queries. Requires the 'ml' feature and ~6GB RAM. (default: false)",
                         "default": false
                     }
                 },
