@@ -31,16 +31,22 @@ A powerful Terminal User Interface (TUI) and agent engine for route optimization
   - Neural-Guided heuristic
   - Neural ONNX direct inference
 - **Drone VRP**: Physics-based energy modeling with Dorling et al. (2017) power model
+  - **Neural GNN Solver** 🆕: Reinforcement Learning agent (GCN-based) for energy-aware routing in complex terrain
   - Supported models: FlyCart30, Wing
   - Wind speed consideration
   - No-fly zone support
+  - Integrated with `drone-rl-agent` on Hugging Face
 
 ### 🤖 Machine Learning
 - **Solver Selector**: Auto-selects best VRP algorithm based on instance features
 - **Quality Predictor**: Predicts expected route quality before solving
 - **Move Scorer**: Neural network for evaluating route improvement moves
 - **AutoML**: Automated hyperparameter tuning
-- **Graph Embeddings** 🆕: Generate dense vector representations for road network nodes and edges
+- **Drone RL Agent** 🆕: Graph Convolutional Network (GCN) policy for autonomous decision making
+  - **State Space**: 67-dim (64-dim FastRP embeddings + 3-dim meta-state: Wind, Battery, Payload)
+  - **Inference**: Powered by `ort` (ONNX Runtime) v2.0
+  - **Training**: RL-trained on Montreal's Mile End road network
+- **Graph Embeddings**: Generate dense vector representations for road network nodes and edges
   - **node2vec**: Biased random walks + Skip-gram (Grover & Leskovec, 2016)
   - **LINE**: 1st + 2nd order proximity preservation (Tang et al., 2015)
   - **FastRP**: Sparse random projection — fastest method (Chen et al., 2019)
@@ -634,6 +640,7 @@ let data = r2.download_object("path/to/file.txt").await?;
 | OR-Tools | Google OR-Tools wrapper | Varies |
 | Neural-Guided | ML-guided heuristic | O(n²) |
 | Neural ONNX | Direct neural inference | O(1) forward pass |
+| Neural GNN | RL Agent + 2-Opt Hybrid | O(n²) |
 
 ### Turn Classification
 - **Straight**: ±45° bearing change
@@ -761,6 +768,7 @@ at your option.
 - [x] **v0.4.0**: Time windows, capacity constraints, PMTiles support
 - [x] **v0.5.0**: MCP server, PostGIS integration, R2 cloud storage, Drone VRP, OsmAnd/Google Maps links
 - [x] **v0.5.2**: Graph embeddings (node2vec, LINE, FastRP, Spatial) — CLI + TUI + Agent
+- [x] **v0.5.3**: GNN RL Drone Agent, `ort` v2.0 integration, HF model card
 - [ ] **v0.6.0**: Advanced ML features, improved TUI, better documentation
 - [ ] **v1.0.0**: Stable API, backward compatibility guarantees
 
