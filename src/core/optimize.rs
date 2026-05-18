@@ -176,6 +176,7 @@ trait NormalizeAngle {
 impl NormalizeAngle for f64 {
     fn normalize(self, lower: f64, upper: f64) -> f64 {
         let width = upper - lower;
+        lower + (self - lower).rem_euclid(width)
         (self - lower).rem_euclid(width) + lower
     }
 }
@@ -401,7 +402,7 @@ pub fn solve_cpp(
         use std::cmp::Ordering;
         use std::collections::BinaryHeap;
 
-        #[derive(Copy, Clone, PartialEq)]
+        #[derive(Copy, Clone)]
         struct State {
             cost: f64,
             position: usize,
