@@ -4,7 +4,7 @@ This document outlines the formal verification requirements for Lean 4, mapping 
 
 ## 1. Algorithm Overview
 
-The module `src/core/optimize.rs` implements a Chinese Postman Problem (CPP) route optimization on multigraphs representing road networks. Multigraph parameters are defined by a set of vertices $V$ and a multiset of edges $E$ where multiple edges can exist between the same pair of vertices. The core process relies on:
+The module `src/core/optimize.rs` implements a Chinese Postman Problem (CPP) route optimization on multigraphs representing road networks. The formal multigraph parameters are defined by a tuple $M = (V, E, s, t)$, where $V$ is a set of vertices, $E$ is a multiset of edges, and $s, t : E \rightarrow V$ are the source and target functions. A key requirement is handling parallel edges correctly. The core process relies on:
 1. Converting the multigraph into an Eulerian multigraph via minimum weight perfect matching on odd-degree vertices.
 2. Finding an Eulerian circuit using Hierholzer's algorithm.
 
@@ -12,17 +12,17 @@ The module `src/core/optimize.rs` implements a Chinese Postman Problem (CPP) rou
 
 To verify correctness in Lean 4, the following properties must hold:
 
-*   **Handshaking Lemma:** In any undirected graph, the sum of all vertex degrees is twice the number of edges, implying the number of vertices with odd degree is always even.
-*   **Eulerian Graph Property:** After adding duplicate edges (Step 5 in the code), the degree of every vertex in the adjacency list `adj` must be even.
+*   **Eulerian Graph Property:** After adding duplicate edges (Step 5 in the code), the degree of every vertex in the adjacency list `adj` must be even. Furthermore, by the **Handshaking Lemma**, the sum of all vertex degrees must be twice the number of edges, which is crucial for proving graph connectivity and parity properties during multigraph matching.
     *   *Invariant:* `∀ v ∈ V, degree(v) ≡ 0 (mod 2)`
 *   **Edge Conservation:** The sum of all edges initially in `adj` must equal the total number of edges traversed in the circuit. Each edge must be visited exactly once.
 *   **Hierholzer Loop Invariant:** At any point during the while loop execution:
     *   `edges_remaining_in(adj) + edges_in(stack) + edges_in(circuit_with_edges) = total_edges`
     *   The elements in `stack` form a continuous path.
     *   The sequence in `circuit_with_edges` forms a sequence of closed cycles correctly attached to the nodes currently in `stack`.
-*   **Termination:** The algorithm is guaranteed to terminate modeled using a well-founded lexicographically decreasing measure based on `(total remaining edges in the adjacency list, stack length)`. In each iteration exactly one of two things happens:
-    *   An edge is removed from `adj` and added to `stack` (edges in `adj` decrease).
-    *   An element is popped from `stack` and added to `circuit_with_edges` (edges in `adj` remain the same, stack length decreases).
+*   **Termination:** The algorithm is guaranteed to terminate, which can be formally modeled in Lean 4 using a **well-founded lexicographically decreasing measure based on `(total remaining edges in the adjacency list, stack length)`**. In each iteration exactly one of two things happens:
+    *   An edge is removed from `adj` and added to `stack` (remaining edges decreases).
+    *   An element is popped from `stack` and added to `circuit_with_edges` (remaining edges stays the same, but `stack length` decreases).
+    *   Since both components are bounded below by 0, the measure is well-founded and the loop must terminate.
 
 ## 3. Boundary Conditions
 
