@@ -232,19 +232,20 @@ pub struct QwenNLParser {
 
 #[cfg(feature = "ml")]
 impl QwenNLParser {
-    /// Loads the Qwen2.5-0.5B-Instruct model from Hugging Face hub (cached locally).
-    /// Uses 0.5B by default as 1.5B is too heavy for CPU-only MCP tools.
+    /// Loads the v2rmp-agent-1.5b-merged model from Hugging Face hub (cached locally).
+    /// This is a fine-tuned Qwen2.5-1.5B-Instruct model trained on v2rmp CLI commands,
+    /// MCP tool invocations, and route optimization workflows via QLoRA SFT.
     pub fn new() -> Result<Self> {
         let device = crate::core::ml::best_device()?;
         let api = Api::new().context("Failed to create HF API client")?;
         let repo = api.repo(Repo::with_revision(
-            "Qwen/Qwen2.5-0.5B-Instruct".to_string(),
+            "aerialblancaservices/v2rmp-agent-1.5b-merged".to_string(),
             RepoType::Model,
             "main".to_string(),
         ));
 
         tracing::info!("Using device: {:?}", device);
-        tracing::info!("Fetching Qwen2.5-0.5B tokenizer and config...");
+        tracing::info!("Fetching v2rmp-agent-1.5b tokenizer and config...");
         let tokenizer_path = repo.get("tokenizer.json")?;
         let config_path = repo.get("config.json")?;
 
@@ -254,7 +255,7 @@ impl QwenNLParser {
         let config: Config = serde_json::from_reader(std::fs::File::open(config_path)?)?;
 
         // Download safetensors.
-        tracing::info!("Fetching Qwen2.5-0.5B safetensors...");
+        tracing::info!("Fetching v2rmp-agent-1.5b safetensors (~3GB, will cache locally)...");
         let model_path = repo.get("model.safetensors")?;
 
         // Use F16 on GPU, F32 on CPU for best compatibility/performance
@@ -266,7 +267,7 @@ impl QwenNLParser {
 
         let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_path], dtype, &device)? };
 
-        tracing::info!("Loading Qwen2.5 model into Candle ({:?})...", dtype);
+        tracing::info!("Loading v2rmp-agent-1.5b model into Candle ({:?})...", dtype);
         let model = ModelForCausalLM::new(&config, vb)?;
 
         Ok(Self {
@@ -278,7 +279,7 @@ impl QwenNLParser {
 
     /// Translates a natural language query into a VRP JSON string using the LLM.
     pub fn parse_llm(&mut self, query: &str) -> Result<String> {
-        let system_prompt = "You are an expert route optimization assistant. Convert the user's natural language routing query into a valid JSON object describing the Vehicle Routing Problem (VRP) configuration. Extract: 'num_stops', 'num_vehicles', 'depot' (as {\"lat\": .., \"lon\": ..}), 'deadline' (HH:MM), 'capacity', 'variant' (e.g., 'cvrp', 'cvrptw'). ONLY output valid JSON and nothing else.";
+        let system_prompt = "You are an expert route optimization agent for the v2rmp ecosystem (rmpca CLI). Convert the user's natural language request into the appropriate v2rmp command or JSON action. If the request is about VRP configuration, extract: 'variant', 'num_stops', 'num_vehicles', 'depot' (as {\"lat\": .., \"lon\": ..}), 'deadline' (HH:MM), 'capacity'. If the request is about a CLI command, provide the exact rmpca invocation. ONLY output valid JSON or command text and nothing else.";
 
         let prompt = format!("<|im_start|>system\n{}<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n", system_prompt, query);
 

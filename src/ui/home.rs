@@ -9,6 +9,7 @@ const MENU_ITEMS: &[&str] = &[
     "Optimize Route",
     "VRP Solver (Multi-Vehicle)",
     "Neural ONNX Solver",
+    "Graph Embeddings (node2vec/LINE)",
     "Browse Cached Maps",
     "Browse Saved Routes",
 ];

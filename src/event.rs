@@ -73,6 +73,7 @@ async fn handle_view_keys(app: &mut App, code: KeyCode, mods: KeyModifiers) {
         View::Optimize => handle_optimize_keys(app, code, mods).await,
         View::Vrp => handle_vrp_keys(app, code, mods).await,
         View::Neural => handle_neural_keys(app, code, mods).await,
+        View::GraphEmbed => handle_graph_embed_keys(app, code, mods).await,
         View::BrowseMaps => handle_browse_maps_keys(app, code),
         View::BrowseRoutes => handle_browse_routes_keys(app, code),
         View::FileBrowser => {} // Handled separately in handle_normal_mode
@@ -115,11 +116,18 @@ fn handle_home_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                 );
             }
             6 => {
+                app.current_view = View::GraphEmbed;
+                app.log(
+                    crate::app::LogLevel::Info,
+                    "Switched to Graph Embeddings view",
+                );
+            }
+            7 => {
                 app.current_view = View::BrowseMaps;
                 app.browse_selection = 0;
                 app.log(crate::app::LogLevel::Info, "Switched to Cached Maps view");
             }
-            7 => {
+            8 => {
                 app.current_view = View::BrowseRoutes;
                 app.browse_selection = 0;
                 app.log(crate::app::LogLevel::Info, "Switched to Saved Routes view");
@@ -304,13 +312,24 @@ fn handle_compile_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
     }
 }
 
-fn generate_google_maps_urls(routes: &[Vec<crate::core::vrp::types::VRPSolverStop>]) -> Vec<String> {
-    let mut urls = Vec::new();
-    for route in routes {
+fn generate_deep_links(
+    routes: &[Vec<crate::core::vrp::types::VRPSolverStop>],
+    osmand_base: Option<&str>,
+    is_vrp: bool,
+) -> (Vec<String>, Vec<String>) {
+    let mut gmaps = Vec::new();
+    let mut osmand = Vec::new();
+
+    for (i, route) in routes.iter().enumerate() {
+        // Google Maps (sampled)
         let max_points = 20;
         let sampled_points = if route.len() > max_points {
             let step = route.len() / max_points;
-            route.iter().step_by(step).take(max_points).collect::<Vec<_>>()
+            route
+                .iter()
+                .step_by(step)
+                .take(max_points)
+                .collect::<Vec<_>>()
         } else {
             route.iter().collect::<Vec<_>>()
         };
@@ -319,9 +338,22 @@ fn generate_google_maps_urls(routes: &[Vec<crate::core::vrp::types::VRPSolverSto
         for stop in sampled_points {
             url.push_str(&format!("{:.6},{:.6}/", stop.lat, stop.lon));
         }
-        urls.push(url);
+        gmaps.push(url);
+
+        // OsmAnd (if base URL provided)
+        if let Some(base) = osmand_base {
+            let filename = if is_vrp || routes.len() > 1 {
+                format!("vehicle_{}.gpx", i + 1)
+            } else {
+                "route.gpx".to_string()
+            };
+            let gpx_url = format!("{}/{}", base.trim_end_matches('/'), filename);
+            osmand.push(crate::core::vrp::utils::generate_osmand_import_url(
+                &gpx_url,
+            ));
+        }
     }
-    urls
+    (gmaps, osmand)
 }
 
 async fn handle_optimize_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
@@ -413,12 +445,25 @@ async fn handle_optimize_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers)
                             );
                         }
 
-                        // Generate Google Maps links
-                        app.google_maps_urls = generate_google_maps_urls(&result.routes);
+                        // Generate deep links
+                        let (gmaps, osmand) = generate_deep_links(
+                            &result.routes,
+                            app.osmand_base_url.as_deref(),
+                            false,
+                        );
+                        app.google_maps_urls = gmaps;
+                        app.osmand_links = osmand;
+
                         if let Some(first_url) = app.google_maps_urls.first() {
                             app.log(
                                 crate::app::LogLevel::Info,
                                 format!("Google Maps: {}", first_url),
+                            );
+                        }
+                        if let Some(first_osmand) = app.osmand_links.first() {
+                            app.log(
+                                crate::app::LogLevel::Info,
+                                format!("OsmAnd Link: {}", first_osmand),
                             );
                         }
                     }
@@ -466,6 +511,9 @@ async fn handle_vrp_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
         }
         KeyCode::Char('d') | KeyCode::Char('D') => {
             app.start_input(InputField::VrpDepot);
+        }
+        KeyCode::Char('L') => {
+            app.start_input(InputField::OsmandBaseUrl);
         }
         KeyCode::Char('x') | KeyCode::Char('X') => {
             app.vrp_depots.clear();
@@ -530,7 +578,8 @@ async fn handle_vrp_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                             }
                         }
                         Err(e) => {
-                            app.vrp_status = crate::app::Status::Error(format!("Invalid JSON: {}", e));
+                            app.vrp_status =
+                                crate::app::Status::Error(format!("Invalid JSON: {}", e));
                             return;
                         }
                     },
@@ -576,19 +625,32 @@ async fn handle_vrp_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                         let mut log_routes = Vec::new();
                         for (i, route) in routes.iter().enumerate() {
                             let path = format!("{}/route_v{}.gpx", output_dir, i + 1);
-                            if let Ok(_) =
-                                crate::core::optimize::write_gpx_multi(&path, std::slice::from_ref(route))
+                            if crate::core::optimize::write_gpx_multi(
+                                &path,
+                                std::slice::from_ref(route),
+                            )
+                            .is_ok()
                             {
                                 log_routes.push(path);
                             }
                         }
 
-                        // Generate Google Maps links
-                        app.google_maps_urls = generate_google_maps_urls(&routes);
+                        // Generate deep links
+                        let (gmaps, osmand) =
+                            generate_deep_links(&routes, app.osmand_base_url.as_deref(), true);
+                        app.google_maps_urls = gmaps;
+                        app.osmand_links = osmand;
+
                         if let Some(first_url) = app.google_maps_urls.first() {
                             app.log(
                                 crate::app::LogLevel::Info,
                                 format!("Google Maps: {}", first_url),
+                            );
+                        }
+                        if let Some(first_osmand) = app.osmand_links.first() {
+                            app.log(
+                                crate::app::LogLevel::Info,
+                                format!("OsmAnd Link: {}", first_osmand),
                             );
                         }
 
@@ -689,7 +751,10 @@ async fn handle_neural_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                 max_iterations: 1,
                 ..Default::default()
             };
-            hyperparams.other.insert("model_path".to_string(), serde_json::Value::String(model_path));
+            hyperparams.other.insert(
+                "model_path".to_string(),
+                serde_json::Value::String(model_path),
+            );
 
             let input = VRPSolverInput {
                 locations,
@@ -711,9 +776,13 @@ async fn handle_neural_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                         let _ = std::fs::create_dir_all(&output_dir);
                         for (i, route) in routes.iter().enumerate() {
                             let path = format!("{}/neural_v{}.gpx", output_dir, i + 1);
-                            let _ = crate::core::optimize::write_gpx_multi(&path, std::slice::from_ref(route));
+                            let _ = crate::core::optimize::write_gpx_multi(
+                                &path,
+                                std::slice::from_ref(route),
+                            );
                         }
-                        app.vrp_status = Status::Done(format!("Neural Solve Done: {} routes", routes.len()));
+                        app.vrp_status =
+                            Status::Done(format!("Neural Solve Done: {} routes", routes.len()));
                         app.log(crate::app::LogLevel::Success, "Neural solving complete");
                     } else {
                         app.vrp_status = Status::Done("No routes produced".into());
@@ -721,8 +790,176 @@ async fn handle_neural_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                 }
                 Err(e) => {
                     app.vrp_status = Status::Error(e.clone());
-                    app.log(crate::app::LogLevel::Error, format!("Neural solve failed: {}", e));
+                    app.log(
+                        crate::app::LogLevel::Error,
+                        format!("Neural solve failed: {}", e),
+                    );
                 }
+            }
+        }
+        _ => {}
+    }
+}
+
+async fn handle_graph_embed_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
+    match code {
+        KeyCode::Char('i') | KeyCode::Char('I') => {
+            app.start_file_browser(crate::app::InputField::GraphEmbedInputFile);
+        }
+        KeyCode::Char('o') | KeyCode::Char('O') => {
+            app.start_input(crate::app::InputField::GraphEmbedOutputFile);
+        }
+        KeyCode::Char('m') | KeyCode::Char('M') => {
+            // Cycle through methods
+            let methods = ["line", "fastrp", "spatial", "node2vec"];
+            let current = app.graph_embed_method.as_str();
+            let idx = methods.iter().position(|&m| m == current).unwrap_or(0);
+            let next = methods[(idx + 1) % methods.len()];
+            app.graph_embed_method = next.to_string();
+            app.log(
+                crate::app::LogLevel::Info,
+                format!("Method: {}", app.graph_embed_method),
+            );
+        }
+        KeyCode::Char('d') | KeyCode::Char('D') => {
+            app.start_input(crate::app::InputField::GraphEmbedDimensions);
+        }
+        KeyCode::Char('e') | KeyCode::Char('E') => {
+            app.graph_embed_include_edges = !app.graph_embed_include_edges;
+            app.log(
+                crate::app::LogLevel::Info,
+                format!(
+                    "Edge embeddings: {}",
+                    if app.graph_embed_include_edges { "ON" } else { "OFF" }
+                ),
+            );
+        }
+        KeyCode::Enter => {
+            #[cfg(feature = "ml")]
+            {
+                use crate::core::ml::node_embed::{EmbedConfig, EmbedMethod, embed_graph};
+                use crate::core::optimize::read_rmp_file;
+
+                let input_path = match &app.graph_embed_input {
+                    Some(p) => p.clone(),
+                    None => {
+                        app.log(crate::app::LogLevel::Warn, "Set an input .rmp file first (press 'i')");
+                        return;
+                    }
+                };
+
+                // Read .rmp
+                let file_data = match std::fs::read(&input_path) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        app.graph_embed_status = Status::Error(format!("Failed to read: {}", e));
+                        app.log(crate::app::LogLevel::Error, format!("Read error: {}", e));
+                        return;
+                    }
+                };
+                let (nodes, edges) = match read_rmp_file(&file_data) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        app.graph_embed_status = Status::Error(format!("Invalid .rmp: {}", e));
+                        app.log(crate::app::LogLevel::Error, format!("Parse error: {}", e));
+                        return;
+                    }
+                };
+
+                if nodes.is_empty() {
+                    app.graph_embed_status = Status::Error("No nodes in .rmp".into());
+                    app.log(crate::app::LogLevel::Error, "No nodes found");
+                    return;
+                }
+
+                let method = match app.graph_embed_method.as_str() {
+                    "node2vec" => EmbedMethod::Node2Vec,
+                    "line" => EmbedMethod::Line,
+                    "fastrp" => EmbedMethod::FastRp,
+                    "spatial" => EmbedMethod::Spatial,
+                    _ => EmbedMethod::Line,
+                };
+
+                let config = EmbedConfig {
+                    method,
+                    dimensions: app.graph_embed_dimensions,
+                    walk_length: app.graph_embed_walk_length,
+                    num_walks: app.graph_embed_num_walks,
+                    p: app.graph_embed_p,
+                    q: app.graph_embed_q,
+                    window: 5,
+                    negative_samples: 5,
+                    lr: 0.025,
+                    epochs: app.graph_embed_epochs,
+                    threads: 1,
+                    include_edges: app.graph_embed_include_edges,
+                };
+
+                app.graph_embed_status = Status::Running {
+                    progress: 0,
+                    message: format!("{} on {} nodes...", app.graph_embed_method, nodes.len()),
+                };
+                app.log(
+                    crate::app::LogLevel::Info,
+                    format!("Running {} ({} nodes, {} edges)...", app.graph_embed_method, nodes.len(), edges.len()),
+                );
+
+                match embed_graph(&nodes, &edges, &config) {
+                    Ok(result) => {
+                        let output_json = serde_json::to_string_pretty(&result).unwrap_or_default();
+                        let num_nodes = result.num_nodes;
+                        let dims = result.dimensions;
+                        let method_name = result.method.clone();
+
+                        if let Some(ref out_path) = app.graph_embed_output {
+                            match std::fs::write(out_path, &output_json) {
+                                Ok(_) => {
+                                    app.graph_embed_status = Status::Done(
+                                        format!("{}: {} nodes, dim={} → {}", method_name, num_nodes, dims, out_path),
+                                    );
+                                    app.log(
+                                        crate::app::LogLevel::Success,
+                                        format!("Wrote {} embeddings to {}", num_nodes, out_path),
+                                    );
+                                }
+                                Err(e) => {
+                                    app.graph_embed_status = Status::Error(format!("Write error: {}", e));
+                                    app.log(crate::app::LogLevel::Error, format!("Write failed: {}", e));
+                                }
+                            }
+                        } else {
+                            // Print to stdout (not great for TUI, but useful)
+                            app.graph_embed_status = Status::Done(
+                                format!("{}: {} nodes, dim={} (printed to stdout)", method_name, num_nodes, dims),
+                            );
+                            app.log(
+                                crate::app::LogLevel::Success,
+                                format!("{} embedding done: {} nodes, dim={}", method_name, num_nodes, dims),
+                            );
+                            // In TUI mode, save to a default file
+                            let default_out = input_path.replace(".rmp", "_embeddings.json");
+                            match std::fs::write(&default_out, &output_json) {
+                                Ok(_) => {
+                                    app.log(
+                                        crate::app::LogLevel::Success,
+                                        format!("Saved to {}", default_out),
+                                    );
+                                }
+                                Err(e) => {
+                                    app.log(crate::app::LogLevel::Error, format!("Save failed: {}", e));
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        app.graph_embed_status = Status::Error(e.to_string());
+                        app.log(crate::app::LogLevel::Error, format!("Embedding failed: {}", e));
+                    }
+                }
+            }
+            #[cfg(not(feature = "ml"))]
+            {
+                app.log(crate::app::LogLevel::Error, "ML feature not enabled. Build with --features ml");
             }
         }
         _ => {}

@@ -6,6 +6,8 @@ pub mod default;
 pub mod neural;
 #[cfg(feature = "ml")]
 pub mod neural_guided;
+#[cfg(feature = "ml")]
+pub mod neural_gnn;
 pub mod or_opt;
 pub mod sweep;
 pub mod two_opt;

@@ -62,6 +62,9 @@ enum Commands {
     TuneHyperparams(TuneHyperparamsArgs),
     /// Parse a natural-language routing query into JSON
     ParseQuery(ParseQueryArgs),
+    /// Generate node/edge embeddings for a road network graph
+    #[cfg(feature = "ml")]
+    GraphEmbed(GraphEmbedArgs),
 }
 
 #[derive(clap::Args, Serialize, Deserialize)]
@@ -69,6 +72,84 @@ struct EmbedArgs {
     /// Text to embed (can be specified multiple times)
     #[arg(short, long, action = clap::ArgAction::Append)]
     text: Vec<String>,
+}
+
+// ── Graph Embed ──────────────────────────────────────────────────────
+
+#[derive(clap::Args, Serialize, Deserialize)]
+#[serde(default)]
+struct GraphEmbedArgs {
+    /// Input .rmp cache file
+    #[arg(short, long)]
+    input: String,
+
+    /// Embedding method
+    #[arg(short, long, value_enum, default_value = "node2vec")]
+    method: crate::core::ml::node_embed::EmbedMethod,
+
+    /// Embedding dimension (default: 64)
+    #[arg(short, long, default_value = "64")]
+    dim: usize,
+
+    /// Walk length for node2vec (default: 30)
+    #[arg(long, default_value = "30")]
+    walk_length: usize,
+
+    /// Number of walks per node for node2vec (default: 10)
+    #[arg(long, default_value = "10")]
+    num_walks: usize,
+
+    /// Return parameter p for node2vec (default: 1.0)
+    #[arg(long, default_value = "1.0")]
+    p: f64,
+
+    /// In-out parameter q for node2vec (default: 1.0)
+    #[arg(long, default_value = "1.0")]
+    q: f64,
+
+    /// Skip-gram window size (default: 5)
+    #[arg(long, default_value = "5")]
+    window: usize,
+
+    /// Number of negative samples (default: 5)
+    #[arg(long, default_value = "5")]
+    negative_samples: usize,
+
+    /// Learning rate (default: 0.025)
+    #[arg(long, default_value = "0.025")]
+    lr: f64,
+
+    /// Number of training epochs for LINE (default: 5)
+    #[arg(long, default_value = "5")]
+    epochs: usize,
+
+    /// Include edge embeddings (derived via Hadamard product)
+    #[arg(long, default_value = "false")]
+    include_edges: bool,
+
+    /// Output file path (JSON). If omitted, prints to stdout.
+    #[arg(short, long)]
+    output: Option<String>,
+}
+
+impl Default for GraphEmbedArgs {
+    fn default() -> Self {
+        Self {
+            input: String::new(),
+            method: crate::core::ml::node_embed::EmbedMethod::Node2Vec,
+            dim: 64,
+            walk_length: 30,
+            num_walks: 10,
+            p: 1.0,
+            q: 1.0,
+            window: 5,
+            negative_samples: 5,
+            lr: 0.025,
+            epochs: 5,
+            include_edges: false,
+            output: None,
+        }
+    }
 }
 
 // ── Elevation ─────────────────────────────────────────────────────────
@@ -240,6 +321,8 @@ enum AgentTask {
     Pipeline(PipelineArgs),
     #[cfg(feature = "ml")]
     Embed(EmbedArgs),
+    #[cfg(feature = "ml")]
+    GraphEmbed(GraphEmbedArgs),
     #[cfg(feature = "extract")]
     Elevation(ElevationArgs),
 }
@@ -381,6 +464,11 @@ struct VrpArgs {
     #[arg(long, default_value_t = false)]
     #[serde(default)]
     google_maps: bool,
+
+    /// Public base URL for OsmAnd GPX import links (e.g. https://pub-xxx.r2.dev)
+    #[arg(long)]
+    #[serde(default)]
+    osmand_base_url: Option<String>,
 }
 
 // ── Extract ───────────────────────────────────────────────────────────
@@ -567,6 +655,11 @@ struct OptimizeArgs {
     #[arg(long, default_value_t = false)]
     #[serde(default)]
     google_maps: bool,
+
+    /// Public base URL for OsmAnd GPX import links (e.g. https://pub-xxx.r2.dev)
+    #[arg(long)]
+    #[serde(default)]
+    osmand_base_url: Option<String>,
 }
 
 // ── Pipeline ──────────────────────────────────────────────────────────
@@ -916,7 +1009,11 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
                     let max_points = 20;
                     let sampled_points = if route.len() > max_points {
                         let step = route.len() / max_points;
-                        route.iter().step_by(step).take(max_points).collect::<Vec<_>>()
+                        route
+                            .iter()
+                            .step_by(step)
+                            .take(max_points)
+                            .collect::<Vec<_>>()
                     } else {
                         route.iter().collect::<Vec<_>>()
                     };
@@ -931,6 +1028,18 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
                         tracing::info!("Google Maps (Sampled): {}", url);
                     }
                 }
+            }
+        }
+
+        if let Some(ref base_url) = args.osmand_base_url {
+            if let Some(ref path) = args.output {
+                let filename = std::path::Path::new(path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("route.gpx");
+                let gpx_url = format!("{}/{}", base_url.trim_end_matches('/'), filename);
+                let osmand_link = crate::core::vrp::utils::generate_osmand_import_url(&gpx_url);
+                tracing::info!("OsmAnd Link: {}", osmand_link);
             }
         }
     }
@@ -1052,11 +1161,23 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
                         url.push_str(&format!("{:.6},{:.6}/", stop.lat, stop.lon));
                     }
                     if route.chunks(20).count() > 1 {
-                        tracing::info!("Vehicle {} Google Maps (Part {}): {}", i + 1, chunk_idx + 1, url);
+                        tracing::info!(
+                            "Vehicle {} Google Maps (Part {}): {}",
+                            i + 1,
+                            chunk_idx + 1,
+                            url
+                        );
                     } else {
                         tracing::info!("Vehicle {} Google Maps: {}", i + 1, url);
                     }
                 }
+            }
+
+            if let Some(ref base_url) = args.osmand_base_url {
+                let filename = format!("vehicle_{}.gpx", i + 1);
+                let gpx_url = format!("{}/{}", base_url.trim_end_matches('/'), filename);
+                let osmand_link = crate::core::vrp::utils::generate_osmand_import_url(&gpx_url);
+                tracing::info!("Vehicle {} OsmAnd Link: {}", i + 1, osmand_link);
             }
         }
     } else {
@@ -1209,6 +1330,8 @@ async fn run_agent_cmd(args: AgentArgs, json: bool) -> Result<()> {
         AgentTask::Pipeline(a) => run_pipeline_cmd(a, json).await,
         #[cfg(feature = "ml")]
         AgentTask::Embed(a) => run_embed_cmd(a, json).await,
+        #[cfg(feature = "ml")]
+        AgentTask::GraphEmbed(a) => run_graph_embed_cmd(a, json),
         #[cfg(feature = "extract")]
         AgentTask::Elevation(a) => run_elevation_cmd(a, json),
     }
@@ -1250,6 +1373,8 @@ async fn run_serve_cmd(_args: ServeArgs) -> Result<()> {
                     AgentTask::Pipeline(a) => run_pipeline_cmd(a, true).await,
                     #[cfg(feature = "ml")]
                     AgentTask::Embed(a) => run_embed_cmd(a, true).await,
+                    #[cfg(feature = "ml")]
+                    AgentTask::GraphEmbed(a) => run_graph_embed_cmd(a, true),
                     #[cfg(feature = "extract")]
                     AgentTask::Elevation(a) => run_elevation_cmd(a, true),
                 };
@@ -1297,6 +1422,77 @@ async fn run_embed_cmd(args: EmbedArgs, json: bool) -> Result<()> {
 #[cfg(not(feature = "ml"))]
 async fn run_embed_cmd(_args: EmbedArgs, _json: bool) -> Result<()> {
     anyhow::bail!("ML feature is not enabled. Cannot generate embeddings.");
+}
+
+// ── Graph Embed handler ─────────────────────────────────────────────
+
+#[cfg(feature = "ml")]
+fn run_graph_embed_cmd(args: GraphEmbedArgs, json: bool) -> Result<()> {
+    use crate::core::ml::node_embed::{EmbedConfig, embed_graph};
+    use crate::core::optimize::read_rmp_file;
+    use std::io::Read;
+
+    // Load .rmp file
+    let mut file_data = Vec::new();
+    std::fs::File::open(&args.input)?
+        .read_to_end(&mut file_data)?;
+    let (nodes, edges) = read_rmp_file(&file_data)?;
+
+    if nodes.is_empty() {
+        anyhow::bail!("No nodes found in .rmp file: {}", args.input);
+    }
+
+    if !json {
+        tracing::info!(
+            "Road network: {} nodes, {} edges from {}",
+            nodes.len(),
+            edges.len(),
+            args.input
+        );
+    }
+
+    let config = EmbedConfig {
+        method: args.method,
+        dimensions: args.dim,
+        walk_length: args.walk_length,
+        num_walks: args.num_walks,
+        p: args.p,
+        q: args.q,
+        window: args.window,
+        negative_samples: args.negative_samples,
+        lr: args.lr,
+        epochs: args.epochs,
+        threads: 1,
+        include_edges: args.include_edges,
+    };
+
+    let result = embed_graph(&nodes, &edges, &config)?;
+
+    let output_data = serde_json::to_string_pretty(&result)?;
+
+    match &args.output {
+        Some(path) => {
+            std::fs::write(path, &output_data)?;
+            if !json {
+                tracing::info!(
+                    "Wrote {} node embeddings (dim={}) to {}",
+                    result.num_nodes,
+                    result.dimensions,
+                    path
+                );
+            }
+        }
+        None => {
+            println!("{}", output_data);
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(not(feature = "ml"))]
+fn run_graph_embed_cmd(_args: GraphEmbedArgs, _json: bool) -> Result<()> {
+    anyhow::bail!("ML feature is not enabled. Cannot generate graph embeddings.");
 }
 
 fn run_list_cmd(args: ListArgs, json: bool) -> Result<()> {
@@ -1643,6 +1839,8 @@ pub async fn run() -> Result<()> {
         #[cfg(feature = "ml")]
         Commands::TuneHyperparams(args) => run_tune_hyperparams_cmd(args).await,
         Commands::ParseQuery(args) => run_parse_query_cmd(args),
+        #[cfg(feature = "ml")]
+        Commands::GraphEmbed(args) => run_graph_embed_cmd(args, cli.json),
     };
 
     if let Err(e) = result {

@@ -20,21 +20,34 @@ impl VRPSolver for NeuralSolver {
 
     async fn solve(&self, input: &VRPSolverInput) -> Result<VRPSolverOutput, String> {
         // Find model path from hyperparams or fallback
-        let model_path = input.hyperparams.as_ref()
+        let model_path = input
+            .hyperparams
+            .as_ref()
             .and_then(|h| h.other.get("model_path"))
             .and_then(|v| v.as_str())
             .unwrap_or("cvrp50_model.onnx");
 
         if !std::path::Path::new(model_path).exists() {
-            return Err(format!("ONNX model not found: {}. Please ensure it is in the project root.", model_path));
+            return Err(format!(
+                "ONNX model not found: {}. Please ensure it is in the project root.",
+                model_path
+            ));
         }
 
         let mut engine = NeuralInferenceEngine::new(model_path)
             .map_err(|e| format!("Failed to initialize neural engine: {}", e))?;
 
         // Prepare request
-        let locations = input.locations.iter().map(|s| [s.lat, s.lon, 0.0]).collect();
-        let demands = input.locations.iter().map(|s| s.demand.unwrap_or(1.0)).collect();
+        let locations = input
+            .locations
+            .iter()
+            .map(|s| [s.lat, s.lon, 0.0])
+            .collect();
+        let demands = input
+            .locations
+            .iter()
+            .map(|s| s.demand.unwrap_or(1.0))
+            .collect();
 
         let req = NeuralRouteRequest {
             locations,
@@ -43,7 +56,8 @@ impl VRPSolver for NeuralSolver {
             model_path: model_path.to_string(),
         };
 
-        let resp = engine.solve(&req)
+        let resp = engine
+            .solve(&req)
             .map_err(|e| format!("Neural solver error: {}", e))?;
 
         // Convert sequence to routes

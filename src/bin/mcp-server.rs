@@ -244,7 +244,12 @@ fn handle_tool_call(params: Value) -> Result<Value> {
             rt.block_on(async {
                 let storage = R2Storage::from_env(bucket)?;
                 let objects = storage.list_objects(prefix).await?;
-                Ok(json!({ "content": [{ "type": "text", "text": format!("Objects:\n{}", objects.join("\n")) }], "isError": false }))
+                let val = json!({ "objects": objects });
+                Ok(json!({
+                    "content": [{ "type": "text", "text": format!("Objects:\n{}", objects.join("\n")) }],
+                    "structured": val,
+                    "isError": false
+                }))
             })
         }
         "upload_to_r2" => {
@@ -265,7 +270,12 @@ fn handle_tool_call(params: Value) -> Result<Value> {
             rt.block_on(async {
                 let storage = R2Storage::from_env(bucket)?;
                 storage.upload_object(r2_path, data).await?;
-                Ok(json!({ "content": [{ "type": "text", "text": format!("Uploaded to {}", r2_path) }], "isError": false }))
+                let val = json!({ "status": "success", "r2_path": r2_path });
+                Ok(json!({
+                    "content": [{ "type": "text", "text": format!("Uploaded to {}", r2_path) }],
+                    "structured": val,
+                    "isError": false
+                }))
             })
         }
         "download_from_r2" => {
@@ -286,7 +296,12 @@ fn handle_tool_call(params: Value) -> Result<Value> {
                 let storage = R2Storage::from_env(bucket)?;
                 let data = storage.download_object(r2_path).await?;
                 std::fs::write(local_path, data)?;
-                Ok(json!({ "content": [{ "type": "text", "text": format!("Downloaded to {}", local_path) }], "isError": false }))
+                let val = json!({ "status": "success", "local_path": local_path });
+                Ok(json!({
+                    "content": [{ "type": "text", "text": format!("Downloaded to {}", local_path) }],
+                    "structured": val,
+                    "isError": false
+                }))
             })
         }
         "query_supabase" => {
@@ -316,7 +331,12 @@ fn handle_tool_call(params: Value) -> Result<Value> {
                     }
                     results.push(Value::Object(res_row));
                 }
-                Ok(json!({ "content": [{ "type": "text", "text": serde_json::to_string_pretty(&results)? }], "isError": false }))
+                let val = json!({ "results": results });
+                Ok(json!({
+                    "content": [{ "type": "text", "text": serde_json::to_string(&results)? }],
+                    "structured": val,
+                    "isError": false
+                }))
             })
         }
         "v2rmp_extract" => {
@@ -366,9 +386,12 @@ fn handle_tool_call(params: Value) -> Result<Value> {
                     r2_endpoint: None,
                 };
                 let res = v2rmp::core::extract::run_extract(&req)?;
-                Ok(
-                    json!({ "content": [{ "type": "text", "text": format!("Extracted {} nodes", res.nodes) }], "isError": false }),
-                )
+                let val = json!(res);
+                Ok(json!({
+                    "content": [{ "type": "text", "text": format!("Extracted {} nodes", res.nodes) }],
+                    "structured": val,
+                    "isError": false
+                }))
             }
             #[cfg(not(feature = "extract"))]
             {
@@ -403,9 +426,12 @@ fn handle_tool_call(params: Value) -> Result<Value> {
                     .unwrap_or(false),
             };
             let res = run_compile(&req)?;
-            Ok(
-                json!({ "content": [{ "type": "text", "text": format!("Compiled {} nodes", res.node_count) }], "isError": false }),
-            )
+            let val = json!(res);
+            Ok(json!({
+                "content": [{ "type": "text", "text": format!("Compiled {} nodes", res.node_count) }],
+                "structured": val,
+                "isError": false
+            }))
         }
         "v2rmp_optimize" => {
             let penalties = TurnPenalties {
@@ -448,9 +474,12 @@ fn handle_tool_call(params: Value) -> Result<Value> {
 
             let rt = tokio::runtime::Runtime::new()?;
             let res = rt.block_on(async { run_optimize(&req).await })?;
-            Ok(
-                json!({ "content": [{ "type": "text", "text": format!("Optimized: {:.2} km", res.total_distance_km) }], "isError": false }),
-            )
+            let val = json!(res);
+            Ok(json!({
+                "content": [{ "type": "text", "text": format!("Optimized: {:.2} km", res.total_distance_km) }],
+                "structured": val,
+                "isError": false
+            }))
         }
         "v2rmp_postgis_cpp" => {
             let depot = if let (Some(lat), Some(lon)) = (
@@ -533,8 +562,12 @@ fn handle_tool_call(params: Value) -> Result<Value> {
             };
 
             let res = run_postgis_cpp(&req)?;
-            let json_text = serde_json::to_string_pretty(&res)?;
-            Ok(json!({ "content": [{ "type": "text", "text": json_text }], "isError": false }))
+            let val = json!(res);
+            Ok(json!({
+                "content": [{ "type": "text", "text": serde_json::to_string(&res)? }],
+                "structured": val,
+                "isError": false
+            }))
         }
         "v2rmp_neural_optimize" => {
             use v2rmp::core::neural_routing::{solve_neural, NeuralRouteRequest};
@@ -575,11 +608,13 @@ fn handle_tool_call(params: Value) -> Result<Value> {
             };
 
             let res = solve_neural(&req)?;
+            let val = json!(res);
             Ok(json!({
                 "content": [{
                     "type": "text",
-                    "text": serde_json::to_string_pretty(&res)?
+                    "text": serde_json::to_string(&res)?
                 }],
+                "structured": val,
                 "isError": false
             }))
         }
@@ -589,14 +624,17 @@ fn handle_tool_call(params: Value) -> Result<Value> {
                 .and_then(Value::as_str)
                 .context("Missing gpx_url")?;
             let link = v2rmp::core::vrp::utils::generate_osmand_import_url(gpx_url);
+            let val = json!({ "osmand_link": link });
             Ok(json!({
                 "content": [{
                     "type": "text",
                     "text": link
                 }],
+                "structured": val,
                 "isError": false
             }))
         }
+
         _ => anyhow::bail!("Tool not found"),
     }
 }

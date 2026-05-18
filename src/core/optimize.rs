@@ -177,6 +177,7 @@ impl NormalizeAngle for f64 {
     fn normalize(self, lower: f64, upper: f64) -> f64 {
         let width = upper - lower;
         lower + (self - lower).rem_euclid(width)
+        (self - lower).rem_euclid(width) + lower
     }
 }
 
@@ -335,7 +336,7 @@ pub fn solve_cpp(
             nodes[to].lat,
             nodes[to].lon,
         );
-        let b_rev = (b_fwd + 180.0).rem_euclid(360.0);
+        let b_rev = (b_fwd + 180.0) % 360.0;
 
         adj[from].push(AdjEntry {
             to: edge.to,
@@ -406,13 +407,6 @@ pub fn solve_cpp(
             cost: f64,
             position: usize,
             incoming_bearing: Option<f64>,
-        }
-        impl PartialEq for State {
-            fn eq(&self, other: &Self) -> bool {
-                self.cost == other.cost
-                    && self.position == other.position
-                    && self.incoming_bearing == other.incoming_bearing
-            }
         }
         impl Eq for State {}
         impl Ord for State {
@@ -603,7 +597,7 @@ pub fn solve_cpp(
     for (i, &(u, v, weight, _eidx)) in duplicate_edges.iter().enumerate() {
         let deadhead_edge_idx = edges.len() + i;
         let b_fwd = bearing(nodes[u].lat, nodes[u].lon, nodes[v].lat, nodes[v].lon);
-        let b_rev = (b_fwd + 180.0).rem_euclid(360.0);
+        let b_rev = (b_fwd + 180.0) % 360.0;
 
         adj[u].push(AdjEntry {
             to: v as u32,
@@ -684,15 +678,15 @@ pub fn solve_cpp(
         }
     }
 
-    // Turn classification
+    // Turn classification using pre-calculated bearings
     if circuit_with_edges.len() > 2 {
         for i in 1..circuit_with_edges.len().saturating_sub(1) {
-            let entry_in = &circuit_with_edges[i];
-            let entry_out = &circuit_with_edges[i + 1];
+            let e_in = &circuit_with_edges[i].1;
+            let e_out = &circuit_with_edges[i + 1].1;
 
-            if let (Some(e_in), Some(e_out)) = (&entry_in.1, &entry_out.1) {
-                let b_in = e_in.bearing;
-                let b_out = e_out.bearing;
+            if let (Some(ei), Some(eo)) = (e_in, e_out) {
+                let b_in = ei.bearing;
+                let b_out = eo.bearing;
                 let delta = b_out - b_in;
                 match classify_turn(delta) {
                     "left" => turns.left += 1,

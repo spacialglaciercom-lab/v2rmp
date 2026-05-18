@@ -26,6 +26,8 @@ use super::solvers::default::DefaultSolver;
 use super::solvers::neural::NeuralSolver;
 #[cfg(feature = "ml")]
 use super::solvers::neural_guided::NeuralGuidedSolver;
+#[cfg(feature = "ml")]
+use super::solvers::neural_gnn::NeuralGnnSolver;
 use super::solvers::or_opt::OrOptSolver;
 use super::solvers::sweep::SweepSolver;
 use super::solvers::two_opt::TwoOptSolver;
@@ -57,6 +59,8 @@ impl SolverRegistryInner {
         builtins.push(Arc::new(NeuralSolver));
         #[cfg(feature = "ml")]
         builtins.push(Arc::new(NeuralGuidedSolver));
+        #[cfg(feature = "ml")]
+        builtins.push(Arc::new(NeuralGnnSolver));
         builtins.push(Arc::new(DefaultSolver));
 
         let builtin_ids: Vec<String> = builtins.iter().map(|s| s.id().to_string()).collect();

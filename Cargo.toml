@@ -1,6 +1,6 @@
 [package]
 name = "v2rmp"
-version = "0.5.1"
+version = "0.5.5"
 edition = "2021"
 authors = ["spacialglaciercom-lab"]
 description = "rmpca — Route Optimization TUI & Agent Engine"
@@ -25,6 +25,8 @@ exclude = [
     "*.py",
     "*.pyc",
     "*.orig",
+    "*.jsonl",
+    "mile_end_embeddings.json",
     "__pycache__/",
     "target/",
     ".bob/",
@@ -35,10 +37,12 @@ exclude = [
     "data/",
     "docs/",
     "drone_vrp_space/",
+    "local/",
     "mcp_test_data/",
     "models/",
     "scripts/",
     "session_logs/",
+    "sft_training/",
     "vector_clean.py",
     "*_patch.diff",
 ]
@@ -80,7 +84,6 @@ required-features = ["gui"]
 [[bin]]
 name = "generate-training-data"
 path = "src/bin/generate-training-data.rs"
-required-features = ["extract"]
 
 [[bin]]
 name = "evaluate-selector"
