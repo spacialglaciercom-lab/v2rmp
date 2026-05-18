@@ -17,6 +17,8 @@ pub mod feedback;
 #[cfg(feature = "ml")]
 pub mod graph_embed;
 #[cfg(feature = "ml")]
+pub mod node_embed;
+#[cfg(feature = "ml")]
 pub mod quality_predictor;
 #[cfg(feature = "ml")]
 pub mod selector;
