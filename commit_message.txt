@@ -1,1 +1,47 @@
-No changes applied. Repository contains extensive merge conflict breakages.
+feat(ml): heavy ML/AI integration — neural solver selector, NLP parser, AutoML, quality predictor, graph embeddings
+
+This commit transforms v2rmp from a rule-based route optimizer into
+a research-backed ML-powered routing engine.
+
+New modules (src/core/ml/*):
+- ml/features.rs — 28-dim instance feature extractor based on
+  Instance-Aware Parameter Configuration (2605.00572), RouteFinder
+  (2406.15007), and RRNCO (2503.16159). Covers geometric, kNN graph,
+  demand, distance matrix, and objective features.
+- ml/selector.rs — Neural MLP solver selector (28→128→64→5) via
+  Candle with safetensors loading. Graceful fallback to legacy
+  rule-based selector if model is absent.
+- ml/quality_predictor.rs — Pre-solve gap and tour-length prediction
+  for early stopping and smart solver spawning.
+- ml/automl.rs — Instance-aware hyperparameter prediction
+  (max_iterations, temperature, tabu_tenure, cooling_rate,
+  neighbourhood_radius).
+- ml/graph_embed.rs — Road network graph embedding placeholder based
+  on GAIN (2107.07791) and RRNCO contextual gating.
+
+New NLP module (src/core/nlp.rs):
+- Regex-based NL query parser converting free text into structured
+  VRP JSON configs. Extracts: packages/stops, vehicles, depot
+  coordinates, deadlines, capacity, speed, objective.
+
+MCP server upgrades (src/bin/rmpca-mcp-server.rs):
+- predict_quality — pre-solve quality prediction
+- tune_hyperparams — instance-aware hyperparameter tuning
+- parse_routing_query — NL → VRP config
+- Upgraded predict_solver — now uses neural selector with fallback
+
+CLI upgrades (src/cli.rs):
+- predict-solver, predict-quality, tune-hyperparams, parse-query
+
+Training pipeline (train_models.py):
+- NumPy-based offline trainer exporting Candle-compatible
+  safetensors: solver_selector, quality_predictor, automl.
+
+Models (models/*.safetensors):
+- Pre-trained small MLPs ready for inference.
+
+Architecture doc:
+- ML_INTEGRATION_ARCHITECTURE.md — full design with research
+  attribution, data flow, training lifecycle, and phase roadmap.
+
+Refs: #ml-integration #neural-vrp #automl #nlp
