@@ -1,0 +1,98 @@
+<<<<<<< SEARCH
+fn segment_to_feature(seg: OvertureSegment) -> Feature {
+    use crate::core::overture::Geometry as OvertureGeometry;
+
+    // Build the GeoJSON geometry value
+    let geometry_json = match &seg.geometry {
+        OvertureGeometry::LineString(coords) => json!({
+            "type": "LineString",
+            "coordinates": coords.iter()
+                .map(|(lon, lat)| vec![*lon, *lat])
+                .collect::<Vec<_>>()
+        }),
+        OvertureGeometry::Point(lon, lat) => json!({
+            "type": "Point",
+            "coordinates": vec![*lon, *lat]
+        }),
+    };
+
+    // Convert JSON to geojson::Geometry
+    let geometry = GeoJsonGeometry::from_json_value(geometry_json)
+        .expect("Failed to convert JSON to geojson::Geometry");
+
+    // Build properties map
+    let mut props = serde_json::Map::new();
+    props.insert("id".to_string(), serde_json::Value::String(seg.id.clone()));
+    if let Some(ref name) = seg.name {
+        props.insert("name".to_string(), serde_json::Value::String(name.clone()));
+    }
+    if let Some(ref class) = seg.class {
+        props.insert("class".to_string(), serde_json::Value::String(class.clone()));
+    }
+    if let Some(ref subtype) = seg.subtype {
+        props
+            .insert("subtype".to_string(), serde_json::Value::String(subtype.clone()));
+    }
+    if let Some(ref surface) = seg.surface {
+        props
+            .insert("surface".to_string(), serde_json::Value::String(surface.clone()));
+    }
+    if let Some(ref oneway) = seg.oneway {
+        props
+            .insert("oneway".to_string(), serde_json::Value::String(oneway.clone()));
+    }
+    if let Some(ref junction) = seg.junction {
+        props
+            .insert("junction".to_string(), serde_json::Value::String(junction.clone()));
+    }
+    if let Some(ref osm_id) = seg.osm_id {
+        props
+            .insert("osm_id".to_string(), serde_json::Value::String(osm_id.clone()));
+    }
+=======
+fn segment_to_feature(seg: OvertureSegment) -> Feature {
+    use crate::core::overture::Geometry as OvertureGeometry;
+
+    // Build the GeoJSON geometry value
+    let geometry_json = match seg.geometry {
+        OvertureGeometry::LineString(coords) => json!({
+            "type": "LineString",
+            "coordinates": coords.into_iter()
+                .map(|(lon, lat)| vec![lon, lat])
+                .collect::<Vec<_>>()
+        }),
+        OvertureGeometry::Point(lon, lat) => json!({
+            "type": "Point",
+            "coordinates": vec![lon, lat]
+        }),
+    };
+
+    // Convert JSON to geojson::Geometry
+    let geometry = GeoJsonGeometry::from_json_value(geometry_json)
+        .expect("Failed to convert JSON to geojson::Geometry");
+
+    // Build properties map
+    let mut props = serde_json::Map::new();
+    props.insert("id".to_string(), serde_json::Value::String(seg.id));
+    if let Some(name) = seg.name {
+        props.insert("name".to_string(), serde_json::Value::String(name));
+    }
+    if let Some(class) = seg.class {
+        props.insert("class".to_string(), serde_json::Value::String(class));
+    }
+    if let Some(subtype) = seg.subtype {
+        props.insert("subtype".to_string(), serde_json::Value::String(subtype));
+    }
+    if let Some(surface) = seg.surface {
+        props.insert("surface".to_string(), serde_json::Value::String(surface));
+    }
+    if let Some(oneway) = seg.oneway {
+        props.insert("oneway".to_string(), serde_json::Value::String(oneway));
+    }
+    if let Some(junction) = seg.junction {
+        props.insert("junction".to_string(), serde_json::Value::String(junction));
+    }
+    if let Some(osm_id) = seg.osm_id {
+        props.insert("osm_id".to_string(), serde_json::Value::String(osm_id));
+    }
+>>>>>>> REPLACE

@@ -4,48 +4,90 @@
 [![Documentation](https://docs.rs/v2rmp/badge.svg)](https://docs.rs/v2rmp)
 [![License](https://img.shields.io/crates/l/v2rmp.svg)](LICENSE)
 
-A powerful Terminal User Interface (TUI) and Command-Line Interface (CLI) for route optimization using both the Chinese Postman Problem (CPP) and multi-vehicle Vehicle Routing Problem (VRP) algorithms. Extract road networks from Overture Maps or OpenStreetMap, compile them into efficient binary formats, and optimize routes with turn penalties and depot constraints.
+A powerful Terminal User Interface (TUI) and agent engine for route optimization. Solve Chinese Postman Problem (CPP), Vehicle Routing Problem (VRP), and complex CVRP with neural networks. Extract road networks from Overture Maps, OpenStreetMap, PMTiles, or PostGIS databases, compile them into efficient binary formats, and optimize routes with turn penalties, depot constraints, and multi-vehicle support.
 
 ## Features
 
-- 🖥️ **Interactive TUI**: Beautiful terminal interface built with `ratatui`
-- 🖼️ **Graphical UI (egui)**: Full-featured desktop GUI with map visualization, file dialogs, and drag-and-drop controls
-- 📐 **BBox Filtering**: Optimize only a subset of a large map by specifying a bounding box — no need to compile a separate .rmp for each area
-- 🤖 **Agent-First CLI**: Purpose-built `agent` command for JSON-task automation
-- 🗺️ **Data Extraction**: Extract road networks from Overture Maps S3 (Parquet) or OpenStreetMap PBF files
-- 🧹 **GeoJSON Cleaning**: Repair geometries, deduplicate edges, and optimize graph topology
-- 🔧 **Binary Compilation**: Convert GeoJSON to optimized `.rmp` binary format with CRC32 integrity checking
-- 🚗 **Route Optimization (CPP)**: Solve the Chinese Postman Problem with turn penalties and oneway support
-- 🚛 **VRP Engine**: Multi-vehicle routing with multiple solvers:
-  - **Clarke-Wright Savings**: Classic heuristic for capacity and distance
-  - **Sweep Algorithm**: Geometric partitioning
-  - **Local Search**: 2-Opt path improvements
-  - **Simulated Annealing**: Or-Opt metaheuristic
-- 🧠 **AI/ML Engine (Pure Rust)**: Learned models via `candle` for:
-  - **AutoML**: Instance-aware hyperparameter tuning (max iterations, temperature, tabu tenure, cooling rate, neighbourhood radius)
-  - **Solver Selection**: Neural ensemble recommending the best algorithm for your instance
-  - **Route Quality**: Predicting gap-to-optimal and tour length before solving
-  - **Neural-Guided Search**: MLP-scored candidate moves for local search refinement
-  - **NLP Query Parser**: Natural language to structured VRP JSON (Regex + local LLM via Qwen2.5)
-- ⛰️ **Elevation & Terrain**: DEM GeoTIFF queries (point, profile, stats, fuel calculation)
-- 🌐 **Headless Server**: JSON-RPC/STDIO `serve` mode for frontend integrations
-- 🤝 **MCP Server**: Model Context Protocol server with 20+ tools for AI agent integration (AutoML, Solver Prediction, NLP parsing, and full routing stack)
-- 📁 **Resource Discovery**: `list` command to discover maps and routes programmatically
-- ⚡ **Asynchronous Runtime**: Fully non-blocking I/O with `tokio` for high-performance extraction and processing
+### 🗺️ Data Extraction
+- **Overture Maps**: Extract from AWS S3 public bucket (Parquet with WKB geometry)
+- **OpenStreetMap**: Extract from local `.osm.pbf` files (Geofabrik, BBBike, etc.)
+- **PMTiles**: Extract vector tiles from `.pmtiles` archives with layer filtering and zoom level selection
+- **PostGIS**: Direct extraction from PostgreSQL/PostGIS `road_edges` tables
+
+### 🔧 Binary Compilation
+- Convert GeoJSON to optimized `.rmp` binary format
+- CRC32 integrity checking
+- ~90% compression vs GeoJSON
+- Node deduplication at 1-meter precision
+
+### 🚗 Route Optimization
+- **CPP**: Chinese Postman Problem with Hierholzer's algorithm, perfect matching, and turn penalties
+- **VRP**: Multi-vehicle routing with capacity constraints
+  - Greedy algorithm
+  - Clarke-Wright Savings
+  - Sweep algorithm
+  - Two-Opt local search
+  - OR-Tools (if available)
+  - Neural-Guided heuristic
+  - Neural ONNX direct inference
+- **Drone VRP**: Physics-based energy modeling with Dorling et al. (2017) power model
+  - **Neural GNN Solver** 🆕: Reinforcement Learning agent (GCN-based) for energy-aware routing in complex terrain
+  - Supported models: FlyCart30, Wing
+  - Wind speed consideration
+  - No-fly zone support
+  - Integrated with `drone-rl-agent` on Hugging Face
+
+### 🤖 Machine Learning
+- **Solver Selector**: Auto-selects best VRP algorithm based on instance features
+- **Quality Predictor**: Predicts expected route quality before solving
+- **Move Scorer**: Neural network for evaluating route improvement moves
+- **AutoML**: Automated hyperparameter tuning
+- **Drone RL Agent** 🆕: Graph Convolutional Network (GCN) policy for autonomous decision making
+  - **State Space**: 67-dim (64-dim FastRP embeddings + 3-dim meta-state: Wind, Battery, Payload)
+  - **Inference**: Powered by `ort` (ONNX Runtime) v2.0
+  - **Training**: RL-trained on Montreal's Mile End road network
+- **Graph Embeddings**: Generate dense vector representations for road network nodes and edges
+  - **node2vec**: Biased random walks + Skip-gram (Grover & Leskovec, 2016)
+  - **LINE**: 1st + 2nd order proximity preservation (Tang et al., 2015)
+  - **FastRP**: Sparse random projection — fastest method (Chen et al., 2019)
+  - **Spatial**: Handcrafted structural features (degree, centrality, clustering, coordinates)
+  - Available in CLI (`rmpca graph-embed`), TUI (Graph Embeddings view), and Agent JSON
+  - No pre-trained model required — all methods work unsupervised directly from `.rmp` files
+- **NLP Parser**: Natural language query parsing into structured routing requests
+
+### ☁️ Cloud & Storage
+- **R2 Cloud Storage**: Cloudflare R2 object storage integration
+  - List, upload, download, delete objects
+  - Environment variable configuration (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT`)
+- **Cached Maps Browser**: Automatically scans for `.rmp` files in current directory
+
+### 🔗 Integration
+- **MCP Server**: Model Context Protocol server for AI agent integration
+  - 20+ tools: extract, compile, optimize, vrp_solve, elevation, partition, etc.
+  - JSON-RPC/STDIO interface
+- **OsmAnd Deep Links**: Generate `osmand://import?url=` links for mobile GPX import
+- **Google Maps URLs**: Generate clickable direction URLs (auto-sampled to ≤20 waypoints)
+- **Chained Pipeline**: One-shot binary for PMTiles → compile → CPP optimize → GPX output
+
+### 🖥️ User Interfaces
+- **Interactive TUI**: Beautiful terminal interface built with `ratatui`
+- **CLI**: Full command-line interface with JSON output support
+- **Web UI**: Experimental web-based interface (feature-gated)
+
+### ⚡ Performance
+- Concurrent S3 file processing (up to 10 files in parallel)
+- GNN/Attention-based neural solvers
+- Efficient graph algorithms: O(E log V) for matching, O(E) for Eulerian circuit
+- Async runtime for I/O operations
+
+---
 
 ## Installation
 
 ### From crates.io
 
 ```bash
-# TUI + CLI (Standard - no heavy ML dependencies)
-cargo install v2rmp --no-default-features --features cli
-
-# Full TUI + CLI + AI/ML Features
 cargo install v2rmp
-
-# Everything (GUI + ML + extraction)
-cargo install v2rmp --all-features
 ```
 
 ### From source
@@ -53,274 +95,308 @@ cargo install v2rmp --all-features
 ```bash
 git clone https://github.com/spacialglaciercom-lab/v2rmp.git
 cd v2rmp
-
-# Standard build
-cargo build --release --no-default-features --features cli
-
-# Build with AI/ML support
-cargo build --release --features ml
+cargo build --release
 ```
 
-### Feature Flags
+### With all features
 
-| Feature    | Default | Description |
-|------------|---------|-------------|
-| `cli`      | ✅      | TUI + CLI (ratatui, crossterm) |
-| `gui`      |         | Desktop GUI with map visualization (eframe, egui, rfd) |
-| `extract`  | ✅      | Road network extraction from Overture/OSM |
-| `ml`       |         | AI/ML stack: AutoML, Neural-Guided Solvers, LLM-based NLP (candle, tokenizers) |
+```bash
+# Requires libgdal-dev for extract feature
+sudo apt-get install libgdal-dev  # Ubuntu/Debian
+brew install gdal                  # macOS
+cargo build --release --all-features
+```
 
-## Modes of Operation
+---
 
-### 1. Interactive TUI
-Launch the full interface by running `rmpca` without arguments.
+## Quick Start
+
+### Launch the TUI
 
 ```bash
 rmpca
 ```
 
-### 2. Graphical UI (egui)
-Launch the desktop GUI with map visualization, file pickers, and all workflow views. Requires the `gui` feature.
+Use arrow keys to navigate, `Enter` to select, `q` to quit, `Esc` to return home.
+
+### Command-line extraction
 
 ```bash
-cargo run --release --features gui --bin web-ui
+# Extract from Overture Maps (requires extract feature)
+rmpca extract --bbox "45.49,-73.59,45.52,-73.55" --output montreal.geojson
+
+# Extract from OSM PBF file (requires extract feature)
+rmpca extract --source osm --pbf-path data.osm.pbf --bbox "45.49,-73.59,45.52,-73.55" --output montreal.geojson
+
+# Extract from PMTiles
+rmpca-extract --pmtiles-path montreal.pmtiles --bbox "45.49,-73.59,45.52,-73.55" --output montreal.geojson
+
+# Extract from PostGIS (direct)
+rmpca-extract --postgis --bbox "45.49,-73.59,45.52,-73.55" --database-url postgresql://user:pass@host/db
 ```
 
-The GUI includes all the same views as the TUI — Extract, Clean, Compile, Optimize, VRP — plus an interactive map canvas with zoom/pan, native file dialogs, and a **Bounding Box Filter** on the Optimize page to limit optimization to a sub-region of a large .rmp file.
+---
 
-### 3. Command-Line Interface (CLI)
-Use `rmpca <COMMAND>` for scripts, agents, and batch processing. All commands support a `--json` flag for structured output.
+## Usage
 
-```bash
-# Discover resources
-rmpca list maps --json
-rmpca list routes --json
+### TUI Views
 
-# Run a task via Agent (JSON payload)
-rmpca agent --task task.json --json
+#### 1. Extract Road Network
+1. Navigate to **Extract Data** view
+2. Press `b` to set bounding box (format: `min_lat,min_lon,max_lat,max_lon`)
+3. Press `Tab` or `s` to toggle between OSM, Overture, PMTiles, and PostGIS sources
+4. For OSM: Press `p` to set path to local `.osm.pbf` file
+5. For PMTiles: Press `P` to set `.pmtiles` file path
+6. For PostGIS: Press `D` to set database URL
+7. Press `Enter` to start extraction
+8. Output: `extract_YYYYMMDD_HHMMSS.geojson`
 
-# Multi-vehicle VRP
-rmpca vrp -i map.rmp --vehicles 5 --algo savings --coordinates stops.csv --depot "40.71,-74.01" --output-dir routes/
+#### 2. PMTiles Extract (Dedicated View)
+1. Navigate to **PMTiles Extract** view
+2. Press `P` to set `.pmtiles` file path
+3. Press `b` to set bounding box
+4. Press `o` to set output path
+5. Press `L` to set layer name (optional)
+6. Press `z` to set zoom level (optional)
+7. Press `Enter` to extract
 
-# Single-vehicle CPP Optimization (Outputs GPX)
-rmpca optimize -i map.rmp -o route.gpx --depot "40.71,-74.01"
-```
+#### 3. PostGIS CPP (Dedicated View)
+1. Navigate to **PostGIS CPP** view
+2. Press `b` to set bounding box
+3. Press `D` to set database URL
+4. Press `t` to set table name (default: `road_edges`)
+5. Configure turn penalties: `l`, `R`, `u`
+6. Press `Enter` to solve directly from PostGIS
+
+#### 4. Compile to Binary
+1. Navigate to **Compile Map** view
+2. Press `i` to set input GeoJSON file path
+3. Press `o` to set output path (optional, auto-derived from input)
+4. Press `Enter` to compile
+5. Output: `.rmp` binary file
+
+#### 5. Browse Cached Maps
+1. Navigate to **Browse Cached Maps** view
+2. View all `.rmp` files in current directory
+3. Use `↑↓` to select a map
+4. Press `Enter` to use selected map for optimization
+
+#### 6. Optimize Route (CPP)
+1. Navigate to **Optimize Route** view
+2. Press `c` to set compiled map file (`.rmp`) or select from Browse view
+3. Configure turn penalties:
+   - `l` - Left turn penalty (default: 1.0)
+   - `R` - Right turn penalty (default: 0.0)
+   - `u` - U-turn penalty (default: 5.0)
+4. Press `d` to set depot coordinates (optional)
+5. Press `L` to set OsmAnd base URL for GPX import links
+6. Press `Enter` to optimize
+7. Output: `route_YYYYMMDD_HHMMSS.json` + optional GPX
+8. **Output Links**: Google Maps URLs and OsmAnd deep links are generated automatically
+
+#### 7. VRP Solver (Heuristic)
+1. Navigate to **VRP Solver** view
+2. Press `i` to set road network `.rmp` (optional, for map preview)
+3. Press `w` to set waypoints JSON (e.g. `[[lat,lon], ...]`)
+4. Press `v` to set number of vehicles
+5. Press `a` to toggle algorithms (Greedy, Savings, Local Search, OR-Tools, Neural-Guided)
+6. Press `k` to set vehicle capacity
+7. Press `L` to set OsmAnd base URL for GPX import links
+8. Press `Enter` to solve
+
+#### 8. Neural ONNX Solver
+1. Navigate to **Neural ONNX Solver** view
+2. Press `m` to select an ONNX model (defaults to `cvrp50_model.onnx`)
+3. Press `w` to select waypoints JSON file
+4. Press `v` to set number of vehicles
+5. Press `k` to set vehicle capacity
+6. Press `o` to set output directory
+7. Press `Enter` to run high-performance GNN-based optimization
+
+#### 9. Graph Embeddings 🆕
+Generate dense vector representations for road network nodes and edges — useful for downstream ML tasks, similarity search, and graph analysis.
+
+1. Navigate to **Graph Embeddings** view
+2. Press `I` to browse and select an input `.rmp` file
+3. Press `M` to cycle through methods: `line` → `fastrp` → `spatial` → `node2vec`
+4. Press `D` to set embedding dimensions (default: 64)
+5. Press `E` to toggle edge embeddings on/off (derived via Hadamard product)
+6. Press `O` to set output `.json` file path (optional — auto-saves to `*_embeddings.json`)
+7. Press `Enter` to generate embeddings
+
+**Method comparison (14K node road network):**
+
+| Method | Speed | Description |
+|--------|-------|-------------|
+| `fastrp` | <1s | Sparse random projection, no optimization needed |
+| `spatial` | ~2s | Handcrafted: degree, betweenness centrality, eigenvector centrality, clustering coefficient, coordinates |
+| `line` | ~3s | SGD over edges preserving 1st + 2nd order graph proximity |
+| `node2vec` | ~25s | Biased random walks + Skip-gram, captures community structure and structural roles |
+
+#### 9. Drone VRP
+1. Navigate to **Drone VRP** view
+2. Press `m` to select drone model (FlyCart30 or Wing)
+3. Press `d` to set depot coordinates
+4. Press `w` to set customer waypoints JSON
+5. Press `D` to set demands JSON
+6. Press `s` to set wind speed (m/s)
+7. Press `Enter` to solve with energy calculation
+
+#### 10. Zone Partition
+1. Navigate to **Partition** view
+2. Press `e` to set edge list JSON or `p` for points JSON
+3. Press `k` to set number of zones
+4. Press `b` to set balance metric (distance, time, count)
+5. Press `Enter` to partition using spectral clustering
+
+---
+
+## Binaries
+
+| Binary | Description | Features Required |
+|--------|-------------|-------------------|
+| `rmpca` | Main TUI application | default |
+| `rmpca-extract` | CLI data extraction | `extract` |
+| `rmpca-drone` | Drone VRP solver CLI | default |
+| `rmpca-chained` | One-shot pipeline: PMTiles → compile → CPP → GPX | default |
+| `rmpca-mcp` | Lightweight MCP server (JSON-RPC/STDIO) | default |
+| `rmpca-mcp-server-legacy` | Full MCP server with 20+ tools | default |
+| `zilliz-mcp-server` | Vector database MCP integration | default |
+| `web-ui` | Experimental web interface | `gui` |
+| `generate-training-data` | Generate ML training data | `extract` |
+| `evaluate-selector` | Evaluate VRP solver selector | `extract` |
+
+---
 
 ## CLI Commands
 
-| Command | Description |
-|---------|-------------|
-| `extract` | Fetch data from Overture Maps or OSM |
-| `clean` | Repair and simplify GeoJSON networks |
-| `compile` | Convert GeoJSON to efficient `.rmp` binary |
-| `optimize` | Single-vehicle CPP route optimization |
-| `vrp` | Multi-vehicle Routing Problem solver |
-| `agent` | Execute complex tasks from JSON payloads |
-| `list` | Enumerate maps, routes, and solvers |
-| `pipeline` | Run extract → clean → compile → optimize |
-| `elevation` | DEM GeoTIFF queries (point, profile, stats, fuel) |
-| `embed` | Generate text embeddings via fastembed |
-| `predict` | ML predictions: `solver`, `quality`, `hyperparams` |
-| `nlp` | Parse natural language queries to VRP JSON |
-| `serve` | Headless JSON-RPC/STDIO server |
+```bash
+# Main application (TUI)
+rmpca
 
-### MCP Server
+# Extract road network (requires extract feature)
+rmpca extract --source overture --bbox "min_lat,min_lon,max_lat,max_lon" --output output.geojson
+rmpca extract --source osm --pbf-path data.osm.pbf --bbox "..." --output output.geojson
 
-rmpca ships an MCP (Model Context Protocol) server that exposes the route optimization pipeline as tools for AI agents. Compatible with Claude Desktop, Claude Code, Cursor, Continue, and any MCP-compliant client.
+# Compile GeoJSON to binary
+rmpca compile --input input.geojson --output map.rmp
 
-#### Quick Start
+# Clean GeoJSON road network
+rmpca clean --input input.geojson --output cleaned.geojson
 
-1. **Add to your MCP client config.** The `cargo run` command handles building automatically — no separate build step needed.
+# Optimize route (CPP)
+rmpca optimize --cache map.rmp --route output.json --left-penalty 1.0 --uturn-penalty 5.0
 
-   **Claude Desktop** — edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+# Solve VRP
+rmpca vrp --waypoints waypoints.json --vehicles 5 --capacity 1000
 
-   ```json
-   {
-     "mcpServers": {
-       "rmpca": {
-         "command": "cargo",
-         "args": ["run", "--bin", "rmpca-mcp-server", "--release"],
-         "cwd": "/path/to/v2rmp"
-       }
-     }
-   }
-   ```
+# Full pipeline: extract -> clean -> compile -> optimize
+rmpca pipeline --bbox "..." --output-prefix montreal
 
-   **Claude Code** — run in your project directory:
+# List available resources
+rmpca list
 
-   ```bash
-   claude mcp add rmpca -- cargo run --bin rmpca-mcp-server --release
-   ```
+# Agent mode: execute JSON task plan
+rmpca agent --plan tasks.json
 
-   **Cursor / Continue / other clients** — add the same JSON to your client's MCP server config under `mcpServers`.
+# Serve mode: headless JSON-RPC/STDIO server
+rmpca serve
 
-2. **Restart your MCP client** (or reload the server list).
+# Generate text embeddings (requires ml feature)
+rmpca embed --text "route optimization" --text "vehicle routing"
 
-3. **Ask your AI agent to use the tools.** The agent will discover all tools automatically.
+# Elevation queries from DEM GeoTIFF (requires extract feature)
+rmpca elevation point --dem elevation.tif --lon -73.5 --lat 45.5
+rmpca elevation profile --dem elevation.tif --input route.json
+rmpca elevation fuel --dem elevation.tif --input route.json --base-consumption 0.1
 
-#### Available Tools
+# Predict best VRP solver (requires ml feature)
+rmpca predict-solver --waypoints waypoints.json --vehicles 5
 
-| Tool | Required Params | Description |
-|------|----------------|-------------|
-| `extract_overture` | `bbox` | Extract road network from Overture Maps S3 by bounding box |
-| `extract_osm` | `bbox` | Extract road network from OSM (local PBF or Overpass API) |
-| `compile` | `input`, `output` | Convert GeoJSON to binary `.rmp` format with optional cleaning |
-| `optimize` | `input` | Run CPP (edge coverage) or VRP (multi-vehicle) route optimization |
-| `clean` | `input`, `output` | Full 11-stage GeoJSON cleaning pipeline with all CleanOptions |
-| `vrp_solve` | `stops` | Solve VRP from explicit lat/lon stop coordinates (no .rmp needed) |
-| `elevation_query` | `dem_path`, `points` | Query elevation at lat/lon points from a local DEM GeoTIFF |
-| `elevation_profile` | `dem_path`, `route` | Sample elevation along a route at fixed intervals |
-| `elevation_stats` | `dem_path`, `bbox` | Elevation statistics (min, max, avg, coverage) in a bbox |
-| `dem_info` | `dem_path` | Return DEM metadata (width, height, bbox, nodata, pixel size) |
-| `fuel_estimate` | `samples` | Calculate fuel consumption from an elevation profile |
-| `inspect_rmp` | `input` | Parse .rmp binary: node count, edge count, bbox |
-| `pipeline` | `bbox` | End-to-end: extract → clean → compile → optimize |
-| `get_valhalla_matrix` | `locations` | Fetch real-road distance/time matrix from Valhalla/OSRM |
-| `list_solvers` | — | Return available VRP solver IDs and labels |
-| `predict_solver` | `stops` | **ML**: Recommend best solver algorithm for an instance |
-| `predict_quality` | `stops` | **ML**: Predict gap-to-optimal and tour length before solving |
-| `tune_hyperparams` | `stops` | **AutoML**: Predict instance-aware solver hyperparameters |
-| `score_route` | `stops`, `routes` | Evaluate a solved route across 4 quality dimensions |
-| `parse_routing_query`| `query` | **NLP/LLM**: Convert natural language to VRP JSON config |
-| `haversine_distance` | `from`, `to` | Calculate great-circle distance between two points |
+# Predict route quality (requires ml feature)
+rmpca predict-quality --waypoints waypoints.json --vehicles 5
 
-#### Example Conversation
+# Parse natural language query
+rmpca parse-query --query "optimize route from Montreal to Toronto with 3 stops"
 
-```
-User:  Extract Overture data for Monaco, compile it, and optimize a sweeper route
-
-Agent: [calls extract_overture with bbox {min_lon:7.409, min_lat:43.723, max_lon:7.439, max_lat:43.751}]
-       → 2340 nodes, 3102 edges, 45.6 km → extract-output.geojson
-       [calls compile with input="extract-output.geojson", output="monaco.rmp"]
-       → 1500 nodes, 2100 edges, 12 KB
-       [calls optimize with input="monaco.rmp", mode="cpp"]
-       → 52.3 km total, 92% efficiency, 12ms
+# Generate graph embeddings (requires ml feature)
+rmpca graph-embed -i map.rmp -m line -d 64 -o embeddings.json
+rmpca graph-embed -i map.rmp -m fastrp -d 128 --include-edges
+rmpca graph-embed -i map.rmp -m node2-vec -d 32 --walk-length 20 --num-walks 5
+rmpca graph-embed -i map.rmp -m spatial -d 64 -o spatial_features.json
 ```
 
-### AI Agent Task Format
-The `agent` command consumes a JSON payload, allowing agents to trigger complex workflows without manual flag management.
+---
+
+## MCP Server
+
+The Model Context Protocol (MCP) server provides AI agent integration with 20+ tools.
+
+### Starting the server
+
+```bash
+# Lightweight server
+rmpca-mcp
+
+# Full server with all tools
+rmpca-mcp-server-legacy
+```
+
+### MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `extract_overture` | Extract from Overture Maps S3 |
+| `extract_osm` | Extract from OSM PBF |
+| `extract_pmtiles` | Extract from PMTiles archive |
+| `extract_postgis` | Extract from PostGIS database |
+| `compile` | Compile GeoJSON to .rmp |
+| `optimize` | Solve CPP |
+| `vrp_solve` | Solve VRP |
+| `clean` | Clean GeoJSON |
+| `pipeline` | Full extract→clean→compile→optimize pipeline |
+| `elevation_query` | Query elevation at a point |
+| `elevation_profile` | Get elevation profile along a route |
+| `elevation_stats` | Get elevation statistics for a bbox |
+| `dem_info` | Show DEM file metadata |
+| `fuel_estimate` | Calculate fuel consumption |
+| `predict_solver` | Predict best VRP solver |
+| `score_route` | Score a route |
+| `route_embedding` | Generate route embedding |
+| `tune_hyperparams` | Tune solver hyperparameters |
+| `list_r2_bucket` | List R2 bucket objects |
+| `upload_to_r2` | Upload file to R2 |
+| `download_from_r2` | Download file from R2 |
+| `postgis_cpp` | Solve CPP directly from PostGIS |
+| `partition` | Partition graph into zones |
+| `partition_from_points` | Partition from point list |
+| `haversine_distance` | Calculate haversine distance |
+| `get_valhalla_matrix` | Get Valhalla distance matrix |
+| `inspect_rmp` | Inspect .rmp file |
+| `list_solvers` | List available VRP solvers |
+| `parse_query` | Parse natural language query |
+| `graph_embed` | Generate node/edge embeddings for a road network |
+| `submit_feedback` | Submit feedback for ML models |
+| `generate_osmand_link` | Generate OsmAnd deep link |
+
+### MCP Client Configuration
 
 ```json
 {
-  "type": "optimize",
-  "input": "manhattan.rmp",
-  "output": "delivery_route.gpx",
-  "num_vehicles": 1,
-  "solver_id": "clarke_wright",
-  "oneway": "respect",
-  "left_penalty": 1.5,
-  "depot": [40.7128, -74.0060]
+  "mcpServers": {
+    "rmpca": {
+      "command": "cargo",
+      "args": ["run", "--bin", "rmpca-mcp-server-legacy", "--release"]
+    }
+  }
 }
 ```
 
-## Usage (TUI)
-
-### 1. Extract Road Network
-- Navigate to **Extract Data** view
-- Set bounding box (format: `min_lon,min_lat,max_lon,max_lat`)
-- Toggle between OSM and Overture sources
-- Output: `extract_YYYYMMDD_HHMMSS.geojson`
-
-### 2. Compile to Binary
-- Navigate to **Compile Map** view
-- Set input GeoJSON file path
-- Output: `.rmp` binary file
-
-### 3. Browse & Optimize
-- Use **Browse Cached Maps** to select a compiled map
-- Configure turn penalties and depot in the **Optimize Route** view
-- Run optimization to generate a GPX/GeoJSON route
-
-#### Bounding Box Filter
-When working with large maps (e.g., a full city), you can restrict optimization to a smaller area instead of running CPP on the entire network. In the **Optimize Route** view (TUI or GUI), set a bounding box in `min_lon,min_lat,max_lon,max_lat` format. Only nodes and edges within that box are included in the optimization. This dramatically reduces solve time for large datasets.
-
-The core function is also available programmatically:
-
-```rust
-use v2rmp::core::optimize::filter_bbox;
-use v2rmp::core::geo_types::BBox;
-
-let bbox = Some(BBox {
-    min_lon: -73.6,
-    min_lat: 45.5,
-    max_lon: -73.5,
-    max_lat: 45.6,
-});
-let (sub_nodes, sub_edges) = filter_bbox(
-    &nodes,
-    &edges,
-    bbox
-);
-
-// Pass None to use the full map
-```
-
-## Elevation & Fuel
-
-Query DEM GeoTIFF files from the CLI or MCP server. Supported via GDAL — works with any GDAL-compatible raster format.
-
-```bash
-# DEM metadata
-rmpca elevation --dem dem.tif info
-
-# Single point query
-rmpca elevation --dem dem.tif point --lon -73.58 --lat 45.50
-
-# Batch point query from JSON file (or stdin)
-echo '[[-73.58,45.50],[-73.57,45.51]]' | rmpca elevation --dem dem.tif points
-
-# Route elevation profile
-echo '[[-73.58,45.50],[-73.57,45.51],[-73.56,45.52]]' | rmpca elevation --dem dem.tif profile -s 100
-
-# Bbox elevation statistics
-rmpca elevation --dem dem.tif stats --bbox "-73.60,45.48,-73.55,45.52" --step 10
-
-# Fuel consumption from a route (base consumption L/km)
-echo '[[-73.58,45.50],[-73.57,45.51]]' | rmpca elevation --dem dem.tif fuel -s 100 --base-consumption 0.08
-```
-
-All subcommands support `--json` for machine-readable output. See the MCP server section above for the corresponding `elevation_query`, `elevation_profile`, `elevation_stats`, `dem_info`, and `fuel_estimate` tools.
-
-## VRP Coordinate Input
-
-The VRP solver accepts a **CSV file** of coordinates as its primary input. This replaces the previous JSON waypoints format.
-
-### CSV Format
-
-The file must have a header row. Required columns are `lat` and `lon`; `label`, `demand`, and `type` are optional.
-
-| Column   | Required | Description |
-|----------|----------|-------------|
-| `lat`    | ✅        | Latitude (WGS-84) |
-| `lon`    | ✅        | Longitude (WGS-84) |
-| `label`  |          | Human-readable name (auto-generated if omitted) |
-| `demand` |          | Per-stop demand (default: 0 for depots, 1 for stops) |
-| `type`   |          | `depot` or `stop` (default: `stop`; first row becomes depot if no `type` column) |
-
-### Example
-
-```csv
-lat,lon,label,demand,type
-45.5017,-73.5673,Montreal Depot,0,depot
-45.5032,-73.5701,Customer A,5,stop
-45.5100,-73.5800,Customer B,3,stop
-45.4980,-73.5750,Customer C,2,stop
-45.5050,-73.5900,Customer D,4,stop
-```
-
-Minimal (just coordinates — first row is automatically treated as the depot):
-
-```csv
-lat,lon
-45.5017,-73.5673
-45.5032,-73.5701
-45.5100,-73.5800
-45.4980,-73.5750
-```
+---
 
 ## Binary Format (.rmp)
 
-The `.rmp` format is a compact binary representation optimized for graph traversals:
+The `.rmp` format is a compact binary representation:
 
 ```
 [4 bytes]  Magic "RMP1"
@@ -331,63 +407,335 @@ The `.rmp` format is a compact binary representation optimized for graph travers
 [4 bytes]  CRC32 checksum
 ```
 
+---
+
+## Keyboard Shortcuts
+
+### Global
+| Key | Action |
+|-----|--------|
+| `q` | Quit application |
+| `Esc` | Return to home |
+| `h` / `F1` | Toggle help |
+| `↑↓` | Navigate menus |
+| `Enter` | Select / confirm |
+| `Tab` | Cycle through fields |
+
+### View-specific
+| View | Shortcut | Action |
+|------|----------|--------|
+| **Extract** | `b` | Set bounding box |
+| **Extract** | `Tab`/`s` | Toggle source (Overture/OSM/PMTiles/PostGIS) |
+| **Extract** | `p` | Set PBF path (OSM only) |
+| **Extract** | `P` | Set PMTiles path |
+| **Extract** | `D` | Set database URL (PostGIS) |
+| **Compile** | `i` | Set input file |
+| **Compile** | `o` | Set output file |
+| **Browse** | `↑↓` | Navigate |
+| **Browse** | `Enter` | Select |
+| **Optimize** | `c` | Set cache file |
+| **Optimize** | `r` | Set route file |
+| **Optimize** | `l`/`R`/`u` | Set turn penalties |
+| **Optimize** | `d` | Set depot |
+| **Optimize** | `L` | Set OsmAnd base URL |
+| **VRP** | `i` | Set road network |
+| **VRP** | `w` | Set waypoints |
+| **VRP** | `v` | Set vehicle count |
+| **VRP** | `a` | Toggle algorithm |
+| **VRP** | `k` | Set capacity |
+| **VRP** | `L` | Set OsmAnd base URL |
+| **Neural** | `m` | Set model path |
+| **Neural** | `w` | Set waypoints |
+| **Neural** | `v` | Set vehicle count |
+| **Neural** | `k` | Set capacity |
+| **Neural** | `o` | Set output directory |
+| **Drone** | `m` | Set drone model |
+| **Drone** | `d` | Set depot |
+| **Drone** | `w` | Set customers |
+| **Drone** | `D` | Set demands |
+| **Drone** | `s` | Set wind speed |
+| **Graph Embed** | `I` | Set input .rmp file (file browser) |
+| **Graph Embed** | `O` | Set output .json file |
+| **Graph Embed** | `M` | Cycle embedding method |
+| **Graph Embed** | `D` | Set dimensions |
+| **Graph Embed** | `E` | Toggle edge embeddings |
+| **Partition** | `e` | Set edge list |
+| **Partition** | `p` | Set points |
+| **Partition** | `k` | Set zone count |
+| **Partition** | `b` | Set balance metric |
+
+---
+
 ## Library Usage
 
 ```rust
-use v2rmp::core::{extract, compile, optimize, vrp};
+use v2rmp::core::{extract, compile, optimize, pmtiles_extract, postgis_cpp};
+use v2rmp::core::drone::{DroneModel, DroneSolver, DroneVrpInstance};
+use v2rmp::core::neural_routing::{NeuralRouteRequest, NeuralInferenceEngine};
+use v2rmp::core::partition::{partition_edges, partition_from_points, PartitionResponse};
+use v2rmp::core::r2::R2Storage;
+use v2rmp::core::vrp::utils::{generate_osmand_import_url, build_haversine_matrix};
 
-// VRP Solver Example
-let vrp_input = vrp::VRPSolverInput {
-    stops: my_stops,
-    vehicles: 3,
-    ..Default::default()
+// Extract from Overture Maps
+let extract_req = extract::ExtractRequest {
+    source: extract::ExtractSource::Overture,
+    bbox: extract::BBoxRequest {
+        min_lon: -73.59,
+        min_lat: 45.49,
+        max_lon: -73.55,
+        max_lat: 45.52,
+    },
+    road_classes: extract::RoadClass::all_vehicle(),
+    output_path: "output.geojson".to_string(),
+    pbf_path: None,
 };
-let solver = vrp::get_solver("clarke-wright")?;
-let output = solver.solve(&vrp_input).await?;
+let result = extract::run_extract(&extract_req)?;
+
+// Extract from OSM PBF
+let extract_req = extract::ExtractRequest {
+    source: extract::ExtractSource::Osm,
+    bbox: extract::BBoxRequest {
+        min_lon: -73.59,
+        min_lat: 45.49,
+        max_lon: -73.55,
+        max_lat: 45.52,
+    },
+    road_classes: extract::RoadClass::all_vehicle(),
+    output_path: "output.geojson".to_string(),
+    pbf_path: Some("data.osm.pbf".to_string()),
+};
+let result = extract::run_extract(&extract_req)?;
+
+// Extract from PMTiles
+let pmtiles_req = pmtiles_extract::PmtilesExtractRequest {
+    pmtiles_path: "montreal.pmtiles".to_string(),
+    min_lon: -73.59,
+    min_lat: 45.49,
+    max_lon: -73.55,
+    max_lat: 45.52,
+    output_path: "output.geojson".to_string(),
+    zoom: Some(14),
+    layer_name: Some("transportation".to_string()),
+};
+let result = pmtiles_extract::run_pmtiles_extract(&pmtiles_req).await?;
+
+// Extract from PostGIS and solve CPP directly
+let postgis_req = postgis_cpp::PostGisCppRequest {
+    bbox: [-73.59, 45.49, -73.55, 45.52],
+    road_classes: vec!["residential".to_string(), "tertiary".to_string()],
+    oneway_mode: postgis_cpp::OneWayMode::Respect,
+    turn_penalties: postgis_cpp::TurnPenalties {
+        left: 1.0,
+        right: 0.0,
+        uturn: 5.0,
+    },
+    depot: Some((45.505, -73.565)),
+    database_url: Some("postgresql://user:pass@host/db".to_string()),
+    table_name: Some("road_edges".to_string()),
+    output_path: Some("route.json".to_string()),
+};
+let result = postgis_cpp::run_postgis_cpp(&postgis_req)?;
+
+// Compile to binary
+let compile_req = compile::CompileRequest {
+    input_geojson: "output.geojson".to_string(),
+    output_rmp: "map.rmp".to_string(),
+    prune_disconnected: false,
+    compress: false,
+    road_classes: vec![],
+    clean_options: None,
+};
+let result = compile::run_compile(&compile_req)?;
+
+// Optimize route
+let optimize_req = optimize::OptimizeRequest {
+    cache_file: "map.rmp".to_string(),
+    route_file: Some("route.json".to_string()),
+    turn_penalties: optimize::TurnPenalties {
+        left: 1.0,
+        right: 0.0,
+        uturn: 5.0,
+    },
+    depot: None,
+    oneway_mode: optimize::OnewayMode::Respect,
+};
+let result = optimize::run_optimize(&optimize_req)?;
+
+// Generate OsmAnd deep link
+let gpx_url = "https://example.com/route.gpx";
+let osmand_link = generate_osmand_import_url(gpx_url);
+// Returns: osmand://import?url=https%3A%2F%2Fexample.com%2Froute.gpx
+
+// Drone VRP
+let drone_instance = DroneVrpInstance {
+    drone_model: DroneModel::FlyCart30,
+    depot: [45.505, -73.565],
+    customers: vec![[45.506, -73.566], [45.507, -73.567]],
+    demands_kg: vec![1.0, 2.0],
+    wind_speed_ms: 2.5,
+    no_fly_zones: vec![],
+};
+let result = DroneSolver::solve(&drone_instance)?;
+
+// Neural ONNX routing
+let mut engine = NeuralInferenceEngine::new("cvrp50_model.onnx")?;
+let req = NeuralRouteRequest {
+    locations: vec![[45.505, -73.565, 0.0], [45.506, -73.566, 0.0]],
+    demands: vec![0.0, 1.0],
+    capacity: 10.0,
+    model_path: "cvrp50_model.onnx".to_string(),
+};
+let result = engine.solve(&req)?;
+
+// Graph partitioning
+let edges = vec![];
+let response: PartitionResponse = partition_edges(&edges, 5, 3, "time")?;
+
+// Graph embeddings — generate node/edge vectors from .rmp
+#[cfg(feature = "ml")]
+{
+    use v2rmp::core::ml::node_embed::{EmbedConfig, EmbedMethod, embed_graph};
+    use v2rmp::core::optimize::read_rmp_file;
+
+    let data = std::fs::read("map.rmp")?;
+    let (nodes, edges) = read_rmp_file(&data)?;
+
+    let config = EmbedConfig {
+        method: EmbedMethod::Line,
+        dimensions: 64,
+        include_edges: true,
+        ..Default::default()
+    };
+    let result = embed_graph(&nodes, &edges, &config)?;
+    // result.nodes: Vec<NodeEmbedding> — each node has a 64-dim vector
+    // result.edges: Option<Vec<EdgeEmbedding>> — hadamard product of node pairs
+}
+
+// R2 Cloud Storage
+let r2 = R2Storage::from_env("my-bucket")?;
+let objects = r2.list_objects(Some("prefix/")).await?;
+r2.upload_object("path/to/file.txt", vec![1, 2, 3]).await?;
+let data = r2.download_object("path/to/file.txt").await?;
 ```
 
-## Models on Hugging Face 🤗
+---
 
-Trained safetensors models are published to the Hugging Face Hub for download and reuse:
+## Algorithms
 
-**[aerialblancaservices/v2rmp-routing-ml](https://huggingface.co/aerialblancaservices/v2rmp-routing-ml)**
+### Chinese Postman Problem (CPP)
+1. Build graph from road network
+2. Find odd-degree vertices
+3. Minimum weight perfect matching (greedy nearest-neighbor or Blossom V)
+4. Add duplicate edges to make all vertices even-degree
+5. Find Eulerian circuit (Hierholzer's algorithm)
+6. Calculate efficiency metrics and turn statistics
 
-| Model | Architecture | Purpose |
-|-------|-------------|---------|
-| `automl_v2` | 28 → 64 → 5 MLP | Instance-aware solver hyperparameters |
-| `solver_selector_v2` | 28 → 128 → 64 → 6 MLP | Best algorithm classification |
-| `quality_predictor_v2` | 28 → 64 → 32 → 2 MLP | Gap-to-optimal & tour length prediction |
-| `move_scorer_v2` | 16 → 32 → 16 → 1 MLP | Neural-guided 2-Opt / Or-Opt move scoring |
-| `graph_embed` | 2-layer GraphSAGE | Road network edge embeddings (64-dim) |
+### VRP Solvers
+| Solver | Description | Complexity |
+|--------|-------------|------------|
+| Greedy | Nearest neighbor insertion | O(n²) |
+| Clarke-Wright | Savings algorithm | O(n² log n) |
+| Sweep | Angular clustering | O(n log n) |
+| Two-Opt | Local search improvement | O(n²) per iteration |
+| OR-Tools | Google OR-Tools wrapper | Varies |
+| Neural-Guided | ML-guided heuristic | O(n²) |
+| Neural ONNX | Direct neural inference | O(1) forward pass |
+| Neural GNN | RL Agent + 2-Opt Hybrid | O(n²) |
 
-Built with [Candle](https://github.com/huggingface/candle) — pure Rust, no Python dependencies required.
+### Turn Classification
+- **Straight**: ±45° bearing change
+- **Left/Right**: 45-135° bearing change
+- **U-turn**: >135° bearing change
+
+### Drone Energy Model
+Uses Dorling et al. (2017) physics-based model:
+- Power = Pₚ + (Pₗ - Pₚ) × (payload / max_payload)
+- Energy (Wh) = (Power × Distance / Speed) / 3600
+- Wind impact: ground_speed = (cruise_speed - wind_speed).max(1.0)
+
+---
 
 ## Data Sources
 
 ### Overture Maps
-- **Status**: ✅ Production Ready
 - **Source**: AWS S3 public bucket (`overturemaps-us-west-2`)
-- **Format**: Parquet/WKB via `reqwest` and `parquet` crates
+- **Format**: Parquet with WKB geometry
+- **Release**: 2026-04-15.0
+- **Authentication**: None required
+- **Status**: ✅ Fully functional
 
 ### OpenStreetMap
-- **Status**: ✅ Production Ready
+- **Format**: PBF (Protocol Buffer Format)
 - **Source**: Local `.osm.pbf` files
-- **Parser**: `osmpbf` crate
+- **Download**: Geofabrik, BBBike, OSM extracts
+- **Status**: ✅ Fully functional
+
+### PMTiles
+- **Format**: `.pmtiles` vector tile archives
+- **Source**: Local files
+- **Layers**: Supports `transportation` and custom layers
+- **Zoom**: Automatic or manual selection
+- **Status**: ✅ Fully functional
+
+### PostGIS
+- **Database**: PostgreSQL with PostGIS extension
+- **Table**: `road_edges` (configurable)
+- **Columns**: Requires `id`, `source`, `target`, `cost`, `oneway`, `geometry`
+- **Status**: ✅ Fully functional
+
+---
 
 ## Performance
-- **Snapping**: 1-meter precision node deduplication
-- **Compression**: ~90% reduction vs GeoJSON
-- **Speed**: Optimization on 10,000+ edges in <500ms
 
-## Roadmap
-- [x] **v0.3.0**: VRP Engine Integration (Clarke-Wright, Sweep, 2-Opt)
-- [x] **v0.3.5**: Agent & List commands for machine-to-machine workflows
-- [x] **v0.4.0**: Fully Async pipeline and OSM PBF support
-- [x] **v0.4.1**: Multi-vehicle VRP CLI command operational with CSV coordinates input
-- [x] **v0.4.2**: Elevation engine (DEM GeoTIFF), Embedding engine (fastembed), Headless serve mode
-- [x] **v0.4.3**: BBox deduplication, TUI version auto-sync, FileBrowser ESC fix, CLI guard
-- [x] **v0.4.4**: MCP server with 20+ tools (AutoML, Solver Prediction, NLP parsing) and feature-gated AI/ML stack
-- [ ] **v0.5.0**: Time Window support (VRPTW) and 3D terrain-aware routing
+- **Concurrent S3 Processing**: Up to 10 files in parallel
+- **Node Deduplication**: 1-meter precision snapping
+- **Binary Format**: ~90% compression vs GeoJSON
+- **Graph Algorithms**: O(E log V) for matching, O(E) for Eulerian circuit
+- **Neural Inference**: <100ms for CVRP-50 on modern CPU
+
+---
+
+## Requirements
+
+- **Rust**: 1.70+
+- **Internet connection**: Required for Overture Maps extraction
+- **Local OSM PBF file**: Required for OpenStreetMap extraction
+
+### Optional Dependencies
+
+| Feature | Dependency | Install Command |
+|---------|------------|-----------------|
+| `extract` | `libgdal-dev` | `sudo apt-get install libgdal-dev` (Ubuntu/Debian) |
+| `extract` | `libgdal-dev` | `brew install gdal` (macOS) |
+| `extract` | `gdal` | Ensure `gdal` is in `PATH` (Windows via Conda/OSGeo4W) |
+| `gui` | `libxcb`, `libx11` | `sudo apt-get install libxcb-render0-dev libx11-dev` |
+
+---
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `R2_ACCESS_KEY_ID` | Cloudflare R2 access key | - |
+| `R2_SECRET_ACCESS_KEY` | Cloudflare R2 secret key | - |
+| `R2_ENDPOINT` | Cloudflare R2 endpoint URL | - |
+| `DATABASE_URL` | PostgreSQL connection URL | - |
+
+---
+
+## Contributing
+
+Contributions welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new functionality
+4. Submit a pull request
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+
+---
 
 ## License
 
@@ -396,3 +744,39 @@ Licensed under either of:
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
 
 at your option.
+
+---
+
+## Acknowledgments
+
+- [Overture Maps Foundation](https://overturemaps.org/) for open road network data
+- [OpenStreetMap](https://www.openstreetmap.org/) contributors for global map data
+- [ratatui](https://github.com/ratatui-org/ratatui) for the excellent TUI framework
+- [Model Context Protocol](https://modelcontextprotocol.io/) for AI agent integration
+- [Cloudflare R2](https://www.cloudflare.com/products/r2/) for cloud storage
+- Chinese Postman Problem algorithm based on classical graph theory
+- Drone energy model based on Dorling et al. (2017)
+- Graph embeddings: node2vec (Grover & Leskovec, 2016), LINE (Tang et al., 2015), FastRP (Chen et al., 2019)
+
+---
+
+## Roadmap
+
+- [x] **v0.1.0**: Overture extraction, OSM PBF extraction, cached maps browser, basic optimization, TUI
+- [x] **v0.2.0**: Async/threaded operations, comprehensive tests, performance optimizations
+- [x] **v0.3.0**: Multi-depot support, VRP solvers, neural routing
+- [x] **v0.4.0**: Time windows, capacity constraints, PMTiles support
+- [x] **v0.5.0**: MCP server, PostGIS integration, R2 cloud storage, Drone VRP, OsmAnd/Google Maps links
+- [x] **v0.5.2**: Graph embeddings (node2vec, LINE, FastRP, Spatial) — CLI + TUI + Agent
+- [x] **v0.5.3**: GNN RL Drone Agent, `ort` v2.0 integration, HF model card
+- [ ] **v0.6.0**: Advanced ML features, improved TUI, better documentation
+- [ ] **v1.0.0**: Stable API, backward compatibility guarantees
+
+---
+
+## Support
+
+- **Documentation**: [docs.rs/v2rmp](https://docs.rs/v2rmp)
+- **Issues**: [GitHub Issues](https://github.com/spacialglaciercom-lab/v2rmp/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/spacialglaciercom-lab/v2rmp/discussions)
+- **Crates.io**: [crates.io/crates/v2rmp](https://crates.io/crates/v2rmp)

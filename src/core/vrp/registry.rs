@@ -23,7 +23,11 @@
 use super::solvers::clarke_wright::ClarkeWrightSolver;
 use super::solvers::default::DefaultSolver;
 #[cfg(feature = "ml")]
+use super::solvers::neural::NeuralSolver;
+#[cfg(feature = "ml")]
 use super::solvers::neural_guided::NeuralGuidedSolver;
+#[cfg(feature = "ml")]
+use super::solvers::neural_gnn::NeuralGnnSolver;
 use super::solvers::or_opt::OrOptSolver;
 use super::solvers::sweep::SweepSolver;
 use super::solvers::two_opt::TwoOptSolver;
@@ -52,7 +56,11 @@ impl SolverRegistryInner {
             Arc::new(TwoOptSolver),
         ];
         #[cfg(feature = "ml")]
+        builtins.push(Arc::new(NeuralSolver));
+        #[cfg(feature = "ml")]
         builtins.push(Arc::new(NeuralGuidedSolver));
+        #[cfg(feature = "ml")]
+        builtins.push(Arc::new(NeuralGnnSolver));
         builtins.push(Arc::new(DefaultSolver));
 
         let builtin_ids: Vec<String> = builtins.iter().map(|s| s.id().to_string()).collect();
@@ -134,8 +142,8 @@ pub fn get_algorithm_options() -> Vec<(String, String)> {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::vrp::test_utils::{make_input, make_stop};
     use super::*;
+    use crate::core::vrp::test_utils::{make_input, make_stop};
 
     #[test]
     fn test_builtin_solvers_registered() {

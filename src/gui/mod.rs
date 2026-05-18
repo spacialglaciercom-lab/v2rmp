@@ -250,7 +250,10 @@ impl Default for GuiApp {
 impl GuiApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut app = Self::default();
-        app.log(LogLevel::Info, format!("rmpca v{} started", env!("CARGO_PKG_VERSION")));
+        app.log(
+            LogLevel::Info,
+            format!("rmpca v{} started", env!("CARGO_PKG_VERSION")),
+        );
         app.log(LogLevel::Info, "Ready - select a workflow step to begin");
         app
     }
@@ -316,7 +319,11 @@ impl GuiApp {
                     self.set_network(nodes, edges, label);
                     self.log(
                         LogLevel::Success,
-                        format!("Loaded {} nodes, {} edges", self.map_nodes.len(), self.map_edges.len()),
+                        format!(
+                            "Loaded {} nodes, {} edges",
+                            self.map_nodes.len(),
+                            self.map_edges.len()
+                        ),
                     );
                 }
                 Err(e) => {
@@ -390,84 +397,82 @@ impl eframe::App for GuiApp {
         egui::Panel::bottom("log_panel")
             .min_size(80.0)
             .show_inside(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("Logs");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("Clear").clicked() {
-                        self.log_entries.clear();
-                    }
+                ui.horizontal(|ui| {
+                    ui.heading("Logs");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button("Clear").clicked() {
+                            self.log_entries.clear();
+                        }
+                    });
                 });
+                egui::ScrollArea::vertical()
+                    .max_height(120.0)
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| {
+                        for entry in &self.log_entries {
+                            ui.horizontal(|ui| {
+                                let ts_color = egui::Color32::from_rgb(80, 180, 220);
+                                let level_color = match entry.level {
+                                    LogLevel::Info => egui::Color32::from_rgb(80, 180, 220),
+                                    LogLevel::Success => egui::Color32::from_rgb(80, 220, 80),
+                                    LogLevel::Warn => egui::Color32::from_rgb(220, 200, 60),
+                                    LogLevel::Error => egui::Color32::from_rgb(220, 80, 80),
+                                };
+                                ui.colored_label(ts_color, &entry.timestamp);
+                                ui.colored_label(level_color, format!("[{}]", entry.level));
+                                ui.label(&entry.message);
+                            });
+                        }
+                    });
             });
-            egui::ScrollArea::vertical()
-                .max_height(120.0)
-                .stick_to_bottom(true)
-                .show(ui, |ui| {
-                    for entry in &self.log_entries {
-                        ui.horizontal(|ui| {
-                            let ts_color = egui::Color32::from_rgb(80, 180, 220);
-                            let level_color = match entry.level {
-                                LogLevel::Info => egui::Color32::from_rgb(80, 180, 220),
-                                LogLevel::Success => egui::Color32::from_rgb(80, 220, 80),
-                                LogLevel::Warn => egui::Color32::from_rgb(220, 200, 60),
-                                LogLevel::Error => egui::Color32::from_rgb(220, 80, 80),
-                            };
-                            ui.colored_label(ts_color, &entry.timestamp);
-                            ui.colored_label(level_color, format!("[{}]", entry.level));
-                            ui.label(&entry.message);
-                        });
-                    }
-                });
-        });
 
         // Left sidebar
         egui::Panel::left("sidebar")
             .min_size(180.0)
             .default_size(200.0)
             .show_inside(ui, |ui| {
-            ui.vertical(|ui| {
-                ui.heading("Workflow");
-                ui.separator();
+                ui.vertical(|ui| {
+                    ui.heading("Workflow");
+                    ui.separator();
 
-                let items = [
-                    ("Extract Data", View::Extract),
-                    ("Clean GeoJSON", View::Clean),
-                    ("Compile Map", View::Compile),
-                    ("CPP Solver", View::Optimize),
-                    ("VRP Solver", View::Vrp),
-                    ("Cached Maps", View::BrowseMaps),
-                    ("Saved Routes", View::BrowseRoutes),
-                ];
+                    let items = [
+                        ("Extract Data", View::Extract),
+                        ("Clean GeoJSON", View::Clean),
+                        ("Compile Map", View::Compile),
+                        ("CPP Solver", View::Optimize),
+                        ("VRP Solver", View::Vrp),
+                        ("Cached Maps", View::BrowseMaps),
+                        ("Saved Routes", View::BrowseRoutes),
+                    ];
 
-                for (label, view) in items {
-                    let is_selected = self.current_view == view;
-                    if ui.selectable_label(is_selected, label).clicked() {
-                        self.current_view = view.clone();
-                        if view == View::BrowseMaps {
-                            self.refresh_cached_maps();
-                            self.browse_selection = 0;
-                        }
-                        if view == View::BrowseRoutes {
-                            self.refresh_saved_routes();
-                            self.browse_selection = 0;
+                    for (label, view) in items {
+                        let is_selected = self.current_view == view;
+                        if ui.selectable_label(is_selected, label).clicked() {
+                            self.current_view = view.clone();
+                            if view == View::BrowseMaps {
+                                self.refresh_cached_maps();
+                                self.browse_selection = 0;
+                            }
+                            if view == View::BrowseRoutes {
+                                self.refresh_saved_routes();
+                                self.browse_selection = 0;
+                            }
                         }
                     }
-                }
+                });
             });
-        });
 
         // Central panel
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            match self.current_view {
-                View::Home => home::draw(ui, self),
-                View::Extract => extract::draw(ui, self),
-                View::Compile => compile::draw(ui, self),
-                View::Clean => clean::draw(ui, self),
-                View::Optimize => optimize::draw(ui, self),
-                View::Vrp => vrp::draw(ui, self),
-                View::BrowseMaps => browse::draw_maps(ui, self),
-                View::BrowseRoutes => browse::draw_routes(ui, self),
-                View::Help => help::draw(ui),
-            }
+        egui::CentralPanel::default().show_inside(ui, |ui| match self.current_view {
+            View::Home => home::draw(ui, self),
+            View::Extract => extract::draw(ui, self),
+            View::Compile => compile::draw(ui, self),
+            View::Clean => clean::draw(ui, self),
+            View::Optimize => optimize::draw(ui, self),
+            View::Vrp => vrp::draw(ui, self),
+            View::BrowseMaps => browse::draw_maps(ui, self),
+            View::BrowseRoutes => browse::draw_routes(ui, self),
+            View::Help => help::draw(ui),
         });
 
         ctx.request_repaint();
@@ -517,10 +522,16 @@ pub fn status_label(ui: &mut egui::Ui, status: &Status) {
             });
         }
         Status::Done(msg) => {
-            ui.colored_label(egui::Color32::from_rgb(80, 220, 80), format!("Status: Done - {}", msg));
+            ui.colored_label(
+                egui::Color32::from_rgb(80, 220, 80),
+                format!("Status: Done - {}", msg),
+            );
         }
         Status::Error(msg) => {
-            ui.colored_label(egui::Color32::from_rgb(220, 80, 80), format!("Status: Error: {}", msg));
+            ui.colored_label(
+                egui::Color32::from_rgb(220, 80, 80),
+                format!("Status: Error: {}", msg),
+            );
         }
     }
 }
@@ -550,10 +561,8 @@ pub fn project_latlon(
 
 /// Render the map canvas (reused across views that need map viz).
 pub fn draw_map_canvas(ui: &mut egui::Ui, app: &mut GuiApp) {
-    let (rect, response) = ui.allocate_exact_size(
-        ui.available_size(),
-        egui::Sense::click_and_drag(),
-    );
+    let (rect, response) =
+        ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
 
     if ui.is_rect_visible(rect) {
         let painter = ui.painter_at(rect);
@@ -599,7 +608,7 @@ pub fn draw_map_canvas(ui: &mut egui::Ui, app: &mut GuiApp) {
                     n.lon,
                     canvas_center,
                     canvas_size,
-                    &bbox,
+                    bbox,
                     app.map_zoom,
                     app.map_pan,
                 )
@@ -643,7 +652,15 @@ pub fn draw_map_canvas(ui: &mut egui::Ui, app: &mut GuiApp) {
                 .cpp_output
                 .as_ref()
                 .is_some_and(|o| o.circuit.contains(&(i as u32)));
-            painter.circle_filled(*pt, node_radius, if on_circuit { circuit_node_color } else { node_color });
+            painter.circle_filled(
+                *pt,
+                node_radius,
+                if on_circuit {
+                    circuit_node_color
+                } else {
+                    node_color
+                },
+            );
         }
 
         if let Some(ref out) = app.cpp_output {

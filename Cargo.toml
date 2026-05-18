@@ -1,30 +1,55 @@
 [package]
 name = "v2rmp"
-version = "0.4.6"
+version = "0.5.5"
 edition = "2021"
+authors = ["spacialglaciercom-lab"]
 description = "rmpca — Route Optimization TUI & Agent Engine"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/spacialglaciercom-lab/v2rmp"
 homepage = "https://github.com/spacialglaciercom-lab/v2rmp"
+documentation = "https://docs.rs/v2rmp"
 readme = "README.md"
-keywords = ["vrp", "route-optimization", "tui", "agent", "osm"]
-categories = ["command-line-utilities", "algorithms", "visualization"]
+keywords = ["route", "optimization", "tui", "gis", "osm"]
+categories = ["command-line-utilities", "visualization", "science"]
 exclude = [
-    "monaco.osm.pbf",
+    ".env",
+    ".env.*",
+    "*.rmp",
+    "*.geojson",
+    "*.pmtiles",
+    "*.pbf",
+    "*.onnx",
+    "*.onnx.data",
+    "*.gpx",
+    "*.pt",
+    "*.py",
+    "*.pyc",
+    "*.orig",
+    "*.jsonl",
+    "mile_end_embeddings.json",
+    "__pycache__/",
     "target/",
     ".bob/",
+    ".jules/",
+    ".gemini/",
+    ".venv/",
+    "checkpoints/",
+    "data/",
+    "docs/",
+    "drone_vrp_space/",
+    "local/",
+    "mcp_test_data/",
+    "models/",
+    "scripts/",
+    "session_logs/",
+    "sft_training/",
     "vector_clean.py",
     "*_patch.diff",
-    "VECTOR_DB_CONFIG.md",
-    "find_duplicates.py",
-    "zilliz_embed_pipeline.py",
-    "cloud-vectordb-examples/",
 ]
 
 [[bin]]
 name = "rmpca"
 path = "src/main.rs"
-required-features = ["cli"]
 
 [[bin]]
 name = "rmpca-extract"
@@ -32,13 +57,24 @@ path = "src/bin/extract.rs"
 required-features = ["extract"]
 
 [[bin]]
-name = "zilliz-mcp-server"
-path = "src/bin/zilliz-mcp-server.rs"
+name = "rmpca-drone"
+path = "src/bin/drone-cli.rs"
 
 [[bin]]
-name = "rmpca-mcp-server"
+name = "rmpca-mcp"
+path = "src/bin/mcp-server.rs"
+
+[[bin]]
+name = "rmpca-chained"
+path = "src/bin/chained_optimize.rs"
+
+[[bin]]
+name = "rmpca-mcp-server-legacy"
 path = "src/bin/rmpca-mcp-server.rs"
-required-features = ["extract"]
+
+[[bin]]
+name = "zilliz-mcp-server"
+path = "src/bin/zilliz-mcp-server.rs"
 
 [[bin]]
 name = "web-ui"
@@ -48,49 +84,45 @@ required-features = ["gui"]
 [[bin]]
 name = "generate-training-data"
 path = "src/bin/generate-training-data.rs"
-required-features = ["ml"]
 
 [[bin]]
 name = "evaluate-selector"
 path = "src/bin/evaluate-selector.rs"
-required-features = ["ml"]
+required-features = ["extract"]
 
 [dependencies]
-# TUI (feature-gated)
-ratatui = { version = "0.29", optional = true }
-crossterm = { version = "0.28", optional = true }
-
-# Core
+duct = "1.1"
+ratatui = "0.29"
+crossterm = "0.28"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 csv = "1"
 chrono = "0.4"
 anyhow = "1"
 async-trait = "0.1"
-
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
-osmpbf = { version = "0.3", optional = true }
+osmpbf = "0.3"
 clap = { version = "4.5", features = ["derive"] }
-dirs = { version = "5.0", optional = true }
-shellexpand = { version = "3.1", optional = true }
-candle-core = { version = "0.10", optional = true }
-candle-nn = { version = "0.10", optional = true }
-candle-transformers = { version = "0.10", optional = true }
-tokenizers = { version = "0.22", optional = true }
-hf-hub = { version = "0.5", default-features = false, features = ["ureq"], optional = true }
-
-# Extraction (object_store + parquet + geo)
-object_store = { version = "0.11", features = ["aws"], optional = true }
-parquet = { version = "54", features = ["async"], optional = true }
-arrow = { version = "54", optional = true }
+dirs = "5.0"
+shellexpand = "3.1"
+dotenvy = "0.15"
+regex = "1"
+candle-core = "0.10"
+candle-nn = "0.10"
+candle-transformers = "0.10"
+tokenizers = "0.22"
+hf-hub = { version = "0.5", default-features = false, features = ["ureq"] }
+object_store = { version = "0.11", features = ["aws"] }
+parquet = { version = "54", features = ["async"] }
+arrow = "54"
 futures-util = "0.3"
 geo-types = "0.7"
 geo-traits = "0.2"
 geo = "0.28"
 geojson = "0.24"
 wkb = "0.8"
-tokio = { version = "1", default-features = false, features = ["sync", "macros", "rt-multi-thread"] }
-sqlx = { version = "0.8", features = ["runtime-tokio", "tls-native-tls", "postgres", "chrono", "json"], optional = true }
+tokio = { version = "1", features = ["full"] }
+sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "postgres", "chrono", "json", "rust_decimal"] }
 sha2 = "0.10"
 hex = "0.4"
 tracing = "0.1"
@@ -99,36 +131,30 @@ crc32fast = "1.4"
 petgraph = "0.6"
 rstar = "0.12"
 ordered-float = "4.2"
+ort = { version = "2.0.0-rc.9", features = ["ndarray"] }
+ndarray = "0.15"
+pmtiles = { version = "0.23.0", features = ["mmap-async-tokio", "tilejson"] }
+mvt-reader = "2.3.0"
+rust_decimal = { version = "1.42.0", features = ["serde-float"] }
+nalgebra = "0.33"
+rand = "0.8"
+rand_distr = "0.4"
 gdal = { version = "0.18", features = ["bindgen"], optional = true }
-regex = "1"
-
-# Web UI (eframe/egui) — feature-gated
 eframe = { version = "0.34.2", features = ["glow", "persistence"], optional = true }
 egui = { version = "0.34.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 rfd = { version = "0.15", optional = true }
+urlencoding = "2.1.3"
 
-# WASM32 target dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 log = "0.4.29"
 wasm-bindgen = "0.2.121"
 web-sys = { version = "0.3.98", features = ["Document", "Element", "EventTarget", "HtmlCanvasElement", "HtmlElement", "Node", "Window"] }
 getrandom = { version = "0.2", features = ["js"] }
 
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-strip = true
-
-[profile.quick]
-inherits = "dev"
-opt-level = 2
-codegen-units = 16
-
 [features]
-default = ["cli", "extract"]
-cli = ["ratatui", "crossterm", "extract"]
+default = ["cli", "ml"]
+cli = []
+ml = []
 gui = ["eframe", "egui", "rfd", "wasm-bindgen-futures"]
-extract = ["object_store", "parquet", "arrow", "osmpbf", "gdal", "dirs", "shellexpand", "sqlx"]
-ml = ["tokenizers", "candle-core", "candle-nn", "candle-transformers", "hf-hub"]
+extract = ["gdal"]

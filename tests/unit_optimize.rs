@@ -37,11 +37,7 @@ fn test_read_rmp_empty() {
 
 #[test]
 fn test_read_rmp_multiple_edges() {
-    let nodes = vec![
-        (45.0, 0.0),
-        (45.001, 0.001),
-        (45.002, 0.002),
-    ];
+    let nodes = vec![(45.0, 0.0), (45.001, 0.001), (45.002, 0.002)];
     let edges = vec![
         (0, 1, 157.0, 0),
         (1, 2, 157.0, 0),

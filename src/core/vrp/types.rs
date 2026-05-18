@@ -94,6 +94,9 @@ pub struct SolverHyperparams {
     pub neighbourhood_radius: usize,
     /// Whether the learned model was used (true) or fallback defaults (false).
     pub model_used: bool,
+    /// Flexible solver-specific parameters.
+    #[serde(default)]
+    pub other: std::collections::HashMap<String, serde_json::Value>,
 }
 
 /// Input to a VRP solver.

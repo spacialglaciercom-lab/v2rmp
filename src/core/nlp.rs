@@ -18,19 +18,19 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[cfg(feature = "ml")]
-use candle_core::{Device, Tensor, DType};
+use anyhow::{Context, Result};
+#[cfg(feature = "ml")]
+use candle_core::{DType, Device, Tensor};
 #[cfg(feature = "ml")]
 use candle_nn::VarBuilder;
 #[cfg(feature = "ml")]
-use candle_transformers::models::qwen2::{ModelForCausalLM, Config};
-#[cfg(feature = "ml")]
 use candle_transformers::generation::LogitsProcessor;
+#[cfg(feature = "ml")]
+use candle_transformers::models::qwen2::{Config, ModelForCausalLM};
 #[cfg(feature = "ml")]
 use hf_hub::{api::sync::Api, Repo, RepoType};
 #[cfg(feature = "ml")]
 use tokenizers::Tokenizer;
-#[cfg(feature = "ml")]
-use anyhow::{Context, Result};
 
 /// Parsed VRP configuration from natural language.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -76,7 +76,8 @@ pub fn parse_query(query: &str) -> ParsedRoutingQuery {
         result.variant = "cpp".to_string();
     } else if lower.contains("time window") || lower.contains("by ") || lower.contains("deadline") {
         result.variant = "cvrptw".to_string();
-    } else if lower.contains("package") || lower.contains("delivery") || lower.contains("customer") {
+    } else if lower.contains("package") || lower.contains("delivery") || lower.contains("customer")
+    {
         result.variant = "cvrp".to_string();
     } else if lower.contains("multiple depot") || lower.contains("multi-depot") {
         result.variant = "mdvrp".to_string();
@@ -86,7 +87,9 @@ pub fn parse_query(query: &str) -> ParsedRoutingQuery {
 
     // ── Entity extraction: numbers ──────────────────────────────────
     // "50 packages", "5 vans", "100 customers", etc.
-    let num_regex = regex::Regex::new(r"(\d+)\s*(package|stop|customer|van|vehicle|driver|truck|route)").unwrap();
+    let num_regex =
+        regex::Regex::new(r"(\d+)\s*(package|stop|customer|van|vehicle|driver|truck|route)")
+            .unwrap();
     for cap in num_regex.captures_iter(&lower) {
         let num: u32 = cap[1].parse().unwrap_or(0);
         let noun = &cap[2];
@@ -100,9 +103,7 @@ pub fn parse_query(query: &str) -> ParsedRoutingQuery {
 
     // ── Entity extraction: coordinates ────────────────────────────────
     // "45.5, -73.6" or "lat 45.5 lon -73.6"
-    let coord_regex = regex::Regex::new(
-        r"(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)"
-    ).unwrap();
+    let coord_regex = regex::Regex::new(r"(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)").unwrap();
     if let Some(cap) = coord_regex.captures(&lower) {
         let lat: f64 = cap[1].parse().unwrap_or(0.0);
         let lon: f64 = cap[2].parse().unwrap_or(0.0);
@@ -114,16 +115,23 @@ pub fn parse_query(query: &str) -> ParsedRoutingQuery {
 
     // ── Entity extraction: time ─────────────────────────────────────
     // "by 5pm", "before 17:00", "deadline 5:30 PM"
-    let time_regex = regex::Regex::new(
-        r"(?:by|before|deadline|until)\s*(\d{1,2}):?(\d{2})?\s*(am|pm)?"
-    ).unwrap();
+    let time_regex =
+        regex::Regex::new(r"(?:by|before|deadline|until)\s*(\d{1,2}):?(\d{2})?\s*(am|pm)?")
+            .unwrap();
     if let Some(cap) = time_regex.captures(&lower) {
         let hour: u32 = cap[1].parse().unwrap_or(0);
-        let minute: u32 = cap.get(2).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+        let minute: u32 = cap
+            .get(2)
+            .and_then(|m| m.as_str().parse().ok())
+            .unwrap_or(0);
         let ampm = cap.get(3).map(|m| m.as_str()).unwrap_or("");
         let mut h = hour;
-        if ampm == "pm" && h < 12 { h += 12; }
-        if ampm == "am" && h == 12 { h = 0; }
+        if ampm == "pm" && h < 12 {
+            h += 12;
+        }
+        if ampm == "am" && h == 12 {
+            h = 0;
+        }
         let time_str = format!("{:02}:{:02}", h, minute);
         result.deadline = Some(time_str.clone());
         entities.insert("deadline".to_string(), time_str);
@@ -147,7 +155,10 @@ pub fn parse_query(query: &str) -> ParsedRoutingQuery {
     }
 
     // ── Objective extraction ────────────────────────────────────────
-    if lower.contains("shortest") || lower.contains("min distance") || lower.contains("fastest route") {
+    if lower.contains("shortest")
+        || lower.contains("min distance")
+        || lower.contains("fastest route")
+    {
         result.objective = Some("min_distance".to_string());
     } else if lower.contains("min time") || lower.contains("quickest") {
         result.objective = Some("min_time".to_string());
@@ -221,29 +232,30 @@ pub struct QwenNLParser {
 
 #[cfg(feature = "ml")]
 impl QwenNLParser {
-    /// Loads the Qwen2.5-0.5B-Instruct model from Hugging Face hub (cached locally).
-    /// Uses 0.5B by default as 1.5B is too heavy for CPU-only MCP tools.
+    /// Loads the v2rmp-agent-1.5b-merged model from Hugging Face hub (cached locally).
+    /// This is a fine-tuned Qwen2.5-1.5B-Instruct model trained on v2rmp CLI commands,
+    /// MCP tool invocations, and route optimization workflows via QLoRA SFT.
     pub fn new() -> Result<Self> {
         let device = crate::core::ml::best_device()?;
         let api = Api::new().context("Failed to create HF API client")?;
         let repo = api.repo(Repo::with_revision(
-            "Qwen/Qwen2.5-0.5B-Instruct".to_string(),
+            "aerialblancaservices/v2rmp-agent-1.5b-merged".to_string(),
             RepoType::Model,
             "main".to_string(),
         ));
 
         tracing::info!("Using device: {:?}", device);
-        tracing::info!("Fetching Qwen2.5-0.5B tokenizer and config...");
+        tracing::info!("Fetching v2rmp-agent-1.5b tokenizer and config...");
         let tokenizer_path = repo.get("tokenizer.json")?;
         let config_path = repo.get("config.json")?;
 
         let tokenizer = Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?;
-            
+
         let config: Config = serde_json::from_reader(std::fs::File::open(config_path)?)?;
 
         // Download safetensors.
-        tracing::info!("Fetching Qwen2.5-0.5B safetensors...");
+        tracing::info!("Fetching v2rmp-agent-1.5b safetensors (~3GB, will cache locally)...");
         let model_path = repo.get("model.safetensors")?;
 
         // Use F16 on GPU, F32 on CPU for best compatibility/performance
@@ -254,7 +266,7 @@ impl QwenNLParser {
         };
 
         let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_path], dtype, &device)? };
-        
+
         tracing::info!("Loading Qwen2.5 model into Candle ({:?})...", dtype);
         let model = ModelForCausalLM::new(&config, vb)?;
 
@@ -268,10 +280,12 @@ impl QwenNLParser {
     /// Translates a natural language query into a VRP JSON string using the LLM.
     pub fn parse_llm(&mut self, query: &str) -> Result<String> {
         let system_prompt = "You are an expert route optimization assistant. Convert the user's natural language routing query into a valid JSON object describing the Vehicle Routing Problem (VRP) configuration. Extract: 'num_stops', 'num_vehicles', 'depot' (as {\"lat\": .., \"lon\": ..}), 'deadline' (HH:MM), 'capacity', 'variant' (e.g., 'cvrp', 'cvrptw'). ONLY output valid JSON and nothing else.";
-        
+
         let prompt = format!("<|im_start|>system\n{}<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n", system_prompt, query);
 
-        let tokens = self.tokenizer.encode(prompt, true)
+        let tokens = self
+            .tokenizer
+            .encode(prompt, true)
             .map_err(|e| anyhow::anyhow!("Tokenization error: {}", e))?;
         let mut tokens = tokens.get_ids().to_vec();
 
@@ -292,7 +306,7 @@ impl QwenNLParser {
             let context_size = if index == 0 { tokens.len() } else { 1 };
             let start_pos = tokens.len().saturating_sub(context_size);
             let input = Tensor::new(&tokens[start_pos..], &self.device)?.unsqueeze(0)?;
-            
+
             let logits = self.model.forward(&input, pos)?;
             let logits = logits.squeeze(0)?;
             let logits = logits.get(logits.dim(0)? - 1)?;
@@ -301,7 +315,7 @@ impl QwenNLParser {
             tokens.push(next_token);
             pos += context_size;
 
-            if let Some(text) = self.tokenizer.decode(&[next_token], true).ok() {
+            if let Ok(text) = self.tokenizer.decode(&[next_token], true) {
                 output_text.push_str(&text);
                 if output_text.contains("<|im_end|>") {
                     break;

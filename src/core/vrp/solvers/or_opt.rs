@@ -9,7 +9,6 @@ fn solve(
     locations: &[VRPSolverStop],
     num_vehicles: usize,
     balance_load: bool,
-    hyperparams: Option<&SolverHyperparams>,
 ) -> SolveResult {
     let n = matrix.len();
     if n <= 1 {
@@ -31,7 +30,10 @@ fn solve(
     };
 
     let mut improved = true;
-    let max_passes = hyperparams.map(|p| p.max_iterations / 4).unwrap_or(100).max(1);
+    let max_passes = hyperparams
+        .map(|p| p.max_iterations / 4)
+        .unwrap_or(100)
+        .max(1);
     let mut passes = 0;
 
     while improved && passes < max_passes {
@@ -228,8 +230,8 @@ impl VRPSolver for OrOptSolver {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::vrp::test_utils::{make_input, make_stop, build_haversine_matrix};
     use super::*;
+    use crate::core::vrp::test_utils::{build_haversine_matrix, make_input, make_stop};
 
     #[tokio::test]
     async fn test_or_opt_single_depot() {
@@ -259,7 +261,8 @@ mod tests {
             service_time_secs: None,
             use_time_windows: false,
             window_open: None,
-            window_close: None, hyperparams: None,
+            window_close: None,
+            hyperparams: None,
         };
         let solver = OrOptSolver;
         let err = solver.solve(&input).await.unwrap_err();
@@ -302,7 +305,8 @@ mod tests {
             service_time_secs: None,
             use_time_windows: false,
             window_open: None,
-            window_close: None, hyperparams: None,
+            window_close: None,
+            hyperparams: None,
         };
         let solver = OrOptSolver;
         let output = solver.solve(&input).await.unwrap();
