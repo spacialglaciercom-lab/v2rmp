@@ -442,6 +442,11 @@ pub fn matrix_get_time(matrix: &DistMatrix, i: usize, j: usize) -> f64 {
         .unwrap_or(0.0)
 }
 
+/// Generate an OsmAnd deep link that triggers the import of a GPX file from a URL.
+pub fn generate_osmand_import_url(gpx_url: &str) -> String {
+    format!("osmand://import?url={}", urlencoding::encode(gpx_url))
+}
+
 pub fn build_sweep_routes(
     matrix: &crate::core::vrp::types::DistMatrix,
     locations: &[crate::core::vrp::types::VRPSolverStop],
@@ -570,6 +575,22 @@ pub fn parse_csv_stops(
             .ok_or_else(|| format!("Missing lon at row {}", row_num + 2))?
             .parse()
             .map_err(|e| format!("Invalid lon at row {}: {}", row_num + 2, e))?;
+
+        // Validation
+        if !(-90.0..=90.0).contains(&lat) {
+            return Err(format!(
+                "Latitude {} out of bounds at row {}",
+                lat,
+                row_num + 2
+            ));
+        }
+        if !(-180.0..=180.0).contains(&lon) {
+            return Err(format!(
+                "Longitude {} out of bounds at row {}",
+                lon,
+                row_num + 2
+            ));
+        }
 
         let label = label_idx
             .and_then(|i| record.get(i))

@@ -8,6 +8,8 @@ const MENU_ITEMS: &[&str] = &[
     "Compile Map (GeoJSON -> .rmp)",
     "Optimize Route",
     "VRP Solver (Multi-Vehicle)",
+    "Neural ONNX Solver",
+    "Graph Embeddings (node2vec/LINE)",
     "Browse Cached Maps",
     "Browse Saved Routes",
 ];

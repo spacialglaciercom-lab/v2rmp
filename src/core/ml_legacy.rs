@@ -135,10 +135,10 @@ pub fn predict_solver(features: &RouteFeatures) -> SolverPrediction {
                 if features.tight_capacity {
                     *score += 0.2;
                 }
-                if n >= 20 && n <= 200 {
+                if (20..=200).contains(&n) {
                     *score += 0.1;
                 }
-                if v >= 2 && v <= 10 {
+                if (2..=10).contains(&v) {
                     *score += 0.1;
                 }
                 if features.objective == VrpObjective::MinDistance {
@@ -157,11 +157,9 @@ pub fn predict_solver(features: &RouteFeatures) -> SolverPrediction {
                     *score += 0.1;
                 }
             }
-            "two_opt" => {
+            "two_opt" if (30..=300).contains(&n) => {
                 // 2-Opt untangling: good for post-processing or medium routes
-                if n >= 30 && n <= 300 {
-                    *score += 0.1;
-                }
+                *score += 0.1;
             }
             "or_opt" => {
                 // Or-Opt metaheuristic: best for large instances, balance, time objectives
@@ -326,8 +324,7 @@ fn bearing_delta(a: &VRPSolverStop, b: &VRPSolverStop, c: &VRPSolverStop) -> f64
     let b1 = bearing(a.lat, a.lon, b.lat, b.lon);
     let b2 = bearing(b.lat, b.lon, c.lat, c.lon);
     let d = b2 - b1;
-    let d = ((d + 180.0) % 360.0) - 180.0;
-    d
+    ((d + 180.0) % 360.0) - 180.0
 }
 
 fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {

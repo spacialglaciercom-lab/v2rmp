@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 use crate::core::geo_types::BBox;
 use crate::core::vrp::registry::solve_with;
 use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
@@ -120,6 +121,7 @@ pub struct OptimizeResult {
     pub turns: TurnSummary,
     pub elapsed_ms: u64,
     pub num_routes: usize,
+    pub routes: Vec<Vec<VRPSolverStop>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -174,14 +176,8 @@ trait NormalizeAngle {
 impl NormalizeAngle for f64 {
     fn normalize(self, lower: f64, upper: f64) -> f64 {
         let width = upper - lower;
-        let mut val = self;
-        while val < lower {
-            val += width;
-        }
-        while val >= upper {
-            val -= width;
-        }
-        val
+        lower + (self - lower).rem_euclid(width)
+        (self - lower).rem_euclid(width) + lower
     }
 }
 
@@ -277,6 +273,7 @@ struct AdjEntry {
     to: u32,
     weight_m: f64,
     edge_idx: usize,
+    bearing: f64,
 }
 
 /// In-memory CPP result: both the summary stats and the ordered node-IDs of the Eulerian circuit.
@@ -294,6 +291,7 @@ pub struct CppOutput {
 /// - `depot` is an optional (lat, lon) — the solver snaps to the nearest node.
 ///
 /// Returns a `CppOutput` with both summary statistics and the full circuit.
+#[allow(clippy::needless_range_loop)]
 pub fn solve_cpp(
     nodes: &[RmpNode],
     edges: &[RmpEdge],
@@ -318,6 +316,7 @@ pub fn solve_cpp(
                 },
                 elapsed_ms: 0,
                 num_routes: 1,
+                routes: Vec::new(),
             },
             circuit: Vec::new(),
         });
@@ -390,11 +389,11 @@ pub fn solve_cpp(
         use std::cmp::Ordering;
         use std::collections::BinaryHeap;
 
-        #[derive(Copy, Clone, PartialEq)]
+        #[derive(Copy, Clone)]
         struct State {
             cost: f64,
             position: usize,
-            incoming_edge_idx: Option<usize>,
+            incoming_bearing: Option<f64>,
         }
         impl Eq for State {}
         impl Ord for State {
@@ -425,13 +424,13 @@ pub fn solve_cpp(
             heap.push(State {
                 cost: 0.0,
                 position: u,
-                incoming_edge_idx: None,
+                incoming_bearing: None,
             });
 
             while let Some(State {
                 cost,
                 position,
-                incoming_edge_idx,
+                incoming_bearing,
             }) = heap.pop()
             {
                 if cost > dists[position] {
@@ -440,26 +439,8 @@ pub fn solve_cpp(
 
                 for edge in &adj[position] {
                     let mut penalty = 0.0;
-                    if let Some(prev_idx) = incoming_edge_idx {
-                        let prev_edge = &edges[prev_idx];
-                        let (p_from, p_to) = if prev_edge.to as usize == position {
-                            (prev_edge.from as usize, position)
-                        } else {
-                            (prev_edge.to as usize, position)
-                        };
-
-                        let b_in = bearing(
-                            nodes[p_from].lat,
-                            nodes[p_from].lon,
-                            nodes[p_to].lat,
-                            nodes[p_to].lon,
-                        );
-                        let b_out = bearing(
-                            nodes[position].lat,
-                            nodes[position].lon,
-                            nodes[edge.to as usize].lat,
-                            nodes[edge.to as usize].lon,
-                        );
+                    if let Some(b_in) = incoming_bearing {
+                        let b_out = edge.bearing;
                         let delta = b_out - b_in;
 
                         match classify_turn(delta) {
@@ -477,7 +458,7 @@ pub fn solve_cpp(
                         heap.push(State {
                             cost: next_cost,
                             position: edge.to as usize,
-                            incoming_edge_idx: Some(edge.edge_idx),
+                            incoming_bearing: Some(edge.bearing),
                         });
                     }
                 }
@@ -720,6 +701,17 @@ pub fn solve_cpp(
 
     let elapsed_ms = start.elapsed().as_millis() as u64;
 
+    let route_points: Vec<VRPSolverStop> = circuit
+        .iter()
+        .map(|&idx| VRPSolverStop {
+            lat: nodes[idx as usize].lat,
+            lon: nodes[idx as usize].lon,
+            label: format!("Node {}", idx),
+            demand: None,
+            arrival_time: None,
+        })
+        .collect();
+
     Ok(CppOutput {
         summary: OptimizeResult {
             total_distance_km: total_distance_m / 1000.0,
@@ -729,6 +721,7 @@ pub fn solve_cpp(
             turns,
             elapsed_ms,
             num_routes: 1,
+            routes: vec![route_points],
         },
         circuit,
     })
@@ -929,10 +922,11 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         turns,
         elapsed_ms: start.elapsed().as_millis() as u64,
         num_routes: output.routes.as_ref().map(|r| r.len()).unwrap_or(1),
+        routes: output.routes.unwrap_or_default(),
     })
 }
 
-pub(crate) fn write_gpx_multi(path: &str, routes: &[Vec<VRPSolverStop>]) -> anyhow::Result<()> {
+pub fn write_gpx_multi(path: &str, routes: &[Vec<VRPSolverStop>]) -> anyhow::Result<()> {
     use std::io::Write;
     let mut file = std::fs::File::create(path)?;
 

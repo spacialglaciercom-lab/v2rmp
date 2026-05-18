@@ -4,7 +4,9 @@ pub mod clean;
 pub mod compile;
 pub mod extract;
 pub mod file_browser;
+pub mod graph_embed;
 pub mod home;
+pub mod neural;
 pub mod optimize;
 pub mod vrp;
 
@@ -67,6 +69,8 @@ fn draw_main(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         View::Compile => compile::draw(f, app, area),
         View::Optimize => optimize::draw(f, app, area),
         View::Vrp => vrp::draw(f, app, area),
+        View::Neural => neural::draw(f, app, area),
+        View::GraphEmbed => graph_embed::draw(f, app, area),
         View::BrowseMaps => browse_maps::draw(f, app, area),
         View::BrowseRoutes => browse_routes::draw(f, app, area),
         View::FileBrowser => file_browser::draw(f, app, area),
@@ -126,6 +130,12 @@ fn draw_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         }
         View::Vrp => {
             "[Esc] Home  [I] Input  [W] Waypoints  [V] Vehicles  [A] Algo  [D] Depot  [Enter] Run VRP"
+        }
+        View::Neural => {
+            "[Esc] Home  [M] Model  [W] Waypoints  [V] Vehicles  [K] Capacity  [Enter] Solve"
+        }
+        View::GraphEmbed => {
+            "[Esc] Home  [I] Input  [O] Output  [M] Method  [D] Dims  [E] Edges  [Enter] Run"
         }
         View::Compile => "[q] Quit  [Esc] Home  [I] Input file  [O] Output file  [Enter] Compile",
         View::BrowseMaps => {
@@ -216,8 +226,20 @@ pub fn draw_input_prompt(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
             "VRP algorithm (greedy|savings|local_search|simulated_annealing)"
         }
         crate::app::InputField::VrpCapacity => "VRP vehicle capacity",
+        crate::app::InputField::VrpVehicles => "Number of VRP vehicles",
         crate::app::InputField::VrpWaypointsFile => "VRP waypoints file path (.json)",
+        crate::app::InputField::VrpModelPath => "ONNX model file path (.onnx)",
         crate::app::InputField::VrpDepot => "VRP depot (lat,lon)",
+        crate::app::InputField::OsmandBaseUrl => "OsmAnd Base URL (e.g. https://pub-xxx.r2.dev)",
+        crate::app::InputField::GraphEmbedInputFile => "Input .rmp file path",
+        crate::app::InputField::GraphEmbedOutputFile => "Output .json file path",
+        crate::app::InputField::GraphEmbedMethod => "Method (node2vec|line|fastrp|spatial)",
+        crate::app::InputField::GraphEmbedDimensions => "Embedding dimensions (e.g. 64)",
+        crate::app::InputField::GraphEmbedWalkLength => "Walk length (default: 30)",
+        crate::app::InputField::GraphEmbedNumWalks => "Num walks per node (default: 10)",
+        crate::app::InputField::GraphEmbedP => "Return param p (default: 1.0)",
+        crate::app::InputField::GraphEmbedQ => "In-out param q (default: 1.0)",
+        crate::app::InputField::GraphEmbedEpochs => "Training epochs (LINE, default: 5)",
     };
 
     let popup_area = ratatui::layout::Rect {

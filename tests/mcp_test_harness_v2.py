@@ -4,10 +4,10 @@ import json, os, subprocess, sys, math, struct, select, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-# Prefer the quick profile binary with ML feature; fall back to release build
-SERVER_BIN = ROOT / "target" / "quick" / "rmpca-mcp-server"
+# Prefer debug build
+SERVER_BIN = ROOT / "target" / "debug" / "rmpca-mcp-server-legacy"
 if not SERVER_BIN.exists():
-    SERVER_BIN = ROOT / "target" / "release" / "rmpca-mcp-server"
+    SERVER_BIN = ROOT / "target" / "release" / "rmpca-mcp-server-legacy"
 TEST_DIR = ROOT / "mcp_test_data"
 
 def generate_city_grid_geojson(min_lon, min_lat, grid_size=6, spacing_m=200.0):

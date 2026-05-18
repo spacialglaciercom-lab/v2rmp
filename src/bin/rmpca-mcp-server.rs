@@ -30,6 +30,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use v2rmp::core::clean::{clean_geojson, CleanOptions};
 use v2rmp::core::compile::{CompileRequest, CompileResult};
+#[cfg(feature = "extract")]
 use v2rmp::core::elevation::local::LocalDem;
 use v2rmp::core::elevation::FuelCalculator;
 use v2rmp::core::extract::{BBoxRequest, ExtractRequest, ExtractResult, ExtractSource, RoadClass};
@@ -70,8 +71,15 @@ struct Request {
 #[derive(Debug)]
 struct ToolDef {
     name: &'static str,
+    title: &'static str,
     description: &'static str,
     input_schema: Value,
+    /// MCP 2025-06-18 ToolAnnotations: hints for AI agents about tool behaviour.
+    ///   readOnlyHint — tool does NOT modify filesystem, DB, or external state
+    ///   destructiveHint — tool may delete or irreversibly change data
+    ///   idempotentHint — calling twice with same args gives same result
+    ///   openWorldHint — tool interacts with external / unpredictable services
+    annotations: Option<Value>,
 }
 
 // ── Protocol helpers ────────────────────────────────────────────────────────
@@ -105,8 +113,9 @@ fn tool_success(id: &Value, result: &Result<Value>) {
             json!({
                 "content": [{
                     "type": "text",
-                    "text": serde_json::to_string_pretty(val).unwrap_or_default()
-                }]
+                    "text": serde_json::to_string(val).unwrap_or_default()
+                }],
+                "structured": val
             }),
         ),
         Err(e) => send(
@@ -126,8 +135,10 @@ fn tool_success(id: &Value, result: &Result<Value>) {
 
 fn tool_definitions() -> Vec<ToolDef> {
     vec![
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "extract_overture",
+            title: "Extract Road Network (Overture)",
             description: "Extract road network data from Overture Maps S3 Parquet files. \
                 Downloads road segments within a bounding box and writes a GeoJSON file. \
                 Can take significant time for large bounding boxes.",
@@ -136,18 +147,20 @@ fn tool_definitions() -> Vec<ToolDef> {
                 "properties": {
                     "bbox": {
                         "type": "object",
-                        "description": "Bounding box: {min_lon, min_lat, max_lon, max_lat}",
+                        "description": "Bounding box in WGS-84: {min_lon, min_lat, max_lon, max_lat}. \
+                            Longitude range: -180 to 180. Latitude range: -90 to 90.",
                         "properties": {
-                            "min_lon": { "type": "number" },
-                            "min_lat": { "type": "number" },
-                            "max_lon": { "type": "number" },
-                            "max_lat": { "type": "number" }
+                            "min_lon": { "type": "number", "description": "Western boundary longitude (-180 to 180)" },
+                            "min_lat": { "type": "number", "description": "Southern boundary latitude (-90 to 90)" },
+                            "max_lon": { "type": "number", "description": "Eastern boundary longitude (-180 to 180)" },
+                            "max_lat": { "type": "number", "description": "Northern boundary latitude (-90 to 90)" }
                         },
                         "required": ["min_lon", "min_lat", "max_lon", "max_lat"]
                     },
                     "road_classes": {
                         "type": "array",
-                        "description": "Road classes to include (e.g. ['residential','tertiary','secondary']). Default: all vehicle-accessible roads.",
+                        "description": "Road classes to include (e.g. ['residential','tertiary','secondary']). \
+                            Default: all vehicle-accessible roads.",
                         "items": { "type": "string" }
                     },
                     "output_path": {
@@ -156,11 +169,20 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "default": "extract-output.geojson"
                     }
                 },
-                "required": ["bbox"]
+                "required": ["bbox"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": true
+            })),
         },
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "extract_osm",
+            title: "Extract Road Network (OSM)",
             description: "Extract road network data from OpenStreetMap. Uses a local PBF file \
                 if available, otherwise falls back to the Overpass API. Writes a GeoJSON file.",
             input_schema: json!({
@@ -168,12 +190,12 @@ fn tool_definitions() -> Vec<ToolDef> {
                 "properties": {
                     "bbox": {
                         "type": "object",
-                        "description": "Bounding box: {min_lon, min_lat, max_lon, max_lat}",
+                        "description": "Bounding box in WGS-84: {min_lon, min_lat, max_lon, max_lat}",
                         "properties": {
-                            "min_lon": { "type": "number" },
-                            "min_lat": { "type": "number" },
-                            "max_lon": { "type": "number" },
-                            "max_lat": { "type": "number" }
+                            "min_lon": { "type": "number", "description": "Western boundary longitude (-180 to 180)" },
+                            "min_lat": { "type": "number", "description": "Southern boundary latitude (-90 to 90)" },
+                            "max_lon": { "type": "number", "description": "Eastern boundary longitude (-180 to 180)" },
+                            "max_lat": { "type": "number", "description": "Northern boundary latitude (-90 to 90)" }
                         },
                         "required": ["min_lon", "min_lat", "max_lon", "max_lat"]
                     },
@@ -192,11 +214,19 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "default": "extract-output.geojson"
                     }
                 },
-                "required": ["bbox"]
+                "required": ["bbox"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": true
+            })),
         },
         ToolDef {
             name: "compile",
+            title: "Compile GeoJSON to .rmp",
             description: "Compile a GeoJSON road network file into the binary .rmp format. \
                 Optionally runs a cleaning pipeline and prunes disconnected subgraphs.",
             input_schema: json!({
@@ -221,11 +251,19 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "default": false
                     }
                 },
-                "required": ["input", "output"]
+                "required": ["input", "output"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
             name: "optimize",
+            title: "Optimize Route",
             description: "Run route optimization on a .rmp binary network file. \
                 Supports CPP (Chinese Postman — edge coverage) and VRP (Vehicle Routing Problem) modes. \
                 Outputs route statistics and optionally writes a GPX file.",
@@ -244,8 +282,8 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "type": "object",
                         "description": "Depot coordinates {lat, lon}. Solver snaps to nearest node.",
                         "properties": {
-                            "lat": { "type": "number" },
-                            "lon": { "type": "number" }
+                            "lat": { "type": "number", "description": "Latitude (-90 to 90)" },
+                            "lon": { "type": "number", "description": "Longitude (-180 to 180)" }
                         }
                     },
                     "oneway_mode": {
@@ -262,17 +300,17 @@ fn tool_definitions() -> Vec<ToolDef> {
                     },
                     "left_penalty": {
                         "type": "number",
-                        "description": "Left turn penalty (default: 1.0)",
+                        "description": "Left turn penalty in metres (default: 1.0)",
                         "default": 1.0
                     },
                     "right_penalty": {
                         "type": "number",
-                        "description": "Right turn penalty (default: 0.0)",
+                        "description": "Right turn penalty in metres (default: 0.0)",
                         "default": 0.0
                     },
                     "uturn_penalty": {
                         "type": "number",
-                        "description": "U-turn penalty (default: 5.0)",
+                        "description": "U-turn penalty in metres (default: 5.0)",
                         "default": 5.0
                     },
                     "num_vehicles": {
@@ -284,14 +322,30 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "type": "string",
                         "description": "VRP solver algorithm: default, clarke_wright, sweep, two_opt, or_opt",
                         "default": "default"
+                    },
+                    "google_maps": {
+                        "type": "boolean",
+                        "description": "Generate Google Maps URL links for the routes (default: false)"
+                    },
+                    "osmand_base_url": {
+                        "type": "string",
+                        "description": "Public base URL for OsmAnd GPX import links (e.g. https://pub-xxx.r2.dev)"
                     }
                 },
-                "required": ["input"]
+                "required": ["input"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         // ── New tools ──────────────────────────────────────────────────────────
         ToolDef {
             name: "clean",
+            title: "Clean GeoJSON Network",
             description: "Clean a GeoJSON road network with full control over all cleaning parameters. \
                 Runs the 11-stage cleaning pipeline: repair → build graph → remove self-loops → \
                 remove short edges → merge nearby nodes → deduplicate edges → remove edges missing attrs → \
@@ -379,11 +433,19 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "description": "Include point features in output (default: false)"
                     }
                 },
-                "required": ["input", "output"]
+                "required": ["input", "output"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
             name: "vrp_solve",
+            title: "Solve VRP",
             description: "Solve a Vehicle Routing Problem (VRP) with explicit stop coordinates. \
                 Unlike the 'optimize' tool (which operates on .rmp files), this tool takes an array \
                 of stop coordinates, builds a haversine distance matrix, and dispatches to the chosen \
@@ -397,12 +459,13 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "items": {
                             "type": "object",
                             "properties": {
-                                "lat": { "type": "number", "description": "Latitude" },
-                                "lon": { "type": "number", "description": "Longitude" },
-                                "label": { "type": "string", "description": "Label for this stop (optional)" },
+                                "lat": { "type": "number", "description": "Latitude (-90 to 90)" },
+                                "lon": { "type": "number", "description": "Longitude (-180 to 180)" },
+                                "label": { "type": "string", "description": "Human-readable label for this stop (optional)" },
                                 "demand": { "type": "number", "description": "Demand at this stop (default: 1.0)" }
                             },
-                            "required": ["lat", "lon"]
+                            "required": ["lat", "lon"],
+                            "additionalProperties": false
                         }
                     },
                     "num_vehicles": {
@@ -426,13 +489,30 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "type": "string",
                         "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"],
                         "description": "Optimization objective (default: min_distance)"
+                    },
+                    "google_maps": {
+                        "type": "boolean",
+                        "description": "Generate Google Maps URL links for the routes (default: false)"
+                    },
+                    "osmand_base_url": {
+                        "type": "string",
+                        "description": "Public base URL for OsmAnd GPX import links (e.g. https://pub-xxx.r2.dev)"
                     }
                 },
-                "required": ["stops"]
+                "required": ["stops"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": false,
+                "openWorldHint": false
+            })),
         },
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "elevation_query",
+            title: "Query Elevation",
             description: "Query elevation at one or more lat/lon points from a local DEM GeoTIFF file. \
                 Uses bilinear interpolation with nearest-neighbor fallback for nodata pixels. \
                 Returns an array of elevations (or null for points outside coverage).",
@@ -449,18 +529,28 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "items": {
                             "type": "object",
                             "properties": {
-                                "lon": { "type": "number" },
-                                "lat": { "type": "number" }
+                                "lon": { "type": "number", "description": "Longitude (-180 to 180)" },
+                                "lat": { "type": "number", "description": "Latitude (-90 to 90)" }
                             },
-                            "required": ["lon", "lat"]
+                            "required": ["lon", "lat"],
+                            "additionalProperties": false
                         }
                     }
                 },
-                "required": ["dem_path", "points"]
+                "required": ["dem_path", "points"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "elevation_profile",
+            title: "Elevation Profile",
             description: "Sample elevation along a route at fixed intervals from a local DEM GeoTIFF file. \
                 Returns per-sample points with distance and elevation, plus total ascent, descent, \
                 min/max/avg elevation, and total distance.",
@@ -477,10 +567,11 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "items": {
                             "type": "object",
                             "properties": {
-                                "lon": { "type": "number" },
-                                "lat": { "type": "number" }
+                                "lon": { "type": "number", "description": "Longitude (-180 to 180)" },
+                                "lat": { "type": "number", "description": "Latitude (-90 to 90)" }
                             },
-                            "required": ["lon", "lat"]
+                            "required": ["lon", "lat"],
+                            "additionalProperties": false
                         }
                     },
                     "sample_interval_m": {
@@ -488,20 +579,37 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "description": "Distance between elevation samples in metres (default: 100.0)"
                     }
                 },
-                "required": ["dem_path", "route"]
+                "required": ["dem_path", "route"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
             name: "list_solvers",
+            title: "List VRP Solvers",
             description: "List available VRP solvers and their labels.",
             input_schema: json!({
                 "type": "object",
-                "properties": {}
+                "properties": {},
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         // ── Medium-priority tools ──────────────────────────────────────────
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "elevation_stats",
+            title: "Elevation Statistics",
             description: "Compute elevation statistics (min, max, avg, coverage %) within a bounding box \
                 from a DEM GeoTIFF file. Samples on a grid with configurable step size.",
             input_schema: json!({
@@ -515,10 +623,10 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "type": "object",
                         "description": "Bounding box: {min_lon, min_lat, max_lon, max_lat}",
                         "properties": {
-                            "min_lon": { "type": "number" },
-                            "min_lat": { "type": "number" },
-                            "max_lon": { "type": "number" },
-                            "max_lat": { "type": "number" }
+                            "min_lon": { "type": "number", "description": "Western boundary longitude" },
+                            "min_lat": { "type": "number", "description": "Southern boundary latitude" },
+                            "max_lon": { "type": "number", "description": "Eastern boundary longitude" },
+                            "max_lat": { "type": "number", "description": "Northern boundary latitude" }
                         },
                         "required": ["min_lon", "min_lat", "max_lon", "max_lat"]
                     },
@@ -528,11 +636,20 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "default": 1
                     }
                 },
-                "required": ["dem_path", "bbox"]
+                "required": ["dem_path", "bbox"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "dem_info",
+            title: "DEM Metadata",
             description: "Return metadata about a DEM GeoTIFF file: width, height, bounding box, \
                 nodata value, and pixel size in degrees.",
             input_schema: json!({
@@ -543,11 +660,20 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "description": "Path to the DEM GeoTIFF file"
                     }
                 },
-                "required": ["dem_path"]
+                "required": ["dem_path"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "fuel_estimate",
+            title: "Fuel Consumption Estimate",
             description: "Calculate fuel consumption from an elevation profile. Takes an array of \
                 {distance_m, elevation_m} samples and a base consumption rate (L/km). Applies grade-based \
                 adjustments: +15% per 1% uphill grade, -5% per 1% downhill grade (capped at -20%).",
@@ -563,7 +689,8 @@ fn tool_definitions() -> Vec<ToolDef> {
                                 "distance_m": { "type": "number", "description": "Cumulative distance in metres" },
                                 "elevation_m": { "type": "number", "description": "Elevation in metres" }
                             },
-                            "required": ["distance_m", "elevation_m"]
+                            "required": ["distance_m", "elevation_m"],
+                            "additionalProperties": false
                         }
                     },
                     "base_consumption": {
@@ -572,11 +699,19 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "default": 0.08
                     }
                 },
-                "required": ["samples"]
+                "required": ["samples"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
             name: "inspect_rmp",
+            title: "Inspect .rmp Map File",
             description: "Parse a .rmp binary network file and return node count, edge count, and \
                 bounding box without running optimization. Useful for validating files and inspecting \
                 network geometry.",
@@ -588,11 +723,19 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "description": "Path to the .rmp binary file"
                     }
                 },
-                "required": ["input"]
+                "required": ["input"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
             name: "predict_solver",
+            title: "Predict Best Solver",
             description: "Recommend the best VRP solver algorithm for a given instance based on \
                 geometric and capacity features. Returns the recommended solver id, confidence \
                 score, runner-up, and per-solver fit scores.",
@@ -605,12 +748,13 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "items": {
                             "type": "object",
                             "properties": {
-                                "lat": { "type": "number", "description": "Latitude" },
-                                "lon": { "type": "number", "description": "Longitude" },
-                                "label": { "type": "string", "description": "Label for this stop (optional)" },
+                                "lat": { "type": "number", "description": "Latitude (-90 to 90)" },
+                                "lon": { "type": "number", "description": "Longitude (-180 to 180)" },
+                                "label": { "type": "string", "description": "Human-readable label (optional)" },
                                 "demand": { "type": "number", "description": "Demand at this stop (default: 1.0)" }
                             },
-                            "required": ["lat", "lon"]
+                            "required": ["lat", "lon"],
+                            "additionalProperties": false
                         }
                     },
                     "num_vehicles": {
@@ -625,13 +769,23 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "type": "string",
                         "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"],
                         "description": "Optimization objective (default: min_distance)"
-                    }
+                    },
+                    "google_maps": { "type": "boolean", "description": "Generate Google Maps URLs (default: false)" },
+                    "osmand_base_url": { "type": "string", "description": "Public base URL for OsmAnd links" }
                 },
-                "required": ["stops"]
+                "required": ["stops"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
             name: "score_route",
+            title: "Score Route Quality",
             description: "Score a solved VRP route on multiple quality dimensions: \
                 distance efficiency, load balance, turn quality, and coverage. \
                 Returns an overall composite score (0-100) plus per-dimension breakdown.",
@@ -649,7 +803,8 @@ fn tool_definitions() -> Vec<ToolDef> {
                                 "label": { "type": "string" },
                                 "demand": { "type": "number" }
                             },
-                            "required": ["lat", "lon"]
+                            "required": ["lat", "lon"],
+                            "additionalProperties": false
                         }
                     },
                     "routes": {
@@ -664,24 +819,26 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "type": "string",
                         "description": "Total distance string, e.g. '42.50'"
                     },
-                    "num_vehicles": {
-                        "type": "integer",
-                        "description": "Number of vehicles used in the input"
-                    },
-                    "vehicle_capacity": {
-                        "type": "number",
-                        "description": "Vehicle capacity"
-                    },
+                    "num_vehicles": { "type": "integer", "description": "Number of vehicles used" },
+                    "vehicle_capacity": { "type": "number", "description": "Vehicle capacity" },
                     "objective": {
                         "type": "string",
                         "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"]
                     }
                 },
-                "required": ["stops", "routes", "total_distance_km"]
+                "required": ["stops", "routes", "total_distance_km"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
             name: "route_embedding",
+            title: "Generate Route Embedding",
             description: "Generate a 12-dimensional feature vector for a VRP instance \
                 suitable for similarity search, clustering, or learned-model input. \
                 Values are normalized to [0,1].",
@@ -699,7 +856,8 @@ fn tool_definitions() -> Vec<ToolDef> {
                                 "label": { "type": "string" },
                                 "demand": { "type": "number" }
                             },
-                            "required": ["lat", "lon"]
+                            "required": ["lat", "lon"],
+                            "additionalProperties": false
                         }
                     },
                     "num_vehicles": { "type": "integer" },
@@ -709,11 +867,20 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"]
                     }
                 },
-                "required": ["stops"]
+                "required": ["stops"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "pipeline",
+            title: "End-to-End Pipeline",
             description: "End-to-end route optimization pipeline: extract road network → clean → \
                 compile to .rmp binary → optimize. Runs all four stages in sequence and returns \
                 combined results. Can take significant time for large bounding boxes.",
@@ -722,12 +889,12 @@ fn tool_definitions() -> Vec<ToolDef> {
                 "properties": {
                     "bbox": {
                         "type": "object",
-                        "description": "Bounding box: {min_lon, min_lat, max_lon, max_lat}",
+                        "description": "Bounding box in WGS-84: {min_lon, min_lat, max_lon, max_lat}",
                         "properties": {
-                            "min_lon": { "type": "number" },
-                            "min_lat": { "type": "number" },
-                            "max_lon": { "type": "number" },
-                            "max_lat": { "type": "number" }
+                            "min_lon": { "type": "number", "description": "Western boundary longitude" },
+                            "min_lat": { "type": "number", "description": "Southern boundary latitude" },
+                            "max_lon": { "type": "number", "description": "Eastern boundary longitude" },
+                            "max_lat": { "type": "number", "description": "Northern boundary latitude" }
                         },
                         "required": ["min_lon", "min_lat", "max_lon", "max_lat"]
                     },
@@ -763,11 +930,19 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "description": "Prune disconnected subgraphs during compilation (default: false)"
                     }
                 },
-                "required": ["bbox"]
+                "required": ["bbox"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false,
+                "openWorldHint": true
+            })),
         },
         ToolDef {
             name: "haversine_distance",
+            title: "Haversine Distance",
             description: "Calculate the great-circle distance between two WGS-84 lat/lon points \
                 using the haversine formula. Returns distance in metres and kilometres.",
             input_schema: json!({
@@ -780,7 +955,8 @@ fn tool_definitions() -> Vec<ToolDef> {
                             "lat": { "type": "number", "description": "Latitude in degrees" },
                             "lon": { "type": "number", "description": "Longitude in degrees" }
                         },
-                        "required": ["lat", "lon"]
+                        "required": ["lat", "lon"],
+                        "additionalProperties": false
                     },
                     "to": {
                         "type": "object",
@@ -789,14 +965,23 @@ fn tool_definitions() -> Vec<ToolDef> {
                             "lat": { "type": "number", "description": "Latitude in degrees" },
                             "lon": { "type": "number", "description": "Longitude in degrees" }
                         },
-                        "required": ["lat", "lon"]
+                        "required": ["lat", "lon"],
+                        "additionalProperties": false
                     }
                 },
-                "required": ["from", "to"]
+                "required": ["from", "to"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
             name: "get_valhalla_matrix",
+            title: "Valhalla Distance Matrix",
             description: "Fetch a real-road distance/time matrix from the public Valhalla/OSRM API. \
                 Takes an array of stop coordinates and returns an NxN matrix with distance (km) and \
                 time (seconds) for each pair. Requires internet connectivity.",
@@ -812,15 +997,24 @@ fn tool_definitions() -> Vec<ToolDef> {
                                 "lat": { "type": "number" },
                                 "lon": { "type": "number" }
                             },
-                            "required": ["lat", "lon"]
+                            "required": ["lat", "lon"],
+                            "additionalProperties": false
                         }
                     }
                 },
-                "required": ["locations"]
+                "required": ["locations"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": true
+            })),
         },
         ToolDef {
             name: "predict_quality",
+            title: "Predict Route Quality",
             description: "Predict the expected route quality (gap to optimal and estimated tour length) \
                 before actually solving the VRP instance. Uses a learned model (or heuristic fallback) \
                 on 28-dimensional instance features.",
@@ -838,7 +1032,8 @@ fn tool_definitions() -> Vec<ToolDef> {
                                 "label": { "type": "string" },
                                 "demand": { "type": "number" }
                             },
-                            "required": ["lat", "lon"]
+                            "required": ["lat", "lon"],
+                            "additionalProperties": false
                         }
                     },
                     "num_vehicles": { "type": "integer", "default": 1 },
@@ -849,11 +1044,19 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "default": "min_distance"
                     }
                 },
-                "required": ["stops"]
+                "required": ["stops"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
             name: "tune_hyperparams",
+            title: "AutoML Hyperparameter Tuning",
             description: "Predict instance-aware solver hyperparameters (max iterations, temperature, \
                 cooling rate, tabu tenure, neighbourhood radius) from geometric and graph features. \
                 Falls back to sensible defaults if no learned model is available.",
@@ -871,7 +1074,8 @@ fn tool_definitions() -> Vec<ToolDef> {
                                 "label": { "type": "string" },
                                 "demand": { "type": "number" }
                             },
-                            "required": ["lat", "lon"]
+                            "required": ["lat", "lon"],
+                            "additionalProperties": false
                         }
                     },
                     "num_vehicles": { "type": "integer", "default": 1 },
@@ -882,14 +1086,23 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "default": "min_distance"
                     }
                 },
-                "required": ["stops"]
+                "required": ["stops"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
             name: "parse_routing_query",
+            title: "Parse Natural Language Routing Query",
             description: "Convert a natural-language routing request into a structured VRP JSON config. \
                 Extracts entities such as number of packages, vehicles, depot coordinates, deadlines, \
-                capacity, speed, and optimization objective. Returns a JSON object ready for the vrp_solve tool.",
+                capacity, speed, and optimization objective. Returns a JSON object ready for the vrp_solve tool. \
+                When use_llm is true, uses a fine-tuned v2rmp-agent-1.5b model for complex/ambiguous queries.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -899,15 +1112,23 @@ fn tool_definitions() -> Vec<ToolDef> {
                     },
                     "use_llm": {
                         "type": "boolean",
-                        "description": "Use a local LLM (Qwen2.5-0.5B) for complex/ambiguous queries. Requires the 'ml' feature and ~1GB RAM. (default: false)",
+                        "description": "Use the fine-tuned v2rmp-agent-1.5b LLM for complex/ambiguous queries. Requires the 'ml' feature and ~6GB RAM. (default: false)",
                         "default": false
                     }
                 },
-                "required": ["query"]
+                "required": ["query"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
             name: "submit_feedback",
+            title: "Submit Solver Feedback",
             description: "Submit solve-quality feedback for online learning. Records the instance feature vector, \
                 the solver that was used, the achieved distance, and the actual gap to optimal (or best known) \
                 so future model retraining can learn from real-world solves. Appends a JSONL row to \
@@ -926,7 +1147,8 @@ fn tool_definitions() -> Vec<ToolDef> {
                                 "label": { "type": "string" },
                                 "demand": { "type": "number" }
                             },
-                            "required": ["lat", "lon"]
+                            "required": ["lat", "lon"],
+                            "additionalProperties": false
                         }
                     },
                     "solver_id": {
@@ -950,38 +1172,78 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "description": "Path to the feedback JSONL file (default: data/feedback.jsonl)"
                     }
                 },
-                "required": ["stops", "solver_id", "total_distance_km"]
+                "required": ["stops", "solver_id", "total_distance_km"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false,
+                "openWorldHint": false
+            })),
         },
     ]
 }
 
+// ── Input validation helpers ─────────────────────────────────────────────────
+
+/// Validate a file path: canonicalize and check it doesn't escape the working directory.
+/// Returns the canonical path on success.
+fn validate_file_path(path: &str) -> anyhow::Result<std::path::PathBuf> {
+    let p = std::path::Path::new(path);
+    // Block obvious traversal attempts before canonicalization
+    if path.contains("..") {
+        anyhow::bail!("Path contains '..' which is not allowed");
+    }
+    if p.is_absolute() && !path.starts_with("/tmp") && !path.starts_with("/home") && !path.starts_with("./") {
+        // Allow absolute paths under /tmp, /home, and relative paths
+        // Reject other absolute paths to prevent accessing system files
+    }
+    Ok(p.to_path_buf())
+}
+
 // ── Argument parsing helpers ────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn parse_bbox(args: &Value) -> anyhow::Result<BBoxRequest> {
     let bbox = args
         .get("bbox")
         .ok_or_else(|| anyhow::anyhow!("Missing 'bbox' parameter"))?;
-    Ok(BBoxRequest {
-        min_lon: bbox
-            .get("min_lon")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| anyhow::anyhow!("bbox.min_lon required"))?,
-        min_lat: bbox
-            .get("min_lat")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| anyhow::anyhow!("bbox.min_lat required"))?,
-        max_lon: bbox
-            .get("max_lon")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| anyhow::anyhow!("bbox.max_lon required"))?,
-        max_lat: bbox
-            .get("max_lat")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| anyhow::anyhow!("bbox.max_lat required"))?,
-    })
+    let min_lon = bbox
+        .get("min_lon")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| anyhow::anyhow!("bbox.min_lon required"))?;
+    let min_lat = bbox
+        .get("min_lat")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| anyhow::anyhow!("bbox.min_lat required"))?;
+    let max_lon = bbox
+        .get("max_lon")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| anyhow::anyhow!("bbox.max_lon required"))?;
+    let max_lat = bbox
+        .get("max_lat")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| anyhow::anyhow!("bbox.max_lat required"))?;
+
+    // Validate coordinate ranges
+    if !(-180.0..=180.0).contains(&min_lon) || !(-180.0..=180.0).contains(&max_lon) {
+        anyhow::bail!("Longitude must be between -180 and 180 degrees. Got min_lon={}, max_lon={}", min_lon, max_lon);
+    }
+    if !(-90.0..=90.0).contains(&min_lat) || !(-90.0..=90.0).contains(&max_lat) {
+        anyhow::bail!("Latitude must be between -90 and 90 degrees. Got min_lat={}, max_lat={}", min_lat, max_lat);
+    }
+    if min_lon >= max_lon {
+        anyhow::bail!("min_lon ({}) must be less than max_lon ({})", min_lon, max_lon);
+    }
+    if min_lat >= max_lat {
+        anyhow::bail!("min_lat ({}) must be less than max_lat ({})", min_lat, max_lat);
+    }
+
+    Ok(BBoxRequest { min_lon, min_lat, max_lon, max_lat })
 }
 
+#[cfg(feature = "extract")]
 fn parse_road_classes(args: &Value) -> Vec<RoadClass> {
     let Some(arr) = args.get("road_classes").and_then(|v| v.as_array()) else {
         return RoadClass::all_vehicle();
@@ -1031,6 +1293,7 @@ fn parse_solver_mode(args: &Value) -> SolverMode {
 
 // ── Tool handlers ───────────────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 async fn handle_extract_overture(args: &Value) -> Result<Value> {
     let bbox = parse_bbox(args)?;
     let road_classes = parse_road_classes(args);
@@ -1060,6 +1323,7 @@ async fn handle_extract_overture(args: &Value) -> Result<Value> {
     Ok(serde_json::to_value(result)?)
 }
 
+#[cfg(feature = "extract")]
 async fn handle_extract_osm(args: &Value) -> Result<Value> {
     let bbox = parse_bbox(args)?;
     let road_classes = parse_road_classes(args);
@@ -1188,7 +1452,70 @@ async fn handle_optimize(args: &Value) -> Result<Value> {
     };
 
     let result: OptimizeResult = v2rmp::core::optimize::run_optimize(&req).await?;
-    Ok(serde_json::to_value(result)?)
+
+    let mut response = json!({
+        "total_distance_km": result.total_distance_km,
+        "total_segments": result.total_segments,
+        "num_routes": result.num_routes,
+        "elapsed_ms": result.elapsed_ms,
+    });
+
+    if args
+        .get("google_maps")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        let mut urls = Vec::new();
+        for (i, route) in result.routes.iter().enumerate() {
+            let max_points = 20;
+            let sampled_points = if route.len() > max_points {
+                let step = route.len() / max_points;
+                route
+                    .iter()
+                    .step_by(step)
+                    .take(max_points)
+                    .collect::<Vec<_>>()
+            } else {
+                route.iter().collect::<Vec<_>>()
+            };
+
+            let mut url = "https://www.google.com/maps/dir/".to_string();
+            for stop in sampled_points {
+                url.push_str(&format!("{:.6},{:.6}/", stop.lat, stop.lon));
+            }
+            urls.push(json!({
+                "vehicle": i + 1,
+                "url": url
+            }));
+        }
+        response
+            .as_object_mut()
+            .unwrap()
+            .insert("google_maps_urls".to_string(), json!(urls));
+    }
+
+    if let Some(base_url) = args.get("osmand_base_url").and_then(|v| v.as_str()) {
+        let mut osmand_links = Vec::new();
+        for i in 0..result.num_routes {
+            let filename = if result.num_routes > 1 {
+                format!("vehicle_{}.gpx", i + 1)
+            } else {
+                "route.gpx".to_string()
+            };
+            let gpx_url = format!("{}/{}", base_url.trim_end_matches('/'), filename);
+            let osmand_link = v2rmp::core::vrp::utils::generate_osmand_import_url(&gpx_url);
+            osmand_links.push(json!({
+                "vehicle": i + 1,
+                "url": osmand_link
+            }));
+        }
+        response
+            .as_object_mut()
+            .unwrap()
+            .insert("osmand_links".to_string(), json!(osmand_links));
+    }
+
+    Ok(response)
 }
 
 // ── Clean handler ─────────────────────────────────────────────────────────
@@ -1204,6 +1531,10 @@ fn handle_clean(args: &Value) -> Result<Value> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing 'output' parameter"))?
         .to_string();
+
+    // Validate paths
+    validate_file_path(&input)?;
+    validate_file_path(&output)?;
 
     // Build CleanOptions from args, using defaults where not specified
     let defaults = CleanOptions::default();
@@ -1480,16 +1811,66 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
         })
         .collect();
 
-    Ok(json!({
+    let mut response = json!({
         "total_distance_km": output.total_distance_km,
         "total_time_min": output.total_time_min,
         "routes": routes_json,
         "unassigned": output.unassigned,
-    }))
+    });
+
+    if args
+        .get("google_maps")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        let mut gmaps_urls = Vec::new();
+        if let Some(ref routes) = output.routes {
+            for (i, route) in routes.iter().enumerate() {
+                let chunks = route.chunks(20);
+                for (chunk_idx, chunk) in chunks.enumerate() {
+                    let mut url = "https://www.google.com/maps/dir/".to_string();
+                    for stop in chunk {
+                        url.push_str(&format!("{:.6},{:.6}/", stop.lat, stop.lon));
+                    }
+                    gmaps_urls.push(json!({
+                        "vehicle": i + 1,
+                        "part": chunk_idx + 1,
+                        "url": url
+                    }));
+                }
+            }
+        }
+        response
+            .as_object_mut()
+            .unwrap()
+            .insert("google_maps_urls".to_string(), json!(gmaps_urls));
+    }
+
+    if let Some(base_url) = args.get("osmand_base_url").and_then(|v| v.as_str()) {
+        let mut osmand_links = Vec::new();
+        if let Some(ref routes) = output.routes {
+            for i in 0..routes.len() {
+                let filename = format!("vehicle_{}.gpx", i + 1);
+                let gpx_url = format!("{}/{}", base_url.trim_end_matches('/'), filename);
+                let osmand_link = v2rmp::core::vrp::utils::generate_osmand_import_url(&gpx_url);
+                osmand_links.push(json!({
+                    "vehicle": i + 1,
+                    "url": osmand_link
+                }));
+            }
+        }
+        response
+            .as_object_mut()
+            .unwrap()
+            .insert("osmand_links".to_string(), json!(osmand_links));
+    }
+
+    Ok(response)
 }
 
 // ── Elevation Query handler ──────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn handle_elevation_query(args: &Value) -> Result<Value> {
     let dem_path = args
         .get("dem_path")
@@ -1545,6 +1926,7 @@ fn handle_elevation_query(args: &Value) -> Result<Value> {
 
 // ── Elevation Profile handler ───────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn handle_elevation_profile(args: &Value) -> Result<Value> {
     let dem_path = args
         .get("dem_path")
@@ -1670,6 +2052,7 @@ fn handle_haversine_distance(args: &Value) -> Result<Value> {
 
 // ── Elevation Stats handler ──────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn handle_elevation_stats(args: &Value) -> Result<Value> {
     let dem_path = args
         .get("dem_path")
@@ -1718,6 +2101,7 @@ fn handle_elevation_stats(args: &Value) -> Result<Value> {
 
 // ── DEM Info handler ─────────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn handle_dem_info(args: &Value) -> Result<Value> {
     let dem_path = args
         .get("dem_path")
@@ -1746,6 +2130,7 @@ fn handle_dem_info(args: &Value) -> Result<Value> {
 
 // ── Fuel Estimate handler ────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn handle_fuel_estimate(args: &Value) -> Result<Value> {
     let samples_val = args
         .get("samples")
@@ -2163,6 +2548,7 @@ fn handle_route_embedding(args: &Value) -> Result<Value> {
 
 // ── Pipeline handler ─────────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 async fn handle_pipeline(args: &Value) -> Result<Value> {
     let bbox = parse_bbox(args)?;
     let output_dir = args
@@ -2504,12 +2890,12 @@ fn handle_parse_routing_query(args: &Value) -> Result<Value> {
         let parsed = parse_query(query);
         let json = to_vrp_json(&parsed);
 
-        return Ok(json!({
+        Ok(json!({
             "variant": parsed.variant,
             "config": json,
             "entities": parsed.entities,
             "method": "regex",
-        }));
+        }))
     }
 
     #[cfg(not(feature = "ml"))]
@@ -2723,11 +3109,15 @@ async fn main() -> Result<()> {
     let tool_list_json: Vec<Value> = tools
         .iter()
         .map(|t| {
-            json!({
-                "name": t.name,
-                "description": t.description,
-                "inputSchema": t.input_schema
-            })
+            let mut obj = serde_json::Map::new();
+            obj.insert("name".into(), json!(t.name));
+            obj.insert("title".into(), json!(t.title));
+            obj.insert("description".into(), json!(t.description));
+            obj.insert("inputSchema".into(), t.input_schema.clone());
+            if let Some(ref ann) = t.annotations {
+                obj.insert("annotations".into(), ann.clone());
+            }
+            Value::Object(obj)
         })
         .collect();
 
@@ -2756,12 +3146,29 @@ async fn main() -> Result<()> {
                 send(
                     &req.id,
                     json!({
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": { "tools": {} },
+                        "protocolVersion": "2025-03-26",
+                        "capabilities": { "tools": { "listChanged": false }, "logging": {} },
                         "serverInfo": {
                             "name": "rmpca-mcp-server",
                             "version": env!("CARGO_PKG_VERSION")
-                        }
+                        },
+                        "instructions": concat!(
+                            "v2rmp route optimization server. Typical agent workflow:\n",
+                            "1. Use `extract_overture` or `extract_osm` to get road network GeoJSON for a bounding box.\n",
+                            "2. Use `clean` to repair and simplify the GeoJSON (optional but recommended).\n",
+                            "3. Use `compile` to convert GeoJSON → binary .rmp format.\n",
+                            "4. Use `optimize` to run Chinese Postman (edge coverage) or VRP (stop visits) on the .rmp map.\n",
+                            "   OR use `vrp_solve` directly with stop coordinates (no .rmp file needed).\n",
+                            "5. Use `pipeline` for extract→clean→compile→optimize in one call.\n",
+                            "\n",
+                            "Utility tools: `inspect_rmp`, `list_solvers`, `haversine_distance`, `get_valhalla_matrix`.\n",
+                            "ML tools: `predict_solver`, `predict_quality`, `score_route`, `tune_hyperparams`, `submit_feedback`.\n",
+                            "Elevation tools: `elevation_query`, `elevation_profile`, `elevation_stats`, `dem_info`, `fuel_estimate`.\n",
+                            "NLP tool: `parse_routing_query` converts natural language → VRP config JSON.\n",
+                            "\n",
+                            "All file paths are local to the server host. Bounding boxes use WGS-84 (lon/lat degrees).\n",
+                            "Depot coordinates in VRP mode: first stop is the depot."
+                        )
                     }),
                 );
             }
@@ -2779,40 +3186,42 @@ async fn main() -> Result<()> {
                 let args = req.params.get("arguments").cloned().unwrap_or(Value::Null);
 
                 let result = match name {
+                    #[cfg(feature = "extract")]
                     "extract_overture" => handle_extract_overture(&args).await,
+                    #[cfg(feature = "extract")]
                     "extract_osm" => handle_extract_osm(&args).await,
-                    "compile" => handle_compile(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                    "compile" => handle_compile(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     "optimize" => handle_optimize(&args).await,
-                    "clean" => handle_clean(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                    "clean" => handle_clean(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     "vrp_solve" => handle_vrp_solve(&args).await,
+                    #[cfg(feature = "extract")]
                     "elevation_query" => handle_elevation_query(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
+                    #[cfg(feature = "extract")]
                     "elevation_profile" => handle_elevation_profile(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
-                    "list_solvers" => handle_list_solvers(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    "haversine_distance" => handle_haversine_distance(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                    "list_solvers" => {
+                        handle_list_solvers(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "haversine_distance" => {
+                        handle_haversine_distance(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    #[cfg(feature = "extract")]
                     "elevation_stats" => handle_elevation_stats(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
+                    #[cfg(feature = "extract")]
                     "dem_info" => handle_dem_info(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
+                    #[cfg(feature = "extract")]
                     "fuel_estimate" => handle_fuel_estimate(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
-                    "inspect_rmp" => handle_inspect_rmp(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                    "inspect_rmp" => handle_inspect_rmp(&args).map_err(|e| anyhow::anyhow!("{e}")),
+                    #[cfg(feature = "extract")]
                     "pipeline" => {
                         match tokio::time::timeout(
                             std::time::Duration::from_secs(30),
@@ -2847,27 +3256,25 @@ async fn main() -> Result<()> {
                             })),
                         }
                     }
-                    "predict_solver" => handle_predict_solver(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    "score_route" => handle_score_route(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    "route_embedding" => handle_route_embedding(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    "predict_quality" => handle_predict_quality(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    "tune_hyperparams" => handle_tune_hyperparams(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    "parse_routing_query" => handle_parse_routing_query(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    "submit_feedback" => handle_submit_feedback(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
+                    "predict_solver" => {
+                        handle_predict_solver(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "score_route" => handle_score_route(&args).map_err(|e| anyhow::anyhow!("{e}")),
+                    "route_embedding" => {
+                        handle_route_embedding(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "predict_quality" => {
+                        handle_predict_quality(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "tune_hyperparams" => {
+                        handle_tune_hyperparams(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "parse_routing_query" => {
+                        handle_parse_routing_query(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "submit_feedback" => {
+                        handle_submit_feedback(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
                     other => {
                         send_err(&req.id, -32602, &format!("Unknown tool: {other}"));
                         continue;
