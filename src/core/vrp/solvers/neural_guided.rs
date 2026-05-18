@@ -7,6 +7,8 @@
 //!
 //! Research basis: RLOR (2303.13117)
 
+#![allow(clippy::ptr_arg, clippy::needless_range_loop)]
+
 use super::super::types::*;
 use super::super::utils::{build_sweep_routes, matrix_get_dist};
 use anyhow::{Context, Result};

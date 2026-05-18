@@ -155,9 +155,7 @@ fn try_embed_network(
         x_features.push((edge.weight_m / 1000.0) as f32); // length
         x_features.push(edge.oneway as f32); // oneway flag
                                              // padding to 10 dims
-        for _ in 0..8 {
-            x_features.push(0.0);
-        }
+        x_features.resize(x_features.len() + 8, 0.0);
     }
     let x = Tensor::from_vec(x_features, (num_edges, 10), &model.device)?;
 

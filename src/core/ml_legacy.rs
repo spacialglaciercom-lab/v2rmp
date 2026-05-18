@@ -157,7 +157,7 @@ pub fn predict_solver(features: &RouteFeatures) -> SolverPrediction {
                     *score += 0.1;
                 }
             }
-            "two_opt" => {
+            "two_opt" if (30..=300).contains(&n) => {
                 // 2-Opt untangling: good for post-processing or medium routes
                 if (30..=300).contains(&n) {
                     *score += 0.1;
