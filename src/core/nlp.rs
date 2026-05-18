@@ -267,7 +267,7 @@ impl QwenNLParser {
 
         let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_path], dtype, &device)? };
 
-        tracing::info!("Loading v2rmp-agent-1.5b model into Candle ({:?})...", dtype);
+        tracing::info!("Loading Qwen2.5 model into Candle ({:?})...", dtype);
         let model = ModelForCausalLM::new(&config, vb)?;
 
         Ok(Self {
@@ -279,7 +279,7 @@ impl QwenNLParser {
 
     /// Translates a natural language query into a VRP JSON string using the LLM.
     pub fn parse_llm(&mut self, query: &str) -> Result<String> {
-        let system_prompt = "You are an expert route optimization agent for the v2rmp ecosystem (rmpca CLI). Convert the user's natural language request into the appropriate v2rmp command or JSON action. If the request is about VRP configuration, extract: 'variant', 'num_stops', 'num_vehicles', 'depot' (as {\"lat\": .., \"lon\": ..}), 'deadline' (HH:MM), 'capacity'. If the request is about a CLI command, provide the exact rmpca invocation. ONLY output valid JSON or command text and nothing else.";
+        let system_prompt = "You are an expert route optimization assistant. Convert the user's natural language routing query into a valid JSON object describing the Vehicle Routing Problem (VRP) configuration. Extract: 'num_stops', 'num_vehicles', 'depot' (as {\"lat\": .., \"lon\": ..}), 'deadline' (HH:MM), 'capacity', 'variant' (e.g., 'cvrp', 'cvrptw'). ONLY output valid JSON and nothing else.";
 
         let prompt = format!("<|im_start|>system\n{}<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n", system_prompt, query);
 

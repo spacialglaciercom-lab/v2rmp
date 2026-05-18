@@ -1,10 +1,3 @@
-## 2025-05-15 - Spatial Pruning for Greedy Matching in CPP
-**Learning:** In the Chinese Postman Problem (CPP), finding the minimum weight perfect matching for odd-degree vertices is often solved greedily by picking an unmatched vertex and finding its nearest unmatched neighbor. An $O(N^2)$ exhaustive search becomes a significant bottleneck as the number of odd-degree vertices ($N$) increases (e.g., thousands of nodes). Sorting vertices by one dimension (e.g., latitude) and pruning the search when the distance in that dimension exceeds the current best distance reduces the average-case complexity dramatically.
-**Action:** Always consider spatial indexing or pruning (like sorting by latitude/longitude or using a KD-tree) when performing nearest-neighbor searches on geographic data.
-
-## 2025-05-16 - Pre-calculating Bearings in CPP Solver
-**Learning:** In the Chinese Postman Problem (CPP), calculating turn penalties during Dijkstra search and final turn classification requires many redundant trigonometric calls (bearing calculations). Pre-calculating bearings for every edge when building the adjacency list and passing the incoming bearing in the search state reduces total runtime significantly (~1.1x speedup on large grids).
-**Action:** In geometric graph algorithms, always prefer pre-calculating and storing edge metadata (like bearings) instead of recomputing them from coordinates in inner loops.
-## 2026-05-17 - Pre-calculating Bearings in CPP Solver
-**Learning:** In the Chinese Postman Problem (CPP) solver, calculating geographic bearings using trigonometric functions is a significant bottleneck when performed repeatedly within the Dijkstra loop and final turn classification. By pre-calculating and caching these bearings in the adjacency list, execution time for a 2,500-node grid was reduced by approximately 43.5%.
-**Action:** Always cache static geographic metadata (like bearings or distances) when building graph adjacency structures to avoid redundant expensive calculations during graph traversal.
+## 2024-05-14 - Extract matched pattern helper for clean code
+**Learning:** We extracted deeply nested Enum `match` in `close_file_browser` into its own helper `apply_file_selection` with earlier `else return` clauses to make `src/app.rs` more readable without altering functionality.
+**Action:** Extract repetitive assignment/logging handlers into distinct, semantically-named functions whenever indentation creeps beyond 3 or 4 levels to keep method lengths manageable.
