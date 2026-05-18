@@ -10,6 +10,7 @@ use tokio::runtime::Runtime;
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use v2rmp::core::ml::features::InstanceFeatures;
 use v2rmp::core::ml::selector::{predict_solver, NeuralPrediction};
 use v2rmp::core::vrp::registry::{get_solver_list, solve_with};
 use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};

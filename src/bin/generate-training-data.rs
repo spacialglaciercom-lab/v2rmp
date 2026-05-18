@@ -20,7 +20,7 @@ use tokio::runtime::Runtime;
 use v2rmp::core::haversine_m;
 use v2rmp::core::ml::features::InstanceFeatures;
 use v2rmp::core::vrp::registry::{get_solver_list, solve_with};
-use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
+use v2rmp::core::vrp::types::{SolverHyperparams, VRPSolverInput, VRPSolverStop, VrpObjective};
 use v2rmp::core::vrp::utils::build_haversine_matrix;
 
 /// Generate a single synthetic VRP instance with depot at index 0.

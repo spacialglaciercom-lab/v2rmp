@@ -112,11 +112,8 @@ pub fn build_graph_matrix(
     // 1. Build adjacency list
     let mut adj = vec![Vec::new(); n_nodes];
     for (i, edge) in edges.iter().enumerate() {
-        #[cfg(feature = "ml")]
-        let mut weight = edge.weight_m;
-        #[cfg(not(feature = "ml"))]
         let weight = edge.weight_m;
-
+        
         // Apply learned embedding if available
         #[cfg(feature = "ml")]
         if let Some(embs) = embeddings {
