@@ -410,13 +410,13 @@ fn all_pairs_shortest_paths(dists: &[Vec<f64>]) -> (Vec<Vec<f64>>, f64, f64) {
     let mut max_d = 0.0;
     let mut sum_d = 0.0;
     let mut count = 0;
-    for i in 0..n {
-        for j in (i + 1)..n {
-            if sp[i][j] < f64::MAX / 2.0 {
-                if sp[i][j] > max_d {
-                    max_d = sp[i][j];
+    for (i, row) in sp.iter().enumerate().take(n) {
+        for item in row.iter().skip(i + 1).take(n - (i + 1)) {
+            if *item < f64::MAX / 2.0 {
+                if *item > max_d {
+                    max_d = *item;
                 }
-                sum_d += sp[i][j];
+                sum_d += *item;
                 count += 1;
             }
         }

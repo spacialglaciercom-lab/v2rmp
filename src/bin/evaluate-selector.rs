@@ -150,7 +150,7 @@ fn main() {
     let mut neural_wins = 0usize;
     let mut default_wins = 0usize;
     let mut or_opt_wins = 0usize;
-    let oracle_wins = 0usize;
+    let _oracle_wins = 0usize;
 
     let mut neural_total_dist = 0.0f64;
     let mut default_total_dist = 0.0f64;
@@ -172,6 +172,7 @@ fn main() {
             confidence: 0.0,
             runner_up: None,
             all_scores: vec![],
+            model_used: false,
         });
 
         // Run all solvers

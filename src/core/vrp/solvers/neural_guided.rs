@@ -7,6 +7,8 @@
 //!
 //! Research basis: RLOR (2303.13117)
 
+#![allow(clippy::ptr_arg, clippy::needless_range_loop)]
+
 use super::super::types::*;
 use super::super::utils::{build_sweep_routes, matrix_get_dist};
 use anyhow::{Context, Result};
@@ -137,7 +139,7 @@ fn move_features_oropt(
         chain_len as f32,
         if is_rev { 1.0 } else { 0.0 },
         (delta / (remove_gain.abs() + 1e-6)) as f32,
-        (chain_len as f32 / route_len as f32) as f32,
+        (chain_len as f32 / route_len as f32),
         0.0,
         0.0,
         0.0,

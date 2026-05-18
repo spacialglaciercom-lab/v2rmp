@@ -13,6 +13,8 @@ pub enum View {
     Clean,
     Optimize,
     Vrp,
+    Neural,
+    GraphEmbed,
     BrowseMaps,
     BrowseRoutes,
     FileBrowser,
@@ -305,7 +307,20 @@ pub enum InputField {
     VrpAlgorithm,
     VrpCapacity,
     VrpDepot,
+    VrpVehicles,
     VrpWaypointsFile,
+    VrpModelPath,
+    OsmandBaseUrl,
+    // Graph Embed fields
+    GraphEmbedInputFile,
+    GraphEmbedOutputFile,
+    GraphEmbedMethod,
+    GraphEmbedDimensions,
+    GraphEmbedWalkLength,
+    GraphEmbedNumWalks,
+    GraphEmbedP,
+    GraphEmbedQ,
+    GraphEmbedEpochs,
 }
 
 pub struct App {
@@ -350,7 +365,28 @@ pub struct App {
     pub vrp_depots: Vec<String>,
     pub vrp_csv_file: Option<String>,
     pub vrp_waypoints_file: Option<String>,
+    pub vrp_model_path: String,
     pub vrp_status: Status,
+
+    /// Generated Google Maps URLs from the last optimization/VRP solve
+    pub google_maps_urls: Vec<String>,
+    /// Generated OsmAnd links from the last optimization/VRP solve
+    pub osmand_links: Vec<String>,
+    /// Base URL for OsmAnd links (persisted during session)
+    pub osmand_base_url: Option<String>,
+
+    // Graph Embed state
+    pub graph_embed_input: Option<String>,
+    pub graph_embed_output: Option<String>,
+    pub graph_embed_method: String,
+    pub graph_embed_dimensions: usize,
+    pub graph_embed_walk_length: usize,
+    pub graph_embed_num_walks: usize,
+    pub graph_embed_p: f64,
+    pub graph_embed_q: f64,
+    pub graph_embed_epochs: usize,
+    pub graph_embed_include_edges: bool,
+    pub graph_embed_status: Status,
 
     // Browse state
     pub cached_maps: Vec<String>,
@@ -413,7 +449,24 @@ impl App {
             vrp_depots: Vec::new(),
             vrp_csv_file: None,
             vrp_waypoints_file: None,
+            vrp_model_path: "cvrp50_model.onnx".to_string(),
             vrp_status: Status::Ready,
+
+            google_maps_urls: Vec::new(),
+            osmand_links: Vec::new(),
+            osmand_base_url: None,
+
+            graph_embed_input: None,
+            graph_embed_output: None,
+            graph_embed_method: "line".to_string(),
+            graph_embed_dimensions: 64,
+            graph_embed_walk_length: 30,
+            graph_embed_num_walks: 10,
+            graph_embed_p: 1.0,
+            graph_embed_q: 1.0,
+            graph_embed_epochs: 5,
+            graph_embed_include_edges: false,
+            graph_embed_status: Status::Ready,
 
             cached_maps: Vec::new(),
             saved_routes: Vec::new(),
@@ -453,6 +506,8 @@ impl App {
             .map(|b| b.previous_view.clone())
             .unwrap_or(View::Home);
 
+        let browser_field = self.file_browser.take().map(|b| b.target_field.clone());
+
         if let Some(path) = selected_path {
             let path_str = path.to_string_lossy().to_string();
 
@@ -464,8 +519,82 @@ impl App {
             // User cancelled — restore the view they came from
             self.current_view = previous_view;
         }
+    }
 
-        self.file_browser = None;
+    fn apply_file_selection(&mut self, field: InputField, path_str: String) {
+        match field {
+            InputField::InputFile => {
+                self.input_file = Some(path_str.clone());
+                if self.output_file.is_none() {
+                    let out = path_str
+                        .replace(".geojson", ".rmp")
+                        .replace(".json", ".rmp");
+                    self.output_file = Some(out);
+                }
+                self.log(
+                    LogLevel::Success,
+                    format!("Input file selected: {}", path_str),
+                );
+                self.current_view = View::Compile;
+            }
+            InputField::OutputFile => {
+                self.output_file = Some(path_str.clone());
+                self.log(
+                    LogLevel::Success,
+                    format!("Output file selected: {}", path_str),
+                );
+                self.current_view = View::Compile;
+            }
+            InputField::CacheFile => {
+                self.cache_file = Some(path_str.clone());
+                self.log(
+                    LogLevel::Success,
+                    format!("Cache file selected: {}", path_str),
+                );
+                self.current_view = View::Optimize;
+            }
+            InputField::RouteFile => {
+                self.route_file = Some(path_str.clone());
+                self.log(
+                    LogLevel::Success,
+                    format!("Route file selected: {}", path_str),
+                );
+                self.current_view = View::Optimize;
+            }
+            InputField::CleanInputFile => {
+                self.clean_input_file = Some(path_str.clone());
+                if self.clean_output_file.is_none() {
+                    let out = path_str
+                        .replace(".geojson", ".cleaned.geojson")
+                        .replace(".json", ".cleaned.json");
+                    self.clean_output_file = Some(out);
+                }
+                self.log(
+                    LogLevel::Success,
+                    format!("Clean input file selected: {}", path_str),
+                );
+                self.current_view = View::Clean;
+            }
+            InputField::CleanOutputFile => {
+                self.clean_output_file = Some(path_str.clone());
+                self.log(
+                    LogLevel::Success,
+                    format!("Clean output file selected: {}", path_str),
+                );
+                self.current_view = View::Clean;
+            }
+            InputField::VrpWaypointsFile => {
+                self.vrp_waypoints_file = Some(path_str.clone());
+                self.log(
+                    LogLevel::Success,
+                    format!("VRP waypoints file selected: {}", path_str),
+                );
+                self.current_view = View::Vrp;
+            }
+            _ => {
+                self.current_view = View::Home;
+            }
+        }
     }
 
     fn handle_file_selection(&mut self, target_field: InputField, path_str: String) {
@@ -676,6 +805,12 @@ impl App {
                 self.vrp_depots.push(value.clone());
                 self.log(LogLevel::Success, format!("VRP depot added: {}", value));
             }
+            InputField::VrpVehicles => {
+                if let Ok(v) = value.parse::<usize>() {
+                    self.vrp_vehicles = v;
+                    self.log(LogLevel::Success, format!("VRP vehicles set: {}", v));
+                }
+            }
             InputField::VrpWaypointsFile => {
                 self.vrp_waypoints_file = Some(value.clone());
                 self.log(
@@ -705,6 +840,63 @@ impl App {
                 self.solver_id = value.clone();
                 self.log(LogLevel::Success, format!("Solver ID set: {}", value));
             }
+            InputField::OsmandBaseUrl => {
+                self.osmand_base_url = Some(value.clone());
+                self.log(LogLevel::Success, format!("OsmAnd base URL set: {}", value));
+            }
+            InputField::GraphEmbedInputFile => {
+                self.graph_embed_input = Some(value.clone());
+                self.log(LogLevel::Success, format!("Graph embed input set: {}", value));
+            }
+            InputField::GraphEmbedOutputFile => {
+                self.graph_embed_output = Some(value.clone());
+                self.log(LogLevel::Success, format!("Graph embed output set: {}", value));
+            }
+            InputField::GraphEmbedMethod => {
+                let valid = ["node2vec", "line", "fastrp", "spatial"];
+                if valid.contains(&value.to_lowercase().as_str()) {
+                    self.graph_embed_method = value.to_lowercase();
+                    self.log(LogLevel::Success, format!("Method set: {}", self.graph_embed_method));
+                } else {
+                    self.log(LogLevel::Error, format!("Invalid method '{}'. Use: node2vec, line, fastrp, spatial", value));
+                }
+            }
+            InputField::GraphEmbedDimensions => {
+                if let Ok(v) = value.parse::<usize>() {
+                    self.graph_embed_dimensions = v;
+                    self.log(LogLevel::Success, format!("Dimensions set: {}", v));
+                }
+            }
+            InputField::GraphEmbedWalkLength => {
+                if let Ok(v) = value.parse::<usize>() {
+                    self.graph_embed_walk_length = v;
+                    self.log(LogLevel::Success, format!("Walk length set: {}", v));
+                }
+            }
+            InputField::GraphEmbedNumWalks => {
+                if let Ok(v) = value.parse::<usize>() {
+                    self.graph_embed_num_walks = v;
+                    self.log(LogLevel::Success, format!("Num walks set: {}", v));
+                }
+            }
+            InputField::GraphEmbedP => {
+                if let Ok(v) = value.parse::<f64>() {
+                    self.graph_embed_p = v;
+                    self.log(LogLevel::Success, format!("Return param p set: {}", v));
+                }
+            }
+            InputField::GraphEmbedQ => {
+                if let Ok(v) = value.parse::<f64>() {
+                    self.graph_embed_q = v;
+                    self.log(LogLevel::Success, format!("In-out param q set: {}", v));
+                }
+            }
+            InputField::GraphEmbedEpochs => {
+                if let Ok(v) = value.parse::<usize>() {
+                    self.graph_embed_epochs = v;
+                    self.log(LogLevel::Success, format!("Epochs set: {}", v));
+                }
+            }
         }
         self.input_mode.active = false;
     }
@@ -718,7 +910,7 @@ impl App {
     pub fn navigate_up(&mut self) {
         match self.current_view {
             View::Home => {
-                self.workflow_selection = (self.workflow_selection + 6) % 7;
+                self.workflow_selection = (self.workflow_selection + 8) % 9;
             }
             View::BrowseMaps => {
                 let max = self.cached_maps.len().max(1);
@@ -739,7 +931,7 @@ impl App {
     pub fn navigate_down(&mut self) {
         match self.current_view {
             View::Home => {
-                self.workflow_selection = (self.workflow_selection + 1) % 7;
+                self.workflow_selection = (self.workflow_selection + 1) % 9;
             }
             View::BrowseMaps => {
                 let max = self.cached_maps.len().max(1);

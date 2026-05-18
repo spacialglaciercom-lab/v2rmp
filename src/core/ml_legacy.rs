@@ -4,8 +4,8 @@
 //! swapped for learned models later.  All functions are pure (no I/O) so
 //! they work in MCP handlers, TUI callbacks, and WASM targets.
 
-use super::vrp::types::{VRPSolverInput, VRPSolverOutput, VrpObjective, VRPSolverStop};
 use super::haversine_m;
+use super::vrp::types::{VRPSolverInput, VRPSolverOutput, VRPSolverStop, VrpObjective};
 
 // ── Route feature extraction ───────────────────────────────────────────
 
@@ -135,10 +135,10 @@ pub fn predict_solver(features: &RouteFeatures) -> SolverPrediction {
                 if features.tight_capacity {
                     *score += 0.2;
                 }
-                if n >= 20 && n <= 200 {
+                if (20..=200).contains(&n) {
                     *score += 0.1;
                 }
-                if v >= 2 && v <= 10 {
+                if (2..=10).contains(&v) {
                     *score += 0.1;
                 }
                 if features.objective == VrpObjective::MinDistance {
@@ -157,9 +157,9 @@ pub fn predict_solver(features: &RouteFeatures) -> SolverPrediction {
                     *score += 0.1;
                 }
             }
-            "two_opt" => {
+            "two_opt" if (30..=300).contains(&n) => {
                 // 2-Opt untangling: good for post-processing or medium routes
-                if n >= 30 && n <= 300 {
+                if (30..=300).contains(&n) {
                     *score += 0.1;
                 }
             }
@@ -190,7 +190,10 @@ pub fn predict_solver(features: &RouteFeatures) -> SolverPrediction {
         recommended: best_id.to_string(),
         confidence: best_score.clamp(0.0, 1.0),
         runner_up,
-        all_scores: scores.into_iter().map(|(id, s)| (id.to_string(), s.clamp(0.0, 1.0))).collect(),
+        all_scores: scores
+            .into_iter()
+            .map(|(id, s)| (id.to_string(), s.clamp(0.0, 1.0)))
+            .collect(),
         features: features.clone(),
     }
 }
@@ -306,11 +309,9 @@ pub fn score_route(input: &VRPSolverInput, output: &VRPSolverOutput) -> RouteQua
     let coverage = (100.0 * assigned as f64 / n_stops as f64).clamp(0.0, 100.0);
 
     // --- Overall ---
-    let overall = (distance_efficiency * 0.35
-        + load_balance * 0.25
-        + turn_quality * 0.20
-        + coverage * 0.20)
-        .clamp(0.0, 100.0);
+    let overall =
+        (distance_efficiency * 0.35 + load_balance * 0.25 + turn_quality * 0.20 + coverage * 0.20)
+            .clamp(0.0, 100.0);
 
     RouteQualityScore {
         distance_efficiency: round2(distance_efficiency),
@@ -325,8 +326,8 @@ fn bearing_delta(a: &VRPSolverStop, b: &VRPSolverStop, c: &VRPSolverStop) -> f64
     let b1 = bearing(a.lat, a.lon, b.lat, b.lon);
     let b2 = bearing(b.lat, b.lon, c.lat, c.lon);
     let d = b2 - b1;
-    let d = ((d + 180.0) % 360.0) - 180.0;
-    d
+
+    ((d + 180.0) % 360.0) - 180.0
 }
 
 fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
@@ -374,7 +375,7 @@ pub fn route_feature_vector(features: &RouteFeatures) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::vrp::test_utils::{make_stop, make_input};
+    use crate::core::vrp::test_utils::{make_input, make_stop};
 
     #[test]
     fn test_features_small_instance() {

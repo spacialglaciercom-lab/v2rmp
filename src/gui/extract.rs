@@ -107,13 +107,15 @@ fn parse_bbox(input: &str) -> Option<BoundingBox> {
 }
 
 fn run_extract(app: &mut GuiApp) {
-    let bbox = match &app.bounding_box {
-        Some(b) => b.clone(),
-        None => {
-            app.log(LogLevel::Warn, "Set a bounding box first");
-            return;
-        }
-    };
+    #[cfg(feature = "extract")]
+    {
+        let bbox = match &app.bounding_box {
+            Some(b) => b.clone(),
+            None => {
+                app.log(LogLevel::Warn, "Set a bounding box first");
+                return;
+            }
+        };
 
     app.extract_status = Status::Running {
         progress: 0,
@@ -124,23 +126,23 @@ fn run_extract(app: &mut GuiApp) {
         format!("Starting extraction from {}", app.data_source),
     );
 
-    let source = match app.data_source {
-        DataSource::Osm => crate::core::extract::ExtractSource::Osm,
-        DataSource::Overture => crate::core::extract::ExtractSource::Overture,
-    };
+        let source = match app.data_source {
+            DataSource::Osm => crate::core::extract::ExtractSource::Osm,
+            DataSource::Overture => crate::core::extract::ExtractSource::Overture,
+        };
 
-    let req = crate::core::extract::ExtractRequest {
-        source,
-        bbox: crate::core::extract::BBoxRequest {
-            min_lon: bbox.min_lon,
-            min_lat: bbox.min_lat,
-            max_lon: bbox.max_lon,
-            max_lat: bbox.max_lat,
-        },
-        road_classes: crate::core::extract::RoadClass::all_vehicle(),
-        output_path: format!("extract_{:.4}_{:.4}.geojson", bbox.min_lat, bbox.min_lon),
-        pbf_path: None,
-    };
+        let req = crate::core::extract::ExtractRequest {
+            source,
+            bbox: crate::core::extract::BBoxRequest {
+                min_lon: bbox.min_lon,
+                min_lat: bbox.min_lat,
+                max_lon: bbox.max_lon,
+                max_lat: bbox.max_lat,
+            },
+            road_classes: crate::core::extract::RoadClass::all_vehicle(),
+            output_path: format!("extract_{:.4}_{:.4}.geojson", bbox.min_lat, bbox.min_lon),
+            pbf_path: None,
+        };
 
     // Run extraction synchronously (blocking the UI — could be moved to a thread)
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -163,5 +165,10 @@ fn run_extract(app: &mut GuiApp) {
             app.extract_status = Status::Error(e.to_string());
             app.log(LogLevel::Error, format!("Extraction failed: {}", e));
         }
+    }
+    #[cfg(not(feature = "extract"))]
+    {
+        app.log(LogLevel::Error, "Extraction feature not enabled. Build with --features extract");
+        app.extract_status = Status::Error("Feature 'extract' disabled".to_string());
     }
 }
