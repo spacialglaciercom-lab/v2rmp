@@ -33,25 +33,50 @@ pub fn haversine_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 
 /// Build a full O(n²) distance/time matrix using haversine.
 /// Time estimated at `avg_speed_kmh` (default 40 km/h).
+///
+/// Optimized with pre-calculated radians/cosines and matrix symmetry.
 pub fn build_haversine_matrix(locations: &[VRPSolverStop], avg_speed_kmh: f64) -> DistMatrix {
     let n = locations.len();
-    let mut matrix = Vec::with_capacity(n);
-    for (i, _) in locations.iter().enumerate().take(n) {
-        let mut row = Vec::with_capacity(n);
-        for j in 0..n {
-            let dist = haversine_km(
-                locations[i].lat,
-                locations[i].lon,
-                locations[j].lat,
-                locations[j].lon,
-            );
-            let time_sec = (dist / avg_speed_kmh) * 3600.0;
-            row.push(DistCell {
+    if n == 0 {
+        return Vec::new();
+    }
+
+    // Pre-calculate radians and cosines to avoid redundant trig calls in the O(n^2) loop
+    let mut lats_rad = Vec::with_capacity(n);
+    let mut lons_rad = Vec::with_capacity(n);
+    let mut cos_lats = Vec::with_capacity(n);
+    for loc in locations {
+        let lat_rad = loc.lat.to_radians();
+        lats_rad.push(lat_rad);
+        lons_rad.push(loc.lon.to_radians());
+        cos_lats.push(lat_rad.cos());
+    }
+
+    // Initialize n x n matrix with zeros
+    let mut matrix = vec![vec![DistCell { distance: 0.0, time: 0.0 }; n]; n];
+    const R_KM: f64 = 6371.0;
+    let time_factor = 3600.0 / avg_speed_kmh;
+
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let dlat = lats_rad[j] - lats_rad[i];
+            let dlon = lons_rad[j] - lons_rad[i];
+
+            let a = (dlat / 2.0).sin().powi(2)
+                + cos_lats[i] * cos_lats[j] * (dlon / 2.0).sin().powi(2);
+            let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+            let dist = R_KM * c;
+            let time_sec = dist * time_factor;
+
+            let cell = DistCell {
                 distance: dist,
                 time: time_sec,
-            });
+            };
+
+            // Exploit symmetry: dist(i, j) == dist(j, i)
+            matrix[i][j] = cell.clone();
+            matrix[j][i] = cell;
         }
-        matrix.push(row);
     }
     matrix
 }
@@ -87,7 +112,10 @@ pub fn build_graph_matrix(
     // 1. Build adjacency list
     let mut adj = vec![Vec::new(); n_nodes];
     for (i, edge) in edges.iter().enumerate() {
+        #[cfg(feature = "ml")]
         let mut weight = edge.weight_m;
+        #[cfg(not(feature = "ml"))]
+        let weight = edge.weight_m;
 
         // Apply learned embedding if available
         #[cfg(feature = "ml")]
@@ -442,6 +470,11 @@ pub fn matrix_get_time(matrix: &DistMatrix, i: usize, j: usize) -> f64 {
         .unwrap_or(0.0)
 }
 
+/// Generate an OsmAnd deep link that triggers the import of a GPX file from a URL.
+pub fn generate_osmand_import_url(gpx_url: &str) -> String {
+    format!("osmand://import?url={}", urlencoding::encode(gpx_url))
+}
+
 pub fn build_sweep_routes(
     matrix: &crate::core::vrp::types::DistMatrix,
     locations: &[crate::core::vrp::types::VRPSolverStop],
@@ -570,6 +603,22 @@ pub fn parse_csv_stops(
             .ok_or_else(|| format!("Missing lon at row {}", row_num + 2))?
             .parse()
             .map_err(|e| format!("Invalid lon at row {}: {}", row_num + 2, e))?;
+
+        // Validation
+        if !(-90.0..=90.0).contains(&lat) {
+            return Err(format!(
+                "Latitude {} out of bounds at row {}",
+                lat,
+                row_num + 2
+            ));
+        }
+        if !(-180.0..=180.0).contains(&lon) {
+            return Err(format!(
+                "Longitude {} out of bounds at row {}",
+                lon,
+                row_num + 2
+            ));
+        }
 
         let label = label_idx
             .and_then(|i| record.get(i))

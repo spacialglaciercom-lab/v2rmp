@@ -317,8 +317,9 @@ async fn main() -> Result<()> {
                                 json!({
                                     "content": [{
                                         "type": "text",
-                                        "text": serde_json::to_string_pretty(&result).unwrap_or_default()
-                                    }]
+                                        "text": serde_json::to_string(&result).unwrap_or_default()
+                                    }],
+                                    "structured": result
                                 }),
                             );
                         }

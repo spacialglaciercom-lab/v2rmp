@@ -232,19 +232,20 @@ pub struct QwenNLParser {
 
 #[cfg(feature = "ml")]
 impl QwenNLParser {
-    /// Loads the Qwen2.5-0.5B-Instruct model from Hugging Face hub (cached locally).
-    /// Uses 0.5B by default as 1.5B is too heavy for CPU-only MCP tools.
+    /// Loads the v2rmp-agent-1.5b-merged model from Hugging Face hub (cached locally).
+    /// This is a fine-tuned Qwen2.5-1.5B-Instruct model trained on v2rmp CLI commands,
+    /// MCP tool invocations, and route optimization workflows via QLoRA SFT.
     pub fn new() -> Result<Self> {
         let device = crate::core::ml::best_device()?;
         let api = Api::new().context("Failed to create HF API client")?;
         let repo = api.repo(Repo::with_revision(
-            "Qwen/Qwen2.5-0.5B-Instruct".to_string(),
+            "aerialblancaservices/v2rmp-agent-1.5b-merged".to_string(),
             RepoType::Model,
             "main".to_string(),
         ));
 
         tracing::info!("Using device: {:?}", device);
-        tracing::info!("Fetching Qwen2.5-0.5B tokenizer and config...");
+        tracing::info!("Fetching v2rmp-agent-1.5b tokenizer and config...");
         let tokenizer_path = repo.get("tokenizer.json")?;
         let config_path = repo.get("config.json")?;
 
@@ -254,7 +255,7 @@ impl QwenNLParser {
         let config: Config = serde_json::from_reader(std::fs::File::open(config_path)?)?;
 
         // Download safetensors.
-        tracing::info!("Fetching Qwen2.5-0.5B safetensors...");
+        tracing::info!("Fetching v2rmp-agent-1.5b safetensors (~3GB, will cache locally)...");
         let model_path = repo.get("model.safetensors")?;
 
         // Use F16 on GPU, F32 on CPU for best compatibility/performance
@@ -314,7 +315,7 @@ impl QwenNLParser {
             tokens.push(next_token);
             pos += context_size;
 
-            if let Some(text) = self.tokenizer.decode(&[next_token], true).ok() {
+            if let Ok(text) = self.tokenizer.decode(&[next_token], true) {
                 output_text.push_str(&text);
                 if output_text.contains("<|im_end|>") {
                     break;
