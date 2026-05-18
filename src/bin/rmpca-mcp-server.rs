@@ -26,14 +26,13 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
+use std::path::Path;
 use std::path::PathBuf;
 use v2rmp::core::clean::{clean_geojson, CleanOptions};
 use v2rmp::core::compile::{CompileRequest, CompileResult};
 #[cfg(feature = "extract")]
 use v2rmp::core::elevation::local::LocalDem;
-#[cfg(feature = "extract")]
 use v2rmp::core::elevation::FuelCalculator;
-#[cfg(feature = "extract")]
 use v2rmp::core::extract::{BBoxRequest, ExtractRequest, ExtractResult, ExtractSource, RoadClass};
 #[cfg(feature = "ml")]
 use v2rmp::core::ml::automl::predict_hyperparams;
@@ -1369,11 +1368,6 @@ fn handle_compile(args: &Value) -> Result<Value> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing 'output' parameter"))?
         .to_string();
-
-    // Validate paths
-    validate_file_path(&input)?;
-    validate_file_path(&output)?;
-
     let clean = args.get("clean").and_then(|v| v.as_bool()).unwrap_or(false);
     let prune = args
         .get("prune_disconnected")
@@ -1411,12 +1405,6 @@ async fn handle_optimize(args: &Value) -> Result<Value> {
         .get("output")
         .and_then(|v| v.as_str())
         .map(String::from);
-
-    // Validate paths
-    validate_file_path(&input)?;
-    if let Some(ref rf) = route_file {
-        validate_file_path(rf)?;
-    }
     let depot = args.get("depot").and_then(|d| {
         let lat = d.get("lat")?.as_f64()?;
         let lon = d.get("lon")?.as_f64()?;
@@ -1698,7 +1686,7 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
             let label = s
                 .get("label")
                 .and_then(|v| v.as_str())
-                .unwrap_or("")
+                .unwrap_or_else(|| "")
                 .to_string();
             let demand = s.get("demand").and_then(|v| v.as_f64());
             Ok(VRPSolverStop {
@@ -2211,9 +2199,6 @@ fn handle_inspect_rmp(args: &Value) -> Result<Value> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing 'input' parameter"))?;
 
-    // Validate path
-    validate_file_path(input)?;
-
     let file_data =
         std::fs::read(input).map_err(|e| anyhow::anyhow!("Failed to read .rmp file: {}", e))?;
 
@@ -2283,7 +2268,7 @@ fn handle_predict_solver(args: &Value) -> Result<Value> {
                 let label = s
                     .get("label")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("")
+                    .unwrap_or_else(|| "")
                     .to_string();
                 let demand = s.get("demand").and_then(|v| v.as_f64());
                 Ok(VRPSolverStop {

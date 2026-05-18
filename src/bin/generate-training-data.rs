@@ -19,8 +19,8 @@ use tokio::runtime::Runtime;
 
 use v2rmp::core::haversine_m;
 use v2rmp::core::ml::features::InstanceFeatures;
-use v2rmp::core::vrp::registry::solve_with;
-use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
+use v2rmp::core::vrp::registry::{get_solver_list, solve_with};
+use v2rmp::core::vrp::types::{SolverHyperparams, VRPSolverInput, VRPSolverStop, VrpObjective};
 use v2rmp::core::vrp::utils::build_haversine_matrix;
 
 /// Solvers to evaluate (neural/ONNX solvers excluded for CPU compatibility).
@@ -425,8 +425,12 @@ fn mst_lower_bound(locations: &[VRPSolverStop], n_vehicles: usize) -> f64 {
     (mst_weight + min1 + min2) * v_factor
 }
 
-fn make_input(config: &InstanceConfig) -> VRPSolverInput {
-    let matrix = build_haversine_matrix(&config.stops, 40.0);
+fn make_input(
+    stops: Vec<VRPSolverStop>,
+    num_vehicles: usize,
+    objective: VrpObjective,
+) -> VRPSolverInput {
+    let matrix = build_haversine_matrix(&stops, 40.0);
     VRPSolverInput {
         locations: config.stops.clone(),
         num_vehicles: config.num_vehicles,
@@ -468,15 +472,10 @@ fn main() {
     let solver_ids: Vec<String> = SOLVER_IDS.iter().map(|s| s.to_string()).collect();
 
     eprintln!(
-        "Generating {} {} VRP instances and evaluating {} solvers: {:?}",
+        "Generating {} synthetic VRP instances and evaluating {} solvers...",
         n_instances,
-        if balanced { "BALANCED" } else { "UNIFORM" },
-        solver_ids.len(),
-        solver_ids
+        solver_ids.len()
     );
-
-    let profiles = GenProfile::all();
-    let n_profiles = profiles.len();
 
     for i in 0..n_instances {
         let (config, profile_label) = if balanced {

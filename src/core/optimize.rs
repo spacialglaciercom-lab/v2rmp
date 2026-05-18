@@ -330,19 +330,10 @@ pub fn solve_cpp(
         let from = edge.from as usize;
         let to = edge.to as usize;
 
-        let b_fwd = bearing(
-            nodes[from].lat,
-            nodes[from].lon,
-            nodes[to].lat,
-            nodes[to].lon,
-        );
-        let b_rev = (b_fwd + 180.0) % 360.0;
-
         adj[from].push(AdjEntry {
             to: edge.to,
             weight_m: edge.weight_m,
             edge_idx: idx,
-            bearing: b_fwd,
         });
 
         match oneway {
@@ -351,7 +342,6 @@ pub fn solve_cpp(
                     to: edge.from,
                     weight_m: edge.weight_m,
                     edge_idx: idx,
-                    bearing: b_rev,
                 });
             }
             OnewayMode::Respect => {
@@ -360,7 +350,6 @@ pub fn solve_cpp(
                         to: edge.from,
                         weight_m: edge.weight_m,
                         edge_idx: idx,
-                        bearing: b_rev,
                     });
                 }
             }
@@ -370,7 +359,6 @@ pub fn solve_cpp(
                         to: edge.from,
                         weight_m: edge.weight_m,
                         edge_idx: idx,
-                        bearing: b_rev,
                     });
                     adj[from].retain(|e| e.edge_idx != idx);
                 } else {
@@ -378,7 +366,6 @@ pub fn solve_cpp(
                         to: edge.from,
                         weight_m: edge.weight_m,
                         edge_idx: idx,
-                        bearing: b_rev,
                     });
                 }
             }
@@ -596,20 +583,15 @@ pub fn solve_cpp(
     // Add duplicate edges
     for (i, &(u, v, weight, _eidx)) in duplicate_edges.iter().enumerate() {
         let deadhead_edge_idx = edges.len() + i;
-        let b_fwd = bearing(nodes[u].lat, nodes[u].lon, nodes[v].lat, nodes[v].lon);
-        let b_rev = (b_fwd + 180.0) % 360.0;
-
         adj[u].push(AdjEntry {
             to: v as u32,
             weight_m: weight,
             edge_idx: deadhead_edge_idx,
-            bearing: b_fwd,
         });
         adj[v].push(AdjEntry {
             to: u as u32,
             weight_m: weight,
             edge_idx: deadhead_edge_idx,
-            bearing: b_rev,
         });
     }
 
@@ -678,22 +660,33 @@ pub fn solve_cpp(
         }
     }
 
-    // Turn classification using pre-calculated bearings
-    if circuit_with_edges.len() > 2 {
-        for i in 1..circuit_with_edges.len().saturating_sub(1) {
-            let e_in = &circuit_with_edges[i].1;
-            let e_out = &circuit_with_edges[i + 1].1;
-
-            if let (Some(ei), Some(eo)) = (e_in, e_out) {
-                let b_in = ei.bearing;
-                let b_out = eo.bearing;
-                let delta = b_out - b_in;
-                match classify_turn(delta) {
-                    "left" => turns.left += 1,
-                    "right" => turns.right += 1,
-                    "u_turn" => turns.u_turn += 1,
-                    _ => turns.straight += 1,
-                }
+    // Turn classification
+    if circuit.len() > 2 {
+        for i in 1..circuit.len().saturating_sub(1) {
+            let prev = circuit[i - 1] as usize;
+            let curr = circuit[i] as usize;
+            let next = circuit[i + 1] as usize;
+            if prev == curr || curr == next {
+                continue;
+            }
+            let b_in = bearing(
+                nodes[prev].lat,
+                nodes[prev].lon,
+                nodes[curr].lat,
+                nodes[curr].lon,
+            );
+            let b_out = bearing(
+                nodes[curr].lat,
+                nodes[curr].lon,
+                nodes[next].lat,
+                nodes[next].lon,
+            );
+            let delta = b_out - b_in;
+            match classify_turn(delta) {
+                "left" => turns.left += 1,
+                "right" => turns.right += 1,
+                "u_turn" => turns.u_turn += 1,
+                _ => turns.straight += 1,
             }
         }
     }
@@ -1109,7 +1102,6 @@ mod tests {
     /// Test: for any connected graph, after running solve_cpp, verify that the
     /// output circuit is a valid closed walk that traverses every edge.
     #[test]
-    #[allow(clippy::needless_range_loop)]
     fn test_cpp_circuit_is_eulerian() {
         // Triangle graph - already Eulerian (every vertex degree 2)
         let (nodes, edges) = make_graph(
