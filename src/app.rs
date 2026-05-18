@@ -506,18 +506,17 @@ impl App {
             .map(|b| b.previous_view.clone())
             .unwrap_or(View::Home);
 
-        let target_field = self.file_browser.as_ref().map(|b| b.target_field.clone());
+        let browser_field = self.file_browser.take().map(|b| b.target_field.clone());
 
-        self.file_browser = None;
-
-        let (Some(path), Some(field)) = (selected_path, target_field) else {
+        if let Some(path) = selected_path {
+            let path_str = path.to_string_lossy().to_string();
+            if let Some(field) = browser_field {
+                self.apply_file_selection(field, path_str);
+            }
+        } else {
             // User cancelled — restore the view they came from
             self.current_view = previous_view;
-            return;
-        };
-
-        let path_str = path.to_string_lossy().to_string();
-        self.apply_file_selection(field, path_str);
+        }
     }
 
     fn apply_file_selection(&mut self, field: InputField, path_str: String) {
