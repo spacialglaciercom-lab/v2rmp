@@ -372,32 +372,24 @@ pub fn solve_cpp(
 
     // Find odd-degree vertices
     let mut degrees = vec![0usize; n];
-    for (i, adj_list) in adj.iter().enumerate() {
-        degrees[i] = adj_list.len();
+    for adj_list in adj.iter() {
+        for edge in adj_list {
+            degrees[edge.to as usize] += 1;
+        }
     }
-    let odd_vertices: Vec<usize> = (0..n).filter(|&i| !degrees[i].is_multiple_of(2)).collect();
-
-    // Exact Minimum-Weight Perfect Matching (MWPM) using Dynamic Programming.
-    // For graphs with a large number of odd vertices (> 24), we fall back to a greedy heuristic
-    // to prevent exponential time complexity (O(2^N)).
-    let mut duplicate_edges: Vec<(usize, usize, f64, usize)> = Vec::new();
+    let odd_vertices: Vec<usize> = (0..n).filter(|&i| degrees[i] % 2 != 0).collect();
     let num_odd = odd_vertices.len();
 
-    use std::cmp::Ordering;
-    use std::collections::BinaryHeap;
+    let mut duplicate_edges: Vec<(usize, usize, f64, usize)> = Vec::new();
 
-    #[derive(Copy, Clone, PartialEq)]
-    struct State {
-        cost: f64,
-        position: usize,
-    }
-    impl Eq for State {}
-    impl Ord for State {
-        fn cmp(&self, other: &Self) -> Ordering {
-            other
-                .cost
-                .partial_cmp(&self.cost)
-                .unwrap_or(Ordering::Equal)
+    if num_odd > 0 {
+        use std::cmp::Ordering;
+        use std::collections::BinaryHeap;
+
+        #[derive(Copy, Clone, PartialEq)]
+        struct State {
+            cost: f64,
+            position: usize,
         }
         impl Eq for State {}
         impl Ord for State {
@@ -413,60 +405,54 @@ pub fn solve_cpp(
                 Some(self.cmp(other))
             }
         }
-    }
 
-    for &u in &odd_vertices {
-        if matched[u] {
-            continue;
-        }
+        // 1. All-Pairs Shortest Paths between odd vertices
+        let mut dist_matrix = vec![vec![f64::MAX; num_odd]; num_odd];
+        let mut path_matrix = vec![vec![Vec::new(); num_odd]; num_odd];
 
-        let mut dists = vec![f64::MAX; n];
-        let mut prev = vec![None; n];
-        let mut heap = BinaryHeap::new();
+        for i in 0..num_odd {
+            let u = odd_vertices[i];
+            let mut dists = vec![f64::MAX; n];
+            let mut prev = vec![None; n];
+            let mut heap = BinaryHeap::new();
 
-        dists[u] = 0.0;
-        heap.push(State {
-            cost: 0.0,
-            position: u,
-        });
+            dists[u] = 0.0;
+            heap.push(State {
+                cost: 0.0,
+                position: u,
+            });
 
-            while let Some(State {
-                cost,
-                position,
-                incoming_bearing,
-            }) = heap.pop()
-            {
+            while let Some(State { cost, position }) = heap.pop() {
                 if cost > dists[position] {
                     continue;
                 }
 
-        while let Some(State { cost, position }) = heap.pop() {
-            if cost > dists[position] {
-                continue;
-            }
-
-                    let next_cost = cost + edge.weight_m + penalty;
+                for edge in &adj[position] {
+                    let next_cost = cost + edge.weight_m;
                     if next_cost < dists[edge.to as usize] {
                         dists[edge.to as usize] = next_cost;
                         prev[edge.to as usize] = Some((position, edge.weight_m, edge.edge_idx));
                         heap.push(State {
                             cost: next_cost,
                             position: edge.to as usize,
-                            incoming_bearing: Some(edge.bearing),
                         });
                     }
                 }
             }
 
-            for edge in &adj[position] {
-                let next = State {
-                    cost: cost + edge.weight_m,
-                    position: edge.to as usize,
-                };
-                if next.cost < dists[next.position] {
-                    dists[next.position] = next.cost;
-                    prev[next.position] = Some((position, edge.weight_m, edge.edge_idx));
-                    heap.push(next);
+            for j in (i + 1)..num_odd {
+                let v = odd_vertices[j];
+                if dists[v] < f64::MAX {
+                    dist_matrix[i][j] = dists[v];
+                    dist_matrix[j][i] = dists[v];
+
+                    let mut path = Vec::new();
+                    let mut curr = v;
+                    while let Some((p, weight, eidx)) = prev[curr] {
+                        path.push((p, curr, weight, eidx));
+                        curr = p;
+                    }
+                    path_matrix[i][j] = path;
                 }
             }
         }
