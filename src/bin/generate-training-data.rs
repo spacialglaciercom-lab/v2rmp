@@ -20,7 +20,27 @@ use tokio::runtime::Runtime;
 use v2rmp::core::haversine_m;
 use v2rmp::core::ml::features::InstanceFeatures;
 use v2rmp::core::vrp::registry::{get_solver_list, solve_with};
-use v2rmp::core::vrp::types::{SolverHyperparams, VRPSolverInput, VRPSolverStop, VrpObjective};
+use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
+use v2rmp::core::vrp::utils::build_haversine_matrix;
+
+/// Generate a single synthetic VRP instance with depot at index 0.
+fn generate_instance(seed_offset: usize) -> Vec<VRPSolverStop> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    seed_offset.hash(&mut hasher);
+    let seed = hasher.finish();
+    let mut rng = fast_prng(seed);
+
+    let pattern = seed_offset % 4;
+    let n_stops = match seed_offset % 10 {
+        0 | 1 => rng.range(10, 25),
+        2..=4 => rng.range(20, 60),
+        5..=7 => rng.range(50, 150),
+        _ => rng.range(100, 250),
+use v2rmp::core::vrp::registry::solve_with;
+use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
 use v2rmp::core::vrp::utils::build_haversine_matrix;
 
 /// Solvers to evaluate (neural/ONNX solvers excluded for CPU compatibility).
@@ -561,7 +581,7 @@ fn main() {
             "solver_dists": solver_dists.iter().map(|(id, d)| serde_json::json!({"solver": id, "distance": d})).collect::<Vec<_>>(),
         });
 
-        println!("{}", record.to_string());
+        println!("{}", record);
 
         if i > 0 && i % 100 == 0 {
             eprintln!("  Completed {} instances...", i);

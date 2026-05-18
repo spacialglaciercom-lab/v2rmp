@@ -3190,38 +3190,29 @@ async fn main() -> Result<()> {
                     "extract_overture" => handle_extract_overture(&args).await,
                     #[cfg(feature = "extract")]
                     "extract_osm" => handle_extract_osm(&args).await,
-                    "compile" => handle_compile(&args).map_err(|e| anyhow::anyhow!("{e}")),
+                    "compile" => handle_compile(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "optimize" => handle_optimize(&args).await,
-                    "clean" => handle_clean(&args).map_err(|e| anyhow::anyhow!("{e}")),
+                    "clean" => handle_clean(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "vrp_solve" => handle_vrp_solve(&args).await,
                     #[cfg(feature = "extract")]
                     "elevation_query" => handle_elevation_query(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    #[cfg(feature = "extract")]
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "elevation_profile" => handle_elevation_profile(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    "list_solvers" => {
-                        handle_list_solvers(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
-                    "haversine_distance" => {
-                        handle_haversine_distance(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
-                    #[cfg(feature = "extract")]
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "list_solvers" => handle_list_solvers(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "haversine_distance" => handle_haversine_distance(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "elevation_stats" => handle_elevation_stats(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    #[cfg(feature = "extract")]
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "dem_info" => handle_dem_info(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    #[cfg(feature = "extract")]
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "fuel_estimate" => handle_fuel_estimate(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}"))
-                        .map(|v| v),
-                    "inspect_rmp" => handle_inspect_rmp(&args).map_err(|e| anyhow::anyhow!("{e}")),
-                    #[cfg(feature = "extract")]
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "inspect_rmp" => handle_inspect_rmp(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "pipeline" => {
                         match tokio::time::timeout(
                             std::time::Duration::from_secs(30),
@@ -3256,25 +3247,20 @@ async fn main() -> Result<()> {
                             })),
                         }
                     }
-                    "predict_solver" => {
-                        handle_predict_solver(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
-                    "score_route" => handle_score_route(&args).map_err(|e| anyhow::anyhow!("{e}")),
-                    "route_embedding" => {
-                        handle_route_embedding(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
-                    "predict_quality" => {
-                        handle_predict_quality(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
-                    "tune_hyperparams" => {
-                        handle_tune_hyperparams(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
-                    "parse_routing_query" => {
-                        handle_parse_routing_query(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
-                    "submit_feedback" => {
-                        handle_submit_feedback(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
+                    "predict_solver" => handle_predict_solver(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "score_route" => handle_score_route(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "route_embedding" => handle_route_embedding(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "predict_quality" => handle_predict_quality(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "tune_hyperparams" => handle_tune_hyperparams(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "parse_routing_query" => handle_parse_routing_query(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "submit_feedback" => handle_submit_feedback(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     other => {
                         send_err(&req.id, -32602, &format!("Unknown tool: {other}"));
                         continue;
