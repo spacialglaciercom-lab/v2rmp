@@ -1,0 +1,475 @@
+{
+  "list_solvers": {
+    "status": "PASS",
+    "data": {
+      "solvers": [
+        {
+          "id": "clarke_wright",
+          "label": "Clarke-Wright Savings"
+        },
+        {
+          "id": "sweep",
+          "label": "Sweep (balanced sectors)"
+        },
+        {
+          "id": "or_opt",
+          "label": "Or-Opt (local search)"
+        },
+        {
+          "id": "two_opt",
+          "label": "2-Opt (route untangling)"
+        },
+        {
+          "id": "neural",
+          "label": "Neural ONNX (GNN/Attention)"
+        },
+        {
+          "id": "neural_guided",
+          "label": "Neural-Guided (2-Opt + Or-Opt)"
+        },
+        {
+          "id": "default",
+          "label": "Default (Zone-cluster + 2-Opt)"
+        }
+      ]
+    }
+  },
+  "haversine_distance": {
+    "status": "PASS",
+    "data": {
+      "distance_km": 343.55606034104164,
+      "distance_m": 343556.06034104165,
+      "from": {
+        "lat": 48.8566,
+        "lon": 2.3522
+      },
+      "to": {
+        "lat": 51.5074,
+        "lon": -0.1278
+      }
+    }
+  },
+  "compile": {
+    "status": "PASS",
+    "data": {
+      "edge_count": 80,
+      "elapsed_ms": 10,
+      "input_size_bytes": 13686,
+      "node_count": 55,
+      "output_size_bytes": 2256
+    }
+  },
+  "clean": {
+    "status": "PASS",
+    "data": {
+      "components_removed": 0,
+      "duplicate_edges_removed": 0,
+      "incomplete_edges_removed": 0,
+      "input_features": 61,
+      "invalid_dropped": 0,
+      "isolates_removed": 0,
+      "nodes_merged": 0,
+      "output_features": 61,
+      "output_file": "/home/rmp/v2rmp/mcp_test_data/cleaned.geojson",
+      "parallel_edges_merged": 0,
+      "selfloops_removed": 0,
+      "short_edges_removed": 0,
+      "total_removed": 0,
+      "warnings": []
+    }
+  },
+  "inspect_rmp": {
+    "status": "PASS",
+    "data": {
+      "bbox": {
+        "max_lat": 45.75898311174991,
+        "max_lon": -0.03712634771196453,
+        "min_lat": 45.75,
+        "min_lon": -0.05
+      },
+      "edge_count": 60,
+      "file_size_bytes": 1612,
+      "node_count": 36,
+      "total_edge_length_km": 11.99999999999999
+    }
+  },
+  "optimize_cpp": {
+    "status": "PASS",
+    "data": {
+      "deadhead_distance_km": 1.6,
+      "efficiency_pct": 88.23529411764706,
+      "elapsed_ms": 12,
+      "num_routes": 1,
+      "total_distance_km": 13.6,
+      "total_segments": 68,
+      "turns": {
+        "left": 12,
+        "right": 7,
+        "straight": 44,
+        "u_turn": 4
+      }
+    }
+  },
+  "vrp_solve": {
+    "status": "PASS",
+    "data": {
+      "routes": [
+        {
+          "stops": [
+            {
+              "demand": 0.0,
+              "label": "Depot",
+              "lat": 45.76,
+              "lon": -0.04
+            },
+            {
+              "demand": 1.0,
+              "label": "Stop 5",
+              "lat": 45.75518824119897,
+              "lon": -0.057116683936165674
+            },
+            {
+              "demand": 2.0,
+              "label": "Stop 3",
+              "lat": 45.76722693785283,
+              "lon": -0.05091002551285204
+            },
+            {
+              "demand": 1.0,
+              "label": "Stop 2",
+              "lat": 45.775127618256086,
+              "lon": -0.042263452141423095
+            },
+            {
+              "demand": 1.0,
+              "label": "Stop 6",
+              "lat": 45.7600875869276,
+              "lon": -0.028039871092134523
+            },
+            {
+              "demand": 0.0,
+              "label": "Depot",
+              "lat": 45.76,
+              "lon": -0.04
+            }
+          ],
+          "vehicle": 0
+        },
+        {
+          "stops": [
+            {
+              "demand": 0.0,
+              "label": "Depot",
+              "lat": 45.76,
+              "lon": -0.04
+            },
+            {
+              "demand": 3.0,
+              "label": "Stop 1",
+              "lat": 45.76077106314106,
+              "lon": -0.03676291085987008
+            },
+            {
+              "demand": 2.0,
+              "label": "Stop 4",
+              "lat": 45.75709676970166,
+              "lon": -0.036892438481901754
+            },
+            {
+              "demand": 0.0,
+              "label": "Depot",
+              "lat": 45.76,
+              "lon": -0.04
+            }
+          ],
+          "vehicle": 1
+        }
+      ],
+      "total_distance_km": "7.97",
+      "total_time_min": 12,
+      "unassigned": null
+    }
+  },
+  "fuel_estimate": {
+    "status": "FAIL",
+    "error": "check failed",
+    "data": {}
+  },
+  "score_route": {
+    "status": "PASS",
+    "data": {
+      "coverage": 100.0,
+      "distance_efficiency": 100.0,
+      "load_balance": 100.0,
+      "overall": 93.33,
+      "turn_quality": 66.67
+    }
+  },
+  "route_embedding": {
+    "status": "PASS",
+    "data": {
+      "dimension": 12,
+      "features": {
+        "avg_pairwise_km": 1.5336072688352558,
+        "density": 8.951285917769829,
+        "lat_spread": 0.007392225485718668,
+        "lon_spread": 0.010548663855951315,
+        "num_stops": 6,
+        "num_vehicles": 2,
+        "objective": "MinDistance",
+        "tight_capacity": false
+      },
+      "vector": [
+        0.012000000104308128,
+        0.10000000149011612,
+        0.015336073003709316,
+        0.00147844513412565,
+        0.002109732711687684,
+        0.17902572453022003,
+        0.0,
+        0.0,
+        0.05999999865889549,
+        0.006134429015219212,
+        7.797810394549742e-05,
+        0.05370771512389183
+      ]
+    }
+  },
+  "elevation_query": {
+    "status": "FAIL",
+    "error": "check failed",
+    "data": {}
+  },
+  "elevation_profile": {
+    "status": "FAIL",
+    "error": "check failed",
+    "data": {}
+  },
+  "elevation_stats": {
+    "status": "FAIL",
+    "error": "check failed",
+    "data": {}
+  },
+  "dem_info": {
+    "status": "FAIL",
+    "error": "check failed",
+    "data": {}
+  },
+  "predict_solver": {
+    "status": "PASS",
+    "data": {
+      "all_scores": [
+        {
+          "score": 0.3087455928325653,
+          "solver_id": "or_opt"
+        },
+        {
+          "score": 0.24909843504428864,
+          "solver_id": "default"
+        },
+        {
+          "score": 0.19082558155059814,
+          "solver_id": "neural_guided"
+        },
+        {
+          "score": 0.16631242632865906,
+          "solver_id": "clarke_wright"
+        },
+        {
+          "score": 0.043104447424411774,
+          "solver_id": "two_opt"
+        },
+        {
+          "score": 0.04191356897354126,
+          "solver_id": "sweep"
+        }
+      ],
+      "confidence": 0.3087455928325653,
+      "features": {
+        "num_stops": 6,
+        "num_vehicles": 2,
+        "objective": "MinDistance"
+      },
+      "instance_feature_vector": [
+        0.012000000104308128,
+        0.10000000149011612,
+        0.015336073003709316,
+        0.00147844513412565,
+        0.002109732711687684,
+        0.17902572453022003,
+        0.0006702947430312634,
+        0.003263565246015787,
+        10.0,
+        10.0,
+        0.8888888955116272,
+        0.024986518546938896,
+        0.00492882402613759,
+        0.015336073003709316,
+        0.0,
+        0.0,
+        0.009999999776482582,
+        0.00816496554762125,
+        0.0,
+        0.05000000074505806,
+        0.015336073003709316,
+        0.006023540161550045,
+        -0.2717491686344147,
+        0.009810169227421284,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "ml_ready": true,
+      "model_loaded": true,
+      "recommended": "or_opt",
+      "runner_up": {
+        "score": 0.24909843504428864,
+        "solver_id": "default"
+      }
+    }
+  },
+  "predict_quality": {
+    "status": "PASS",
+    "data": {
+      "confidence": 0.8,
+      "feature_vector": [
+        0.012000000104308128,
+        0.10000000149011612,
+        0.015336073003709316,
+        0.00147844513412565,
+        0.002109732711687684,
+        0.17902572453022003,
+        0.0006702947430312634,
+        0.003263565246015787,
+        10.0,
+        10.0,
+        0.8888888955116272,
+        0.024986518546938896,
+        0.00492882402613759,
+        0.015336073003709316,
+        0.0,
+        0.0,
+        0.009999999776482582,
+        0.00816496554762125,
+        0.0,
+        0.05000000074505806,
+        0.015336073003709316,
+        0.006023540161550045,
+        -0.2717491686344147,
+        0.009810169227421284,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "ml_ready": true,
+      "predicted_gap_pct": 2.5665550231933594,
+      "predicted_tour_length_km": 5000.0
+    }
+  },
+  "tune_hyperparams": {
+    "status": "PASS",
+    "data": {
+      "cooling_rate": 0.956759107887745,
+      "feature_vector": [
+        0.012000000104308128,
+        0.10000000149011612,
+        0.015336073003709316,
+        0.00147844513412565,
+        0.002109732711687684,
+        0.17902572453022003,
+        0.0006702947430312634,
+        0.003263565246015787,
+        10.0,
+        10.0,
+        0.8888888955116272,
+        0.024986518546938896,
+        0.00492882402613759,
+        0.015336073003709316,
+        0.0,
+        0.0,
+        0.009999999776482582,
+        0.00816496554762125,
+        0.0,
+        0.05000000074505806,
+        0.015336073003709316,
+        0.006023540161550045,
+        -0.2717491686344147,
+        0.009810169227421284,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "max_iterations": 10000,
+      "ml_ready": true,
+      "neighbourhood_radius": 15,
+      "tabu_tenure": 23,
+      "temperature": 1000.0
+    }
+  },
+  "parse_routing_query": {
+    "status": "PASS",
+    "data": {
+      "config": {
+        "bbox": {
+          "max_lat": 45.55,
+          "max_lon": -73.55,
+          "min_lat": 45.45,
+          "min_lon": -73.64999999999999
+        },
+        "depot": {
+          "lat": 45.5,
+          "lon": -73.6
+        },
+        "num_stops": 30,
+        "num_vehicles": 3,
+        "variant": "cvrp"
+      },
+      "entities": {
+        "depot": "45.5, -73.6",
+        "package": "30",
+        "van": "3"
+      },
+      "method": "regex",
+      "variant": "cvrp"
+    }
+  },
+  "submit_feedback": {
+    "status": "PASS",
+    "feedback_count": 3
+  },
+  "pipeline": {
+    "status": "PASS",
+    "data": {}
+  },
+  "get_valhalla_matrix": {
+    "status": "PASS",
+    "data": {
+      "matrix": [
+        [
+          {
+            "distance_km": 0.0,
+            "time_seconds": 0.0
+          },
+          {
+            "distance_km": 0.0,
+            "time_seconds": 0.0
+          }
+        ],
+        [
+          {
+            "distance_km": 0.0,
+            "time_seconds": 0.0
+          },
+          {
+            "distance_km": 0.0,
+            "time_seconds": 0.0
+          }
+        ]
+      ],
+      "size": 2
+    }
+  }
+}

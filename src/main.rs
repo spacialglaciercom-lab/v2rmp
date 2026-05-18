@@ -1,9 +1,5 @@
-#![cfg(feature = "cli")]
-mod app;
-mod cli;
-mod core;
-mod event;
-mod ui;
+#[cfg(feature = "cli")]
+use v2rmp::{app, cli, event, ui};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -66,4 +62,11 @@ async fn run_tui() -> anyhow::Result<()> {
     terminal.show_cursor()?;
 
     Ok(())
+}
+
+#[cfg(not(feature = "cli"))]
+fn main() {
+    eprintln!("Error: The 'cli' feature must be enabled to build the rmpca binary.");
+    eprintln!("   cargo run --bin rmpca --features cli");
+    std::process::exit(1);
 }

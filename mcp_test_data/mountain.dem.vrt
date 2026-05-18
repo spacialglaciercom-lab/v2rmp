@@ -1,0 +1,13 @@
+<VRTDataset rasterXSize="128" rasterYSize="128">
+  <GeoTransform>-0.1, 0.0015625, 0, 45.9, 0, -0.0015624999999999667</GeoTransform>
+  <SRS>EPSG:4326</SRS>
+  <VRTRasterBand dataType="Float32" band="1">
+    <NoDataValue>-9999</NoDataValue>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="1">mountain.dem.dem.bin</SourceFilename>
+      <SourceBand>1</SourceBand>
+      <SrcRect xOff="0" yOff="0" xSize="128" ySize="128" />
+      <DstRect xOff="0" yOff="0" xSize="128" ySize="128" />
+    </SimpleSource>
+  </VRTRasterBand>
+</VRTDataset>

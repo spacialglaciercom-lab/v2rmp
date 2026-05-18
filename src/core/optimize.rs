@@ -1,3 +1,5 @@
+#![allow(clippy::needless_range_loop)]
+use crate::core::geo_types::BBox;
 use crate::core::vrp::registry::solve_with;
 use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
 use serde::{Deserialize, Serialize};
@@ -11,17 +13,14 @@ use std::time::Instant;
 pub fn filter_bbox(
     nodes: &[RmpNode],
     edges: &[RmpEdge],
-    bbox: Option<(f64, f64, f64, f64)>, // (min_lat, max_lat, min_lon, max_lon)
+    bbox: Option<BBox>,
 ) -> (Vec<RmpNode>, Vec<RmpEdge>) {
-    let Some((min_lat, max_lat, min_lon, max_lon)) = bbox else {
+    let Some(bbox) = bbox else {
         return (nodes.to_vec(), edges.to_vec());
     };
 
     // Mark which old-node indices are inside the bbox
-    let inside: Vec<bool> = nodes
-        .iter()
-        .map(|n| n.lat >= min_lat && n.lat <= max_lat && n.lon >= min_lon && n.lon <= max_lon)
-        .collect();
+    let inside: Vec<bool> = nodes.iter().map(|n| bbox.contains(n.lon, n.lat)).collect();
 
     // Build old->new index map
     let mut old_to_new = vec![u32::MAX; nodes.len()];
@@ -94,6 +93,8 @@ pub struct OptimizeRequest {
     /// VRP-only: solver algorithm id (clarke_wright, sweep, two_opt, or_opt, default).
     #[serde(default = "default_solver_id")]
     pub solver_id: String,
+    /// VRP-only: path to CSV file containing stops.
+    pub coordinates: Option<String>,
 }
 
 fn default_num_vehicles() -> usize {
@@ -120,6 +121,7 @@ pub struct OptimizeResult {
     pub turns: TurnSummary,
     pub elapsed_ms: u64,
     pub num_routes: usize,
+    pub routes: Vec<Vec<VRPSolverStop>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -174,14 +176,8 @@ trait NormalizeAngle {
 impl NormalizeAngle for f64 {
     fn normalize(self, lower: f64, upper: f64) -> f64 {
         let width = upper - lower;
-        let mut val = self;
-        while val < lower {
-            val += width;
-        }
-        while val >= upper {
-            val -= width;
-        }
-        val
+        lower + (self - lower).rem_euclid(width)
+        (self - lower).rem_euclid(width) + lower
     }
 }
 
@@ -263,8 +259,8 @@ fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let lat1_r = lat1.to_radians();
     let lat2_r = lat2.to_radians();
 
-    let x = dlon.cos() * lat2_r.sin();
-    let y = lat1_r.cos() * lat2_r.sin() - lat1_r.sin() * lat2_r.cos() * dlon.cos();
+    let y = dlon.sin() * lat2_r.cos();
+    let x = lat1_r.cos() * lat2_r.sin() - lat1_r.sin() * lat2_r.cos() * dlon.cos();
 
     let bearing_rad = y.atan2(x);
     (bearing_rad.to_degrees() + 360.0) % 360.0
@@ -277,6 +273,7 @@ struct AdjEntry {
     to: u32,
     weight_m: f64,
     edge_idx: usize,
+    bearing: f64,
 }
 
 /// In-memory CPP result: both the summary stats and the ordered node-IDs of the Eulerian circuit.
@@ -317,6 +314,7 @@ pub fn solve_cpp(
                 },
                 elapsed_ms: 0,
                 num_routes: 1,
+                routes: Vec::new(),
             },
             circuit: Vec::new(),
         });
@@ -379,14 +377,11 @@ pub fn solve_cpp(
     }
     let odd_vertices: Vec<usize> = (0..n).filter(|&i| !degrees[i].is_multiple_of(2)).collect();
 
-    // Minimum weight perfect matching (greedy nearest-neighbor using Dijkstra)
+    // Exact Minimum-Weight Perfect Matching (MWPM) using Dynamic Programming.
+    // For graphs with a large number of odd vertices (> 24), we fall back to a greedy heuristic
+    // to prevent exponential time complexity (O(2^N)).
     let mut duplicate_edges: Vec<(usize, usize, f64, usize)> = Vec::new();
-    let mut matched = vec![false; n];
-    for i in 0..n {
-        if degrees[i].is_multiple_of(2) {
-            matched[i] = true;
-        }
-    }
+    let num_odd = odd_vertices.len();
 
     use std::cmp::Ordering;
     use std::collections::BinaryHeap;
@@ -404,10 +399,19 @@ pub fn solve_cpp(
                 .partial_cmp(&self.cost)
                 .unwrap_or(Ordering::Equal)
         }
-    }
-    impl PartialOrd for State {
-        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-            Some(self.cmp(other))
+        impl Eq for State {}
+        impl Ord for State {
+            fn cmp(&self, other: &Self) -> Ordering {
+                other
+                    .cost
+                    .partial_cmp(&self.cost)
+                    .unwrap_or(Ordering::Equal)
+            }
+        }
+        impl PartialOrd for State {
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                Some(self.cmp(other))
+            }
         }
     }
 
@@ -426,16 +430,32 @@ pub fn solve_cpp(
             position: u,
         });
 
-        let mut best_v = None;
+            while let Some(State {
+                cost,
+                position,
+                incoming_bearing,
+            }) = heap.pop()
+            {
+                if cost > dists[position] {
+                    continue;
+                }
 
         while let Some(State { cost, position }) = heap.pop() {
             if cost > dists[position] {
                 continue;
             }
 
-            if position != u && !matched[position] {
-                best_v = Some(position);
-                break;
+                    let next_cost = cost + edge.weight_m + penalty;
+                    if next_cost < dists[edge.to as usize] {
+                        dists[edge.to as usize] = next_cost;
+                        prev[edge.to as usize] = Some((position, edge.weight_m, edge.edge_idx));
+                        heap.push(State {
+                            cost: next_cost,
+                            position: edge.to as usize,
+                            incoming_bearing: Some(edge.bearing),
+                        });
+                    }
+                }
             }
 
             for edge in &adj[position] {
@@ -451,19 +471,102 @@ pub fn solve_cpp(
             }
         }
 
-        if let Some(v) = best_v {
-            matched[u] = true;
-            matched[v] = true;
+        // 2. Minimum Weight Perfect Matching
+        let mut pairs = Vec::new();
 
-            // Trace path back from v to u
-            let mut curr = v;
-            while let Some((p, weight, eidx)) = prev[curr] {
-                duplicate_edges.push((p, curr, weight, eidx));
-                curr = p;
+        if num_odd <= 24 {
+            // Exact DP (Bitmask DP)
+            let mut memo = vec![f64::MAX; 1 << num_odd];
+            let mut parent = vec![usize::MAX; 1 << num_odd];
+            memo[0] = 0.0;
+
+            for mask in 0..(1 << num_odd) {
+                if memo[mask] == f64::MAX {
+                    continue;
+                }
+
+                // Find first unmatched vertex
+                let mut i = 0;
+                while i < num_odd {
+                    if (mask & (1 << i)) == 0 {
+                        break;
+                    }
+                    i += 1;
+                }
+                if i == num_odd {
+                    continue;
+                }
+
+                for j in (i + 1)..num_odd {
+                    if (mask & (1 << j)) == 0 && dist_matrix[i][j] < f64::MAX {
+                        let next_mask = mask | (1 << i) | (1 << j);
+                        let new_cost = memo[mask] + dist_matrix[i][j];
+                        if new_cost < memo[next_mask] {
+                            memo[next_mask] = new_cost;
+                            parent[next_mask] = mask;
+                        }
+                    }
+                }
+            }
+
+            // Backtrack
+            let mut curr = (1 << num_odd) - 1;
+            while curr > 0 {
+                let prev_mask = parent[curr];
+                if prev_mask == usize::MAX {
+                    break;
+                } // Safety against disconnected components
+                let diff = curr ^ prev_mask;
+
+                let mut u = usize::MAX;
+                let mut v = usize::MAX;
+                for i in 0..num_odd {
+                    if (diff & (1 << i)) != 0 {
+                        if u == usize::MAX {
+                            u = i;
+                        } else {
+                            v = i;
+                        }
+                    }
+                }
+                pairs.push((u, v));
+                curr = prev_mask;
             }
         } else {
-            // Fallback: If disconnected, just skip (graph must be disconnected)
-            matched[u] = true;
+            // Greedy fallback for very large odd-vertex counts
+            let mut matched = vec![false; num_odd];
+            for i in 0..num_odd {
+                if matched[i] {
+                    continue;
+                }
+                let mut best_j = None;
+                let mut best_dist = f64::MAX;
+
+                for j in (i + 1)..num_odd {
+                    if !matched[j] && dist_matrix[i][j] < best_dist {
+                        best_dist = dist_matrix[i][j];
+                        best_j = Some(j);
+                    }
+                }
+
+                if let Some(j) = best_j {
+                    matched[i] = true;
+                    matched[j] = true;
+                    pairs.push((i, j));
+                }
+            }
+        }
+
+        // Add the paths for all matched pairs into duplicate_edges
+        for (u_idx, v_idx) in pairs {
+            let (i, j) = if u_idx < v_idx {
+                (u_idx, v_idx)
+            } else {
+                (v_idx, u_idx)
+            };
+            for &(p, c, weight, eidx) in &path_matrix[i][j] {
+                duplicate_edges.push((p, c, weight, eidx));
+            }
         }
     }
 
@@ -536,7 +639,7 @@ pub fn solve_cpp(
         if let Some(e) = &entry.1 {
             total_distance_m += e.weight_m;
             total_segments += 1;
-            if e.edge_idx == deadhead_edge_idx {
+            if e.edge_idx >= edges.len() {
                 deadhead_distance_m += e.weight_m;
             } else {
                 edge_traversal_count[e.edge_idx] += 1;
@@ -589,6 +692,17 @@ pub fn solve_cpp(
 
     let elapsed_ms = start.elapsed().as_millis() as u64;
 
+    let route_points: Vec<VRPSolverStop> = circuit
+        .iter()
+        .map(|&idx| VRPSolverStop {
+            lat: nodes[idx as usize].lat,
+            lon: nodes[idx as usize].lon,
+            label: format!("Node {}", idx),
+            demand: None,
+            arrival_time: None,
+        })
+        .collect();
+
     Ok(CppOutput {
         summary: OptimizeResult {
             total_distance_km: total_distance_m / 1000.0,
@@ -598,6 +712,7 @@ pub fn solve_cpp(
             turns,
             elapsed_ms,
             num_routes: 1,
+            routes: vec![route_points],
         },
         circuit,
     })
@@ -615,7 +730,13 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     }
     let (nodes, edges) = read_rmp_file(&file_data)?;
 
-    let output = solve_cpp(&nodes, &edges, req.oneway_mode, req.depot)?;
+    let output = solve_cpp(
+        &nodes,
+        &edges,
+        req.oneway_mode,
+        req.depot,
+        req.turn_penalties,
+    )?;
 
     if let Some(ref route_path) = req.route_file {
         if route_path.ends_with(".json") {
@@ -646,41 +767,67 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
     // 1. Read .rmp
     let mut file_data = Vec::new();
     std::fs::File::open(&req.cache_file)?.read_to_end(&mut file_data)?;
-    let (nodes, _edges) = read_rmp_file(&file_data)?;
+    let (nodes, edges) = read_rmp_file(&file_data)?;
 
     if nodes.is_empty() {
         anyhow::bail!("No nodes found in .rmp file");
     }
 
+    // ── Graph Embeddings ─────────────────────────────────────────────
+    #[cfg(feature = "ml")]
+    let embeddings = {
+        let embs = crate::core::ml::graph_embed::embed_network(&nodes, &edges, None);
+        if !embs.is_empty() {
+            Some(embs)
+        } else {
+            None
+        }
+    };
+    #[cfg(not(feature = "ml"))]
+    let embeddings: Option<std::collections::HashMap<usize, Vec<f32>>> = None;
+
     // 2. Build VRP Stops
-    let mut stops: Vec<VRPSolverStop> = nodes
-        .iter()
-        .enumerate()
-        .map(|(i, n)| VRPSolverStop {
-            lat: n.lat,
-            lon: n.lon,
-            label: format!("Node {}", i),
-            demand: Some(1.0),
-            arrival_time: None,
-        })
-        .collect();
+    let mut stops: Vec<VRPSolverStop> = Vec::new();
 
     // Add depot at start if specified
     if let Some((dlat, dlon)) = req.depot {
-        stops.insert(
-            0,
-            VRPSolverStop {
-                lat: dlat,
-                lon: dlon,
-                label: "Depot".into(),
-                demand: Some(0.0),
-                arrival_time: None,
-            },
-        );
+        stops.push(VRPSolverStop {
+            lat: dlat,
+            lon: dlon,
+            label: "Depot".into(),
+            demand: Some(0.0),
+            arrival_time: None,
+        });
     }
 
-    // 3. Build Distance Matrix (Haversine for now)
-    let matrix = super::vrp::utils::build_haversine_matrix(&stops, 40.0);
+    if let Some(csv_path) = &req.coordinates {
+        let (csv_stops, _) = super::vrp::utils::parse_csv_stops(csv_path)
+            .map_err(|e| anyhow::anyhow!("CSV parse error: {}", e))?;
+        stops.extend(csv_stops);
+    } else {
+        anyhow::bail!("VRP mode requires --coordinates (a CSV file) to define delivery stops.");
+    }
+
+    // 3. Build Distance Matrix
+    // Use graph-based shortest paths if we have edges, otherwise fallback to haversine.
+    let matrix = if !edges.is_empty() {
+        #[cfg(feature = "ml")]
+        {
+            super::vrp::utils::build_graph_matrix(
+                &stops,
+                &nodes,
+                &edges,
+                embeddings.as_deref(),
+                40.0,
+            )
+        }
+        #[cfg(not(feature = "ml"))]
+        {
+            super::vrp::utils::build_graph_matrix(&stops, &nodes, &edges, None, 40.0)
+        }
+    } else {
+        super::vrp::utils::build_haversine_matrix(&stops, 40.0)
+    };
 
     // 4. Solve
     let vrp_input = VRPSolverInput {
@@ -693,11 +840,33 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         use_time_windows: false,
         window_open: None,
         window_close: None,
+        hyperparams: None,
     };
 
     let output = solve_with(&req.solver_id, &vrp_input)
         .await
         .map_err(|e| anyhow::anyhow!("VRP Solver error: {}", e))?;
+
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+    let total_dist_km: f64 = output.total_distance_km.parse().unwrap_or(0.0);
+
+    // ── Online Learning Feedback ─────────────────────────────────────
+    #[cfg(feature = "ml")]
+    {
+        use crate::core::ml::feedback::{log_solve, SolveLogEntry};
+        let features = crate::core::ml::features::InstanceFeatures::from_input(&vrp_input);
+        let entry = SolveLogEntry {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            instance_features: features.to_vector(),
+            solver_id: req.solver_id.clone(),
+            total_distance_km: total_dist_km,
+            elapsed_ms,
+            gap_to_bks: None, // We don't know the BKS for general instances
+        };
+        if let Err(e) = log_solve(entry, None) {
+            tracing::warn!("Failed to log solve for feedback: {}", e);
+        }
+    }
 
     // 5. Compute Stats
     let mut turns = TurnSummary {
@@ -729,8 +898,6 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         }
     }
 
-    let total_dist_km: f64 = output.total_distance_km.parse().unwrap_or(0.0);
-
     // 6. Write GPX
     if let Some(ref path) = req.route_file {
         if let Some(ref routes) = output.routes {
@@ -746,10 +913,11 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         turns,
         elapsed_ms: start.elapsed().as_millis() as u64,
         num_routes: output.routes.as_ref().map(|r| r.len()).unwrap_or(1),
+        routes: output.routes.unwrap_or_default(),
     })
 }
 
-pub(crate) fn write_gpx_multi(path: &str, routes: &[Vec<VRPSolverStop>]) -> anyhow::Result<()> {
+pub fn write_gpx_multi(path: &str, routes: &[Vec<VRPSolverStop>]) -> anyhow::Result<()> {
     use std::io::Write;
     let mut file = std::fs::File::create(path)?;
 
@@ -884,6 +1052,7 @@ mod tests {
             mode: SolverMode::Cpp,
             num_vehicles: 1,
             solver_id: "default".to_string(),
+            coordinates: None,
         };
         let _result = run_optimize(&req);
         // run_optimize is async but CPP is sync, so we need to use tokio

@@ -30,7 +30,10 @@ fn solve(
     };
 
     let mut improved = true;
-    let max_passes = 100;
+    let max_passes = hyperparams
+        .map(|p| p.max_iterations / 4)
+        .unwrap_or(100)
+        .max(1);
     let mut passes = 0;
 
     while improved && passes < max_passes {
@@ -211,7 +214,13 @@ impl VRPSolver for OrOptSolver {
             .as_ref()
             .ok_or("Or-Opt solver requires a distance matrix")?;
         let balance_load = input.objective == VrpObjective::BalanceLoad;
-        let result = solve(matrix, &input.locations, input.num_vehicles, balance_load);
+        let result = solve(
+            matrix,
+            &input.locations,
+            input.num_vehicles,
+            balance_load,
+            input.hyperparams.as_ref(),
+        );
         Ok(result.into_output(input))
     }
     fn clone_box(&self) -> Box<dyn VRPSolver> {
@@ -230,7 +239,7 @@ mod tests {
         let input = make_input(stops, 1);
         let solver = OrOptSolver;
         let output = solver.solve(&input).await.unwrap();
-        assert!(output.routes.is_none());
+        assert!(output.routes.is_some());
     }
 
     #[tokio::test]
@@ -253,6 +262,7 @@ mod tests {
             use_time_windows: false,
             window_open: None,
             window_close: None,
+            hyperparams: None,
         };
         let solver = OrOptSolver;
         let err = solver.solve(&input).await.unwrap_err();
@@ -296,6 +306,7 @@ mod tests {
             use_time_windows: false,
             window_open: None,
             window_close: None,
+            hyperparams: None,
         };
         let solver = OrOptSolver;
         let output = solver.solve(&input).await.unwrap();

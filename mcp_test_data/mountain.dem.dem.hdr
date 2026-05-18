@@ -1,0 +1,9 @@
+ENVI
+samples = 128
+lines   = 128
+bands   = 1
+header offset = 0
+data type = 4
+interleave = bsq
+byte order = 0
+map info = {Geographic Lat/Lon, 1.0, 1.0, -0.1, 45.9, 0.0015625, 0.0015624999999999667, WGS-84, units=Degrees}

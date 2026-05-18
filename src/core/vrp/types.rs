@@ -38,7 +38,7 @@ impl SolveResult {
             .collect();
         VRPSolverOutput {
             stops: routes.iter().flatten().cloned().collect(),
-            routes: if routes.len() > 1 { Some(routes) } else { None },
+            routes: Some(routes),
             total_distance_km: format!("{:.2}", self.total_distance),
             total_time_min: (self.total_time / 60.0).round() as u32,
             route_stats: None,
@@ -79,6 +79,26 @@ pub struct DistCell {
 /// Distance/time matrix: `matrix[from][to]`.
 pub type DistMatrix = Vec<Vec<DistCell>>;
 
+/// Hyperparameters for a VRP solver.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SolverHyperparams {
+    /// Maximum iterations for metaheuristics (e.g. simulated annealing).
+    pub max_iterations: u32,
+    /// Temperature for simulated annealing.
+    pub temperature: f64,
+    /// Tabu tenure for tabu search.
+    pub tabu_tenure: usize,
+    /// Cooling rate for SA.
+    pub cooling_rate: f64,
+    /// Neighbourhood radius for local search.
+    pub neighbourhood_radius: usize,
+    /// Whether the learned model was used (true) or fallback defaults (false).
+    pub model_used: bool,
+    /// Flexible solver-specific parameters.
+    #[serde(default)]
+    pub other: std::collections::HashMap<String, serde_json::Value>,
+}
+
 /// Input to a VRP solver.
 #[derive(Debug, Clone)]
 pub struct VRPSolverInput {
@@ -97,6 +117,8 @@ pub struct VRPSolverInput {
     pub window_open: Option<i64>,
     /// Shift close epoch (Unix seconds).
     pub window_close: Option<i64>,
+    /// Learned or manually tuned hyperparameters.
+    pub hyperparams: Option<SolverHyperparams>,
 }
 
 /// VRP objective type.

@@ -151,7 +151,7 @@ pub struct GuiApp {
     pub solver_id: String,
     pub optimize_status: Status,
     pub oneway_mode: crate::core::optimize::OnewayMode,
-    pub optimize_bbox: Option<(f64, f64, f64, f64)>,
+    pub optimize_bbox: Option<crate::core::geo_types::BBox>,
     pub optimize_bbox_input: String,
 
     // VRP
@@ -174,7 +174,7 @@ pub struct GuiApp {
     pub map_nodes: Vec<crate::core::optimize::RmpNode>,
     pub map_edges: Vec<crate::core::optimize::RmpEdge>,
     pub map_file_label: String,
-    pub map_bounds: Option<(f64, f64, f64, f64)>,
+    pub map_bounds: Option<crate::core::geo_types::BBox>,
     pub cpp_output: Option<crate::core::optimize::CppOutput>,
     pub map_solve_error: Option<String>,
     pub map_depot_text: String,
@@ -356,7 +356,12 @@ impl GuiApp {
                 max_lon = max_lon.max(n.lon);
             }
             let pad = 0.002;
-            self.map_bounds = Some((min_lat - pad, max_lat + pad, min_lon - pad, max_lon + pad));
+            self.map_bounds = Some(crate::core::geo_types::BBox {
+                min_lon: min_lon - pad,
+                min_lat: min_lat - pad,
+                max_lon: max_lon + pad,
+                max_lat: max_lat + pad,
+            });
         }
         self.map_nodes = nodes;
         self.map_edges = edges;
@@ -537,18 +542,17 @@ pub fn project_latlon(
     lon: f64,
     canvas_center: egui::Pos2,
     canvas_size: egui::Vec2,
-    bounds: (f64, f64, f64, f64),
+    bbox: &crate::core::geo_types::BBox,
     zoom: f32,
     pan: egui::Vec2,
 ) -> egui::Pos2 {
-    let (min_lat, max_lat, min_lon, max_lon) = bounds;
-    let lat_range = (max_lat - min_lat).max(0.001);
-    let lon_range = (max_lon - min_lon).max(0.001);
+    let lat_range = (bbox.max_lat - bbox.min_lat).max(0.001);
+    let lon_range = (bbox.max_lon - bbox.min_lon).max(0.001);
     let scale_x = canvas_size.x / lon_range as f32;
     let scale_y = canvas_size.y / lat_range as f32;
     let scale = scale_x.min(scale_y) * zoom;
-    let x = (lon - min_lon) as f32 * scale + (canvas_size.x - lon_range as f32 * scale) * 0.5;
-    let y = (max_lat - lat) as f32 * scale + (canvas_size.y - lat_range as f32 * scale) * 0.5;
+    let x = (lon - bbox.min_lon) as f32 * scale + (canvas_size.x - lon_range as f32 * scale) * 0.5;
+    let y = (bbox.max_lat - lat) as f32 * scale + (canvas_size.y - lat_range as f32 * scale) * 0.5;
     egui::pos2(
         canvas_center.x + x - canvas_size.x * 0.5 + pan.x,
         canvas_center.y + y - canvas_size.y * 0.5 + pan.y,
@@ -590,8 +594,8 @@ pub fn draw_map_canvas(ui: &mut egui::Ui, app: &mut GuiApp) {
             app.map_zoom = 1.0;
         }
 
-        let bounds = match app.map_bounds {
-            Some(b) => b,
+        let bbox = match app.map_bounds {
+            Some(ref b) => b,
             None => return,
         };
 
@@ -604,7 +608,7 @@ pub fn draw_map_canvas(ui: &mut egui::Ui, app: &mut GuiApp) {
                     n.lon,
                     canvas_center,
                     canvas_size,
-                    bounds,
+                    bbox,
                     app.map_zoom,
                     app.map_pan,
                 )
@@ -677,16 +681,15 @@ pub fn draw_map_canvas(ui: &mut egui::Ui, app: &mut GuiApp) {
 
         // Cursor position
         if let Some(mouse) = response.hover_pos() {
-            let (min_lat, max_lat, min_lon, max_lon) = bounds;
-            let lat_range = (max_lat - min_lat).max(0.001);
-            let lon_range = (max_lon - min_lon).max(0.001);
+            let lat_range = (bbox.max_lat - bbox.min_lat).max(0.001);
+            let lon_range = (bbox.max_lon - bbox.min_lon).max(0.001);
             let scale_x = canvas_size.x / lon_range as f32;
             let scale_y = canvas_size.y / lat_range as f32;
             let scale = scale_x.min(scale_y) * app.map_zoom;
             let rel_x = mouse.x - canvas_center.x - app.map_pan.x + canvas_size.x * 0.5;
             let rel_y = mouse.y - canvas_center.y - app.map_pan.y + canvas_size.y * 0.5;
-            let lon = rel_x / scale + min_lon as f32;
-            let lat = max_lat as f32 - rel_y / scale;
+            let lon = rel_x / scale + bbox.min_lon as f32;
+            let lat = bbox.max_lat as f32 - rel_y / scale;
             painter.text(
                 egui::pos2(rect.min.x + 8.0, rect.max.y - 24.0),
                 egui::Align2::LEFT_BOTTOM,
