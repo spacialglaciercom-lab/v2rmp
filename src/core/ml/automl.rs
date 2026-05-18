@@ -45,19 +45,20 @@ impl HyperparamPredictor {
         let v = vals.as_slice();
 
         // Clamp each output to [0, 1] and scale to parameter range
-        let max_iter = (100.0 + v[0].clamp(0.0, 1.0) as f64 * 9900.0) as u32;
+        let max_iterations = (100.0 + v[0].clamp(0.0, 1.0) as f64 * 9900.0) as u32;
         let temperature = 1.0 + v[1].clamp(0.0, 1.0) as f64 * 999.0;
         let tabu_tenure = (1.0 + v[2].clamp(0.0, 1.0) as f64 * 49.0).round() as usize;
         let cooling_rate = 0.8 + v[3].clamp(0.0, 1.0) as f64 * 0.199;
         let neighbourhood_radius = (1.0 + v[4].clamp(0.0, 1.0) as f64 * 19.0).round() as usize;
 
         Ok(SolverHyperparams {
-            max_iterations: max_iter,
+            max_iterations,
             temperature,
             tabu_tenure,
             cooling_rate,
             neighbourhood_radius,
             model_used: true,
+            ..Default::default()
         })
     }
 }
@@ -127,6 +128,7 @@ impl SolverHyperparams {
             cooling_rate: 0.995,
             neighbourhood_radius: 3,
             model_used: false,
+            other: std::collections::HashMap::new(),
         }
     }
 }

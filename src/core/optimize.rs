@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 use crate::core::geo_types::BBox;
 use crate::core::vrp::registry::solve_with;
 use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
@@ -120,6 +121,7 @@ pub struct OptimizeResult {
     pub turns: TurnSummary,
     pub elapsed_ms: u64,
     pub num_routes: usize,
+    pub routes: Vec<Vec<VRPSolverStop>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -174,14 +176,8 @@ trait NormalizeAngle {
 impl NormalizeAngle for f64 {
     fn normalize(self, lower: f64, upper: f64) -> f64 {
         let width = upper - lower;
-        let mut val = self;
-        while val < lower {
-            val += width;
-        }
-        while val >= upper {
-            val -= width;
-        }
-        val
+        lower + (self - lower).rem_euclid(width)
+        (self - lower).rem_euclid(width) + lower
     }
 }
 
@@ -277,6 +273,7 @@ struct AdjEntry {
     to: u32,
     weight_m: f64,
     edge_idx: usize,
+    bearing: f64,
 }
 
 /// In-memory CPP result: both the summary stats and the ordered node-IDs of the Eulerian circuit.
@@ -299,7 +296,6 @@ pub fn solve_cpp(
     edges: &[RmpEdge],
     oneway: OnewayMode,
     depot: Option<(f64, f64)>,
-    penalties: TurnPenalties,
 ) -> anyhow::Result<CppOutput> {
     let start = Instant::now();
 
@@ -318,6 +314,7 @@ pub fn solve_cpp(
                 },
                 elapsed_ms: 0,
                 num_routes: 1,
+                routes: Vec::new(),
             },
             circuit: Vec::new(),
         });
@@ -386,15 +383,21 @@ pub fn solve_cpp(
     let mut duplicate_edges: Vec<(usize, usize, f64, usize)> = Vec::new();
     let num_odd = odd_vertices.len();
 
-    if num_odd > 0 {
-        use std::cmp::Ordering;
-        use std::collections::BinaryHeap;
+    use std::cmp::Ordering;
+    use std::collections::BinaryHeap;
 
-        #[derive(Copy, Clone, PartialEq)]
-        struct State {
-            cost: f64,
-            position: usize,
-            incoming_edge_idx: Option<usize>,
+    #[derive(Copy, Clone, PartialEq)]
+    struct State {
+        cost: f64,
+        position: usize,
+    }
+    impl Eq for State {}
+    impl Ord for State {
+        fn cmp(&self, other: &Self) -> Ordering {
+            other
+                .cost
+                .partial_cmp(&self.cost)
+                .unwrap_or(Ordering::Equal)
         }
         impl Eq for State {}
         impl Ord for State {
@@ -410,65 +413,37 @@ pub fn solve_cpp(
                 Some(self.cmp(other))
             }
         }
+    }
 
-        // 1. All-Pairs Shortest Paths between odd vertices
-        let mut dist_matrix = vec![vec![f64::MAX; num_odd]; num_odd];
-        let mut path_matrix = vec![vec![Vec::new(); num_odd]; num_odd];
+    for &u in &odd_vertices {
+        if matched[u] {
+            continue;
+        }
 
-        for i in 0..num_odd {
-            let u = odd_vertices[i];
-            let mut dists = vec![f64::MAX; n];
-            let mut prev = vec![None; n];
-            let mut heap = BinaryHeap::new();
+        let mut dists = vec![f64::MAX; n];
+        let mut prev = vec![None; n];
+        let mut heap = BinaryHeap::new();
 
-            dists[u] = 0.0;
-            heap.push(State {
-                cost: 0.0,
-                position: u,
-                incoming_edge_idx: None,
-            });
+        dists[u] = 0.0;
+        heap.push(State {
+            cost: 0.0,
+            position: u,
+        });
 
             while let Some(State {
                 cost,
                 position,
-                incoming_edge_idx,
+                incoming_bearing,
             }) = heap.pop()
             {
                 if cost > dists[position] {
                     continue;
                 }
 
-                for edge in &adj[position] {
-                    let mut penalty = 0.0;
-                    if let Some(prev_idx) = incoming_edge_idx {
-                        let prev_edge = &edges[prev_idx];
-                        let (p_from, p_to) = if prev_edge.to as usize == position {
-                            (prev_edge.from as usize, position)
-                        } else {
-                            (prev_edge.to as usize, position)
-                        };
-
-                        let b_in = bearing(
-                            nodes[p_from].lat,
-                            nodes[p_from].lon,
-                            nodes[p_to].lat,
-                            nodes[p_to].lon,
-                        );
-                        let b_out = bearing(
-                            nodes[position].lat,
-                            nodes[position].lon,
-                            nodes[edge.to as usize].lat,
-                            nodes[edge.to as usize].lon,
-                        );
-                        let delta = b_out - b_in;
-
-                        match classify_turn(delta) {
-                            "left" => penalty = penalties.left,
-                            "right" => penalty = penalties.right,
-                            "u_turn" => penalty = penalties.u_turn,
-                            _ => {}
-                        }
-                    }
+        while let Some(State { cost, position }) = heap.pop() {
+            if cost > dists[position] {
+                continue;
+            }
 
                     let next_cost = cost + edge.weight_m + penalty;
                     if next_cost < dists[edge.to as usize] {
@@ -477,25 +452,21 @@ pub fn solve_cpp(
                         heap.push(State {
                             cost: next_cost,
                             position: edge.to as usize,
-                            incoming_edge_idx: Some(edge.edge_idx),
+                            incoming_bearing: Some(edge.bearing),
                         });
                     }
                 }
             }
 
-            for j in (i + 1)..num_odd {
-                let v = odd_vertices[j];
-                if dists[v] < f64::MAX {
-                    dist_matrix[i][j] = dists[v];
-                    dist_matrix[j][i] = dists[v];
-
-                    let mut path = Vec::new();
-                    let mut curr = v;
-                    while let Some((p, weight, eidx)) = prev[curr] {
-                        path.push((p, curr, weight, eidx));
-                        curr = p;
-                    }
-                    path_matrix[i][j] = path;
+            for edge in &adj[position] {
+                let next = State {
+                    cost: cost + edge.weight_m,
+                    position: edge.to as usize,
+                };
+                if next.cost < dists[next.position] {
+                    dists[next.position] = next.cost;
+                    prev[next.position] = Some((position, edge.weight_m, edge.edge_idx));
+                    heap.push(next);
                 }
             }
         }
@@ -600,17 +571,17 @@ pub fn solve_cpp(
     }
 
     // Add duplicate edges
-    for (i, &(u, v, weight, _eidx)) in duplicate_edges.iter().enumerate() {
-        let deadhead_edge_idx = edges.len() + i;
+    let deadhead_edge_idx = usize::MAX;
+    for &(u, v, weight, eidx) in &duplicate_edges {
         adj[u].push(AdjEntry {
             to: v as u32,
             weight_m: weight,
-            edge_idx: deadhead_edge_idx,
+            edge_idx: eidx,
         });
         adj[v].push(AdjEntry {
             to: u as u32,
             weight_m: weight,
-            edge_idx: deadhead_edge_idx,
+            edge_idx: eidx,
         });
     }
 
@@ -700,7 +671,8 @@ pub fn solve_cpp(
                 nodes[next].lat,
                 nodes[next].lon,
             );
-            let delta = b_out - b_in;
+            let b_in_reverse = (b_in + 180.0).normalize(0.0, 360.0);
+            let delta = b_out - b_in_reverse;
             match classify_turn(delta) {
                 "left" => turns.left += 1,
                 "right" => turns.right += 1,
@@ -720,6 +692,17 @@ pub fn solve_cpp(
 
     let elapsed_ms = start.elapsed().as_millis() as u64;
 
+    let route_points: Vec<VRPSolverStop> = circuit
+        .iter()
+        .map(|&idx| VRPSolverStop {
+            lat: nodes[idx as usize].lat,
+            lon: nodes[idx as usize].lon,
+            label: format!("Node {}", idx),
+            demand: None,
+            arrival_time: None,
+        })
+        .collect();
+
     Ok(CppOutput {
         summary: OptimizeResult {
             total_distance_km: total_distance_m / 1000.0,
@@ -729,6 +712,7 @@ pub fn solve_cpp(
             turns,
             elapsed_ms,
             num_routes: 1,
+            routes: vec![route_points],
         },
         circuit,
     })
@@ -930,10 +914,11 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         turns,
         elapsed_ms: start.elapsed().as_millis() as u64,
         num_routes: output.routes.as_ref().map(|r| r.len()).unwrap_or(1),
+        routes: output.routes.unwrap_or_default(),
     })
 }
 
-pub(crate) fn write_gpx_multi(path: &str, routes: &[Vec<VRPSolverStop>]) -> anyhow::Result<()> {
+pub fn write_gpx_multi(path: &str, routes: &[Vec<VRPSolverStop>]) -> anyhow::Result<()> {
     use std::io::Write;
     let mut file = std::fs::File::create(path)?;
 
@@ -1115,14 +1100,7 @@ mod tests {
             &[(45.0, -73.0), (45.01, -73.0), (45.005, -73.01)],
             &[(0, 1, 1100.0, 0), (1, 2, 1100.0, 0), (2, 0, 1100.0, 0)],
         );
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
+        let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None).unwrap();
 
         // Property 1: circuit is non-empty
         assert!(!out.circuit.is_empty(), "circuit must not be empty");
@@ -1184,14 +1162,7 @@ mod tests {
                 (0, 3, 1500.0, 0),
             ],
         );
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
+        let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None).unwrap();
 
         // Build a multiset of traversed directed edges from the circuit
         let mut traversed: std::collections::HashMap<(u32, u32), u32> =
@@ -1250,14 +1221,7 @@ mod tests {
             "handshaking lemma: odd-degree count must be even"
         );
 
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
+        let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None).unwrap();
 
         // In an Eulerian circuit, every node must have even degree in the walk.
         // Degree = number of times a node appears as "from" endpoint + "to" endpoint.
@@ -1299,14 +1263,7 @@ mod tests {
                 (3, 0, 1100.0, 0),
             ],
         );
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
+        let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None).unwrap();
 
         let sum_weights_km: f64 = edges.iter().map(|e| e.weight_m / 1000.0).sum();
         let tolerance = 0.01;
@@ -1340,14 +1297,7 @@ mod tests {
             &[(45.0, -73.0), (45.01, -73.0), (45.02, -73.0)],
             &[(0, 1, 1100.0, 0), (1, 2, 1100.0, 0)],
         );
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
+        let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None).unwrap();
 
         let sum_weights_km: f64 = edges.iter().map(|e| e.weight_m / 1000.0).sum();
         let expected_total = sum_weights_km + out.summary.deadhead_distance_km;
@@ -1391,14 +1341,7 @@ mod tests {
                 (4, 0, 1100.0, 0),
             ],
         );
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
+        let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None).unwrap();
 
         let mut adj: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
         for e in &edges {
@@ -1432,14 +1375,7 @@ mod tests {
     #[test]
     fn test_cpp_single_edge() {
         let (nodes, edges) = make_graph(&[(45.0, -73.0), (45.01, -73.0)], &[(0, 1, 1100.0, 0)]);
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
+        let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None).unwrap();
 
         assert!(
             out.circuit.len() >= 2,
@@ -1469,14 +1405,7 @@ mod tests {
             &[(45.0, -73.0), (45.01, -73.0)],
             &[(0, 1, 1100.0, 1)], // oneway = 1
         );
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Respect,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
+        let out = solve_cpp(&nodes, &edges, OnewayMode::Respect, None).unwrap();
 
         for window in out.circuit.windows(2) {
             let (a, b) = (window[0], window[1]);
@@ -1494,14 +1423,7 @@ mod tests {
     fn test_cpp_empty_graph() {
         let nodes: Vec<RmpNode> = vec![];
         let edges: Vec<RmpEdge> = vec![];
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
+        let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None).unwrap();
 
         assert!(
             out.circuit.is_empty(),
@@ -1522,14 +1444,7 @@ mod tests {
             &[(0, 1, 1100.0, 0), (1, 2, 1100.0, 0)],
         );
 
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            Some((45.01, -73.0)),
-            TurnPenalties::default(),
-        )
-        .unwrap();
+        let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, Some((45.01, -73.0))).unwrap();
 
         assert_eq!(
             out.circuit.first().copied(),
@@ -1566,14 +1481,7 @@ mod tests {
         }
 
         let (nodes, edges) = make_graph(&coords, &edge_defs);
-        let out = solve_cpp(
-            &nodes,
-            &edges,
-            OnewayMode::Ignore,
-            None,
-            TurnPenalties::default(),
-        )
-        .unwrap();
+        let out = solve_cpp(&nodes, &edges, OnewayMode::Ignore, None).unwrap();
 
         let mut traversed: std::collections::HashMap<(u32, u32), u32> =
             std::collections::HashMap::new();

@@ -28,16 +28,36 @@ extract_*.geojson
 *.bak
 *.backup
 
-# Secrets / credentials
-VECTOR_DB_CONFIG.md
-zilliz_embed_pipeline.py
-cloud-vectordb-examples/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+.env
+.env.*
 
-# Cache
-.fastembed_cache/
+# ML Models & Data
+*.onnx
+*.onnx.data
+*.pt
+*.safetensors
+*.bin
+*.h5
+*.pmtiles
+*.pbf
+*.gpx
+checkpoints/
+data/
+models/
 
-# Test artifacts
-test_dem.tif
-*.core
+# Project Specific
+.bob/
+.gemini/
 .deepseek/
-find_duplicates.py
+.jules/
+session_logs/
+mcp_test_data/
+drone_vrp_space/
