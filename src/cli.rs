@@ -1118,27 +1118,6 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
         hyperparams: None,
     };
 
-    #[cfg(not(feature = "ml"))]
-    let vrp_input = VRPSolverInput {
-        locations: stops,
-        num_vehicles: args.vehicles,
-        vehicle_capacity: capacity,
-        objective: VrpObjective::MinDistance,
-        matrix: Some(matrix),
-        service_time_secs: Some(30.0),
-        use_time_windows: false,
-        window_open: None,
-        window_close: None,
-        hyperparams: None,
-    };
-
-    // AutoML: predict best hyperparameters
-    #[cfg(feature = "ml")]
-    {
-        let features = InstanceFeatures::from_input(&vrp_input);
-        vrp_input.hyperparams = Some(predict_hyperparams(&features));
-    }
-
     let output = crate::core::vrp::registry::solve_with(solver_id, &vrp_input)
         .await
         .map_err(|e| anyhow::anyhow!("VRP Solver error: {}", e))?;
@@ -1849,4 +1828,49 @@ pub async fn run() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_bbox_valid() {
+        let result = parse_bbox("-122.4,37.7,-122.3,37.8");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), (-122.4, 37.7, -122.3, 37.8));
+    }
+
+    #[test]
+    fn test_parse_bbox_too_few_parts() {
+        let result = parse_bbox("-122.4,37.7,-122.3");
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Bounding box must have exactly 4 values: MIN_LON,MIN_LAT,MAX_LON,MAX_LAT"
+        );
+    }
+
+    #[test]
+    fn test_parse_bbox_too_many_parts() {
+        let result = parse_bbox("-122.4,37.7,-122.3,37.8,0.0");
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Bounding box must have exactly 4 values: MIN_LON,MIN_LAT,MAX_LON,MAX_LAT"
+        );
+    }
+
+    #[test]
+    fn test_parse_bbox_invalid_number() {
+        let result = parse_bbox("-122.4,37.7,abc,37.8");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Invalid bbox value: abc");
+    }
+
+    #[test]
+    fn test_parse_bbox_empty() {
+        let result = parse_bbox("");
+        assert!(result.is_err());
+    }
 }

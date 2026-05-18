@@ -53,7 +53,7 @@ use v2rmp::core::optimize::{
     OnewayMode, OptimizeRequest, OptimizeResult, SolverMode, TurnPenalties,
 };
 use v2rmp::core::vrp::registry::solve_with;
-use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverOutput, VRPSolverStop, VrpObjective};
+use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
 use v2rmp::core::vrp::utils::{build_haversine_matrix, get_valhalla_matrix};
 
 // ── JSON-RPC / MCP types ───────────────────────────────────────────────────
@@ -1686,7 +1686,7 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
             let label = s
                 .get("label")
                 .and_then(|v| v.as_str())
-                .unwrap_or_else(|| "")
+                .unwrap_or("")
                 .to_string();
             let demand = s.get("demand").and_then(|v| v.as_f64());
             Ok(VRPSolverStop {
@@ -1748,38 +1748,11 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
         hyperparams: None,
     };
 
-    #[cfg(not(feature = "ml"))]
-    let input = VRPSolverInput {
-        locations: stops,
-        num_vehicles,
-        vehicle_capacity,
-        objective,
-        matrix: Some(matrix),
-        service_time_secs: None,
-        use_time_windows: false,
-        window_open: None,
-        window_close: None,
-        hyperparams: None,
-    };
-
-    // AutoML: predict best hyperparameters for this instance
-    #[cfg(feature = "ml")]
-    let automl_used = {
-        let features = InstanceFeatures::from_input(&input);
-        let params = predict_hyperparams(&features);
-        let used = params.model_used;
-        input.hyperparams = Some(params);
-        used
-    };
-    #[cfg(not(feature = "ml"))]
-    let automl_used = false;
-
     tracing::info!(
-        "vrp_solve: {} stops, {} vehicles, solver={}, AutoML={}",
+        "vrp_solve: {} stops, {} vehicles, solver={}",
         input.locations.len(),
         num_vehicles,
-        solver_id,
-        automl_used
+        solver_id
     );
 
     let output = solve_with(&solver_id, &input)
@@ -2209,13 +2182,13 @@ fn handle_inspect_rmp(args: &Value) -> Result<Value> {
         (0.0, 0.0, 0.0, 0.0)
     } else {
         nodes.iter().fold(
-            (f64::MAX, f64::MAX, f64::MIN, f64::MIN),
-            |(mn_lon, mn_lat, mx_lon, mx_lat), n| {
+            (f64::MAX, f64::MIN, f64::MAX, f64::MIN),
+            |(mn_lat, mx_lat, mn_lon, mx_lon), n| {
                 (
-                    mn_lon.min(n.lon),
                     mn_lat.min(n.lat),
-                    mx_lon.max(n.lon),
                     mx_lat.max(n.lat),
+                    mn_lon.min(n.lon),
+                    mx_lon.max(n.lon),
                 )
             },
         )
@@ -3190,77 +3163,32 @@ async fn main() -> Result<()> {
                     "extract_overture" => handle_extract_overture(&args).await,
                     #[cfg(feature = "extract")]
                     "extract_osm" => handle_extract_osm(&args).await,
-                    "compile" => handle_compile(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "compile" => handle_compile(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     "optimize" => handle_optimize(&args).await,
-                    "clean" => handle_clean(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "clean" => handle_clean(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     "vrp_solve" => handle_vrp_solve(&args).await,
-                    #[cfg(feature = "extract")]
-                    "elevation_query" => handle_elevation_query(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "elevation_profile" => handle_elevation_profile(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "list_solvers" => handle_list_solvers(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "haversine_distance" => handle_haversine_distance(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "elevation_stats" => handle_elevation_stats(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "dem_info" => handle_dem_info(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "fuel_estimate" => handle_fuel_estimate(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "inspect_rmp" => handle_inspect_rmp(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "pipeline" => {
-                        match tokio::time::timeout(
-                            std::time::Duration::from_secs(30),
-                            handle_pipeline(&args),
-                        )
-                        .await
-                        {
-                            Ok(Ok(v)) => Ok(v),
-                            Ok(Err(e)) => Err(anyhow::anyhow!("{e}")),
-                            Err(_elapsed) => Ok(json!({
-                                "error": "timeout",
-                                "stage": "pipeline",
-                                "retryable": true,
-                                "hint": "Overture S3 extraction or pipeline stage exceeded 30-second timeout. Use extract_overture directly with a smaller bbox, or run offline."
-                            })),
-                        }
+                    "elevation_query" => {
+                        handle_elevation_query(&args).map_err(|e| anyhow::anyhow!("{e}"))
                     }
-                    "get_valhalla_matrix" => {
-                        match tokio::time::timeout(
-                            std::time::Duration::from_secs(15),
-                            handle_get_valhalla_matrix(&args),
-                        )
-                        .await
-                        {
-                            Ok(Ok(v)) => Ok(v),
-                            Ok(Err(e)) => Err(anyhow::anyhow!("{e}")),
-                            Err(_elapsed) => Ok(json!({
-                                "error": "timeout",
-                                "stage": "valhalla_matrix",
-                                "retryable": true,
-                                "hint": "Valhalla API request timed out after 15 seconds (network may be unavailable)."
-                            })),
-                        }
+                    "elevation_profile" => {
+                        handle_elevation_profile(&args).map_err(|e| anyhow::anyhow!("{e}"))
                     }
-                    "predict_solver" => handle_predict_solver(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "score_route" => handle_score_route(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "route_embedding" => handle_route_embedding(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "predict_quality" => handle_predict_quality(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "tune_hyperparams" => handle_tune_hyperparams(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "parse_routing_query" => handle_parse_routing_query(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "submit_feedback" => handle_submit_feedback(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "list_solvers" => {
+                        handle_list_solvers(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "haversine_distance" => {
+                        handle_haversine_distance(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "elevation_stats" => {
+                        handle_elevation_stats(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "dem_info" => handle_dem_info(&args).map_err(|e| anyhow::anyhow!("{e}")),
+                    "fuel_estimate" => {
+                        handle_fuel_estimate(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "inspect_rmp" => handle_inspect_rmp(&args).map_err(|e| anyhow::anyhow!("{e}")),
+                    "pipeline" => handle_pipeline(&args).await,
+                    "get_valhalla_matrix" => handle_get_valhalla_matrix(&args).await,
                     other => {
                         send_err(&req.id, -32602, &format!("Unknown tool: {other}"));
                         continue;
