@@ -23,26 +23,6 @@ use v2rmp::core::vrp::registry::{get_solver_list, solve_with};
 use v2rmp::core::vrp::types::{SolverHyperparams, VRPSolverInput, VRPSolverStop, VrpObjective};
 use v2rmp::core::vrp::utils::build_haversine_matrix;
 
-/// Generate a single synthetic VRP instance with depot at index 0.
-fn generate_instance(seed_offset: usize) -> Vec<VRPSolverStop> {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    seed_offset.hash(&mut hasher);
-    let seed = hasher.finish();
-    let mut rng = fast_prng(seed);
-
-    let pattern = seed_offset % 4;
-    let n_stops = match seed_offset % 10 {
-        0 | 1 => rng.range(10, 25),
-        2..=4 => rng.range(20, 60),
-        5..=7 => rng.range(50, 150),
-        _ => rng.range(100, 250),
-use v2rmp::core::vrp::registry::solve_with;
-use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
-use v2rmp::core::vrp::utils::build_haversine_matrix;
-
 /// Solvers to evaluate (neural/ONNX solvers excluded for CPU compatibility).
 const SOLVER_IDS: &[&str] = &["default", "clarke_wright", "sweep", "or_opt", "two_opt"];
 
@@ -445,12 +425,8 @@ fn mst_lower_bound(locations: &[VRPSolverStop], n_vehicles: usize) -> f64 {
     (mst_weight + min1 + min2) * v_factor
 }
 
-fn make_input(
-    stops: Vec<VRPSolverStop>,
-    num_vehicles: usize,
-    objective: VrpObjective,
-) -> VRPSolverInput {
-    let matrix = build_haversine_matrix(&stops, 40.0);
+fn make_input(config: &InstanceConfig) -> VRPSolverInput {
+    let matrix = build_haversine_matrix(&config.stops, 40.0);
     VRPSolverInput {
         locations: config.stops.clone(),
         num_vehicles: config.num_vehicles,
@@ -496,6 +472,9 @@ fn main() {
         n_instances,
         solver_ids.len()
     );
+
+    let profiles = GenProfile::all();
+    let n_profiles = profiles.len();
 
     for i in 0..n_instances {
         let (config, profile_label) = if balanced {

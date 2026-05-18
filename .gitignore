@@ -61,3 +61,11 @@ models/
 session_logs/
 mcp_test_data/
 drone_vrp_space/
+
+# Unused scripts and data
+extract_osmnx.py
+fetch_mtl.py
+train_v4.py
+sft_training/train_sft_job.py
+montreal_embeddings/
+src/bin/extract-overpass.rs

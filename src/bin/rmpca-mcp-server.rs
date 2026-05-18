@@ -32,7 +32,9 @@ use v2rmp::core::clean::{clean_geojson, CleanOptions};
 use v2rmp::core::compile::{CompileRequest, CompileResult};
 #[cfg(feature = "extract")]
 use v2rmp::core::elevation::local::LocalDem;
+#[cfg(feature = "extract")]
 use v2rmp::core::elevation::FuelCalculator;
+#[cfg(feature = "extract")]
 use v2rmp::core::extract::{BBoxRequest, ExtractRequest, ExtractResult, ExtractSource, RoadClass};
 #[cfg(feature = "ml")]
 use v2rmp::core::ml::automl::predict_hyperparams;
@@ -53,7 +55,7 @@ use v2rmp::core::optimize::{
     OnewayMode, OptimizeRequest, OptimizeResult, SolverMode, TurnPenalties,
 };
 use v2rmp::core::vrp::registry::solve_with;
-use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
+use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverOutput, VRPSolverStop, VrpObjective};
 use v2rmp::core::vrp::utils::{build_haversine_matrix, get_valhalla_matrix};
 
 // ── JSON-RPC / MCP types ───────────────────────────────────────────────────
@@ -3167,9 +3169,11 @@ async fn main() -> Result<()> {
                     "optimize" => handle_optimize(&args).await,
                     "clean" => handle_clean(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     "vrp_solve" => handle_vrp_solve(&args).await,
+                    #[cfg(feature = "extract")]
                     "elevation_query" => {
                         handle_elevation_query(&args).map_err(|e| anyhow::anyhow!("{e}"))
                     }
+                    #[cfg(feature = "extract")]
                     "elevation_profile" => {
                         handle_elevation_profile(&args).map_err(|e| anyhow::anyhow!("{e}"))
                     }
@@ -3179,14 +3183,18 @@ async fn main() -> Result<()> {
                     "haversine_distance" => {
                         handle_haversine_distance(&args).map_err(|e| anyhow::anyhow!("{e}"))
                     }
+                    #[cfg(feature = "extract")]
                     "elevation_stats" => {
                         handle_elevation_stats(&args).map_err(|e| anyhow::anyhow!("{e}"))
                     }
+                    #[cfg(feature = "extract")]
                     "dem_info" => handle_dem_info(&args).map_err(|e| anyhow::anyhow!("{e}")),
+                    #[cfg(feature = "extract")]
                     "fuel_estimate" => {
                         handle_fuel_estimate(&args).map_err(|e| anyhow::anyhow!("{e}"))
                     }
                     "inspect_rmp" => handle_inspect_rmp(&args).map_err(|e| anyhow::anyhow!("{e}")),
+                    #[cfg(feature = "extract")]
                     "pipeline" => handle_pipeline(&args).await,
                     "get_valhalla_matrix" => handle_get_valhalla_matrix(&args).await,
                     other => {

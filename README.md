@@ -233,7 +233,7 @@ Generate dense vector representations for road network nodes and edges — usefu
 | `line` | ~3s | SGD over edges preserving 1st + 2nd order graph proximity |
 | `node2vec` | ~25s | Biased random walks + Skip-gram, captures community structure and structural roles |
 
-#### 9. Drone VRP
+#### 10. Drone VRP
 1. Navigate to **Drone VRP** view
 2. Press `m` to select drone model (FlyCart30 or Wing)
 3. Press `d` to set depot coordinates
@@ -242,7 +242,7 @@ Generate dense vector representations for road network nodes and edges — usefu
 6. Press `s` to set wind speed (m/s)
 7. Press `Enter` to solve with energy calculation
 
-#### 10. Zone Partition
+#### 11. Zone Partition
 1. Navigate to **Partition** view
 2. Press `e` to set edge list JSON or `p` for points JSON
 3. Press `k` to set number of zones

@@ -897,6 +897,10 @@ impl App {
                     self.log(LogLevel::Success, format!("Epochs set: {}", v));
                 }
             }
+            InputField::VrpModelPath => {
+                self.vrp_model_path = value.clone();
+                self.log(LogLevel::Success, format!("VRP model path set: {}", value));
+            }
         }
         self.input_mode.active = false;
     }

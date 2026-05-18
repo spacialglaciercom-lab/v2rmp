@@ -177,7 +177,6 @@ impl NormalizeAngle for f64 {
     fn normalize(self, lower: f64, upper: f64) -> f64 {
         let width = upper - lower;
         lower + (self - lower).rem_euclid(width)
-        (self - lower).rem_euclid(width) + lower
     }
 }
 
@@ -296,6 +295,7 @@ pub fn solve_cpp(
     edges: &[RmpEdge],
     oneway: OnewayMode,
     depot: Option<(f64, f64)>,
+    penalties: TurnPenalties,
 ) -> anyhow::Result<CppOutput> {
     let start = Instant::now();
 
@@ -328,10 +328,14 @@ pub fn solve_cpp(
         let from = edge.from as usize;
         let to = edge.to as usize;
 
+        let b_fwd = bearing(nodes[from].lat, nodes[from].lon, nodes[to].lat, nodes[to].lon);
+        let b_rev = (b_fwd + 180.0) % 360.0;
+
         adj[from].push(AdjEntry {
             to: edge.to,
             weight_m: edge.weight_m,
             edge_idx: idx,
+            bearing: b_fwd,
         });
 
         match oneway {
@@ -340,6 +344,7 @@ pub fn solve_cpp(
                     to: edge.from,
                     weight_m: edge.weight_m,
                     edge_idx: idx,
+                    bearing: b_rev,
                 });
             }
             OnewayMode::Respect => {
@@ -348,6 +353,7 @@ pub fn solve_cpp(
                         to: edge.from,
                         weight_m: edge.weight_m,
                         edge_idx: idx,
+                        bearing: b_rev,
                     });
                 }
             }
@@ -357,6 +363,7 @@ pub fn solve_cpp(
                         to: edge.from,
                         weight_m: edge.weight_m,
                         edge_idx: idx,
+                        bearing: b_rev,
                     });
                     adj[from].retain(|e| e.edge_idx != idx);
                 } else {
@@ -364,6 +371,7 @@ pub fn solve_cpp(
                         to: edge.from,
                         weight_m: edge.weight_m,
                         edge_idx: idx,
+                        bearing: b_rev,
                     });
                 }
             }
@@ -380,7 +388,7 @@ pub fn solve_cpp(
     let odd_vertices: Vec<usize> = (0..n).filter(|&i| degrees[i] % 2 != 0).collect();
     let num_odd = odd_vertices.len();
 
-    let mut duplicate_edges: Vec<(usize, usize, f64, usize)> = Vec::new();
+    let mut duplicate_edges: Vec<(usize, usize, f64, usize, f64)> = Vec::new();
 
     if num_odd > 0 {
         use std::cmp::Ordering;
@@ -449,7 +457,8 @@ pub fn solve_cpp(
                     let mut path = Vec::new();
                     let mut curr = v;
                     while let Some((p, weight, eidx)) = prev[curr] {
-                        path.push((p, curr, weight, eidx));
+                        let b = bearing(nodes[p].lat, nodes[p].lon, nodes[curr].lat, nodes[curr].lon);
+                        path.push((p, curr, weight, eidx, b));
                         curr = p;
                     }
                     path_matrix[i][j] = path;
@@ -550,24 +559,26 @@ pub fn solve_cpp(
             } else {
                 (v_idx, u_idx)
             };
-            for &(p, c, weight, eidx) in &path_matrix[i][j] {
-                duplicate_edges.push((p, c, weight, eidx));
+            for &(p, c, weight, eidx, b) in &path_matrix[i][j] {
+                duplicate_edges.push((p, c, weight, eidx, b));
             }
         }
     }
 
     // Add duplicate edges
-    let deadhead_edge_idx = usize::MAX;
-    for &(u, v, weight, eidx) in &duplicate_edges {
+    for &(u, v, weight, eidx, b) in &duplicate_edges {
+        let rev_b = (b + 180.0) % 360.0;
         adj[u].push(AdjEntry {
             to: v as u32,
             weight_m: weight,
             edge_idx: eidx,
+            bearing: b,
         });
         adj[v].push(AdjEntry {
             to: u as u32,
             weight_m: weight,
             edge_idx: eidx,
+            bearing: rev_b,
         });
     }
 

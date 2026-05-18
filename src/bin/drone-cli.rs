@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::fs;
-use v2rmp::core::drone::solver::DroneSolver;
 use v2rmp::core::drone::{DroneModel, DroneSpec, DroneVrpInstance};
+use v2rmp::core::drone::solver::DroneSolver;
 
 #[derive(Parser)]
 #[command(name = "rmpca-drone")]
