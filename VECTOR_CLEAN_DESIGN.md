@@ -472,8 +472,34 @@ fn merge_nearby_nodes(
     let merged_count = mapping.iter()
         .filter(|(k, v)| k != v)
         .count();
+
+    // Create new graph with merged nodes
+    let mut new_graph = UnGraph::new_undirected();
+    let mut new_node_map: HashMap<String, NodeIndex> = HashMap::new();
+
+    // Add canonical nodes
+    for canonical_id in mapping.values().collect::<HashSet<_>>() {
+        if let Some(node) = find_node_by_id(&nodes, canonical_id) {
+            let new_idx = new_graph.add_node(node.clone());
+            new_node_map.insert(canonical_id.clone(), new_idx);
+        }
+    }
+
+    // Add edges with updated endpoints
+    for edge_idx in graph.edge_indices() {
+        if let (Some((old_a, old_b)), Some(edge)) = (graph.edge_endpoints(edge_idx), graph.edge_weight(edge_idx)) {
+            let canonical_a = mapping[&graph.node_weight(old_a).unwrap().id];
+            let canonical_b = mapping[&graph.node_weight(old_b).unwrap().id];
+
+            if canonical_a != canonical_b {
+                if let (Some(&new_a), Some(&new_b)) = (new_node_map.get(&canonical_a), new_node_map.get(&canonical_b)) {
+                    new_graph.add_edge(new_a, new_b, edge.clone());
+                }
+            }
+        }
+    }
     
-    // TODO: Relabel graph nodes and update edge endpoints
+    *graph = new_graph;
     
     merged_count
 }
