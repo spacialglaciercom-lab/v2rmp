@@ -314,7 +314,11 @@ fn handle_tool_call(params: Value) -> Result<Value> {
                 dotenvy::dotenv().ok();
                 let db_url = std::env::var("SUPABASE_DB_URL")?;
                 let pool = sqlx::PgPool::connect(&db_url).await?;
-                let rows = sqlx::query(sql_query).fetch_all(&pool).await?;
+                let mut tx = pool.begin().await?;
+                sqlx::query("SET TRANSACTION READ ONLY")
+                    .execute(&mut *tx)
+                    .await?;
+                let rows = sqlx::query(sql_query).fetch_all(&mut *tx).await?;
                 let mut results = Vec::new();
                 for row in rows {
                     use sqlx::{Column, Row, TypeInfo};
@@ -322,15 +326,25 @@ fn handle_tool_call(params: Value) -> Result<Value> {
                     for col in row.columns() {
                         let name = col.name();
                         let val: Value = match col.type_info().name() {
-                            "TEXT" | "VARCHAR" | "NAME" => row.get::<Option<String>, _>(name).map(Value::String).unwrap_or(Value::Null),
-                            "INT4" | "INTEGER" => row.get::<Option<i32>, _>(name).map(|n| json!(n)).unwrap_or(Value::Null),
-                            "INT8" | "BIGINT" => row.get::<Option<i64>, _>(name).map(|n| json!(n)).unwrap_or(Value::Null),
+                            "TEXT" | "VARCHAR" | "NAME" => row
+                                .get::<Option<String>, _>(name)
+                                .map(Value::String)
+                                .unwrap_or(Value::Null),
+                            "INT4" | "INTEGER" => row
+                                .get::<Option<i32>, _>(name)
+                                .map(|n| json!(n))
+                                .unwrap_or(Value::Null),
+                            "INT8" | "BIGINT" => row
+                                .get::<Option<i64>, _>(name)
+                                .map(|n| json!(n))
+                                .unwrap_or(Value::Null),
                             _ => json!("<type not displayed>"),
                         };
                         res_row.insert(name.to_string(), val);
                     }
                     results.push(Value::Object(res_row));
                 }
+                let _ = tx.rollback().await;
                 let val = json!({ "results": results });
                 Ok(json!({
                     "content": [{ "type": "text", "text": serde_json::to_string(&results)? }],

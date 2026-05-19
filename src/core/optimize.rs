@@ -430,32 +430,9 @@ pub fn solve_cpp(
             position: u,
         });
 
-            while let Some(State {
-                cost,
-                position,
-                incoming_bearing,
-            }) = heap.pop()
-            {
-                if cost > dists[position] {
-                    continue;
-                }
-
         while let Some(State { cost, position }) = heap.pop() {
             if cost > dists[position] {
                 continue;
-            }
-
-                    let next_cost = cost + edge.weight_m + penalty;
-                    if next_cost < dists[edge.to as usize] {
-                        dists[edge.to as usize] = next_cost;
-                        prev[edge.to as usize] = Some((position, edge.weight_m, edge.edge_idx));
-                        heap.push(State {
-                            cost: next_cost,
-                            position: edge.to as usize,
-                            incoming_bearing: Some(edge.bearing),
-                        });
-                    }
-                }
             }
 
             for edge in &adj[position] {

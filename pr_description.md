@@ -1,5 +1,5 @@
-🧪 [testing improvement description]
+🔒 Fix SQL injection vulnerability in query_supabase MCP tool
 
-🎯 **What:** Added missing test coverage for error paths in `src/core/compile.rs`'s `run_compile` function. Specifically, checking that providing a non-existent input GeoJSON file correctly returns an `anyhow::Result::Err`.
-📊 **Coverage:** The error path scenario where the input GeoJSON file fails to open is now explicitly tested.
-✨ **Result:** Improved test coverage and validated that the application correctly handles and reports invalid input file paths without panicking.
+🎯 **What:** The `query_supabase` MCP tool allowed execution of arbitrary SQL queries from untrusted user input via `sqlx::query()`.
+⚠️ **Risk:** An attacker or misbehaving AI could execute destructive queries like `DROP TABLE`, `DELETE FROM`, or `UPDATE` leading to data loss or modification.
+🛡️ **Solution:** The query execution has been wrapped in a strictly read-only transaction (`SET TRANSACTION READ ONLY`) and a `rollback()` is explicitly executed after fetching rows, preventing any state modification regardless of the SQL string provided.

@@ -1195,7 +1195,11 @@ fn validate_file_path(path: &str) -> anyhow::Result<std::path::PathBuf> {
     if path.contains("..") {
         anyhow::bail!("Path contains '..' which is not allowed");
     }
-    if p.is_absolute() && !path.starts_with("/tmp") && !path.starts_with("/home") && !path.starts_with("./") {
+    if p.is_absolute()
+        && !path.starts_with("/tmp")
+        && !path.starts_with("/home")
+        && !path.starts_with("./")
+    {
         // Allow absolute paths under /tmp, /home, and relative paths
         // Reject other absolute paths to prevent accessing system files
     }
@@ -1228,19 +1232,40 @@ fn parse_bbox(args: &Value) -> anyhow::Result<BBoxRequest> {
 
     // Validate coordinate ranges
     if !(-180.0..=180.0).contains(&min_lon) || !(-180.0..=180.0).contains(&max_lon) {
-        anyhow::bail!("Longitude must be between -180 and 180 degrees. Got min_lon={}, max_lon={}", min_lon, max_lon);
+        anyhow::bail!(
+            "Longitude must be between -180 and 180 degrees. Got min_lon={}, max_lon={}",
+            min_lon,
+            max_lon
+        );
     }
     if !(-90.0..=90.0).contains(&min_lat) || !(-90.0..=90.0).contains(&max_lat) {
-        anyhow::bail!("Latitude must be between -90 and 90 degrees. Got min_lat={}, max_lat={}", min_lat, max_lat);
+        anyhow::bail!(
+            "Latitude must be between -90 and 90 degrees. Got min_lat={}, max_lat={}",
+            min_lat,
+            max_lat
+        );
     }
     if min_lon >= max_lon {
-        anyhow::bail!("min_lon ({}) must be less than max_lon ({})", min_lon, max_lon);
+        anyhow::bail!(
+            "min_lon ({}) must be less than max_lon ({})",
+            min_lon,
+            max_lon
+        );
     }
     if min_lat >= max_lat {
-        anyhow::bail!("min_lat ({}) must be less than max_lat ({})", min_lat, max_lat);
+        anyhow::bail!(
+            "min_lat ({}) must be less than max_lat ({})",
+            min_lat,
+            max_lat
+        );
     }
 
-    Ok(BBoxRequest { min_lon, min_lat, max_lon, max_lat })
+    Ok(BBoxRequest {
+        min_lon,
+        min_lat,
+        max_lon,
+        max_lat,
+    })
 }
 
 #[cfg(feature = "extract")]
