@@ -4,7 +4,6 @@ GeoJSON/OSM cleaning pipeline before optimizer.
   POST /api/geojson/clean — validate, repair geometry, dedupe nodes/edges,
   remove self-loops/short edges/isolates, keep largest component(s); return cleaned GeoJSON + stats.
 """
-from __future__ import annotations
 
 import hashlib
 import logging
