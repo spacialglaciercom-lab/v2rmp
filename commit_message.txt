@@ -1,6 +1,6 @@
-🧹 Extract deep nesting into handle_file_selection
+🧹 Remove unused import and variable in re_export_onnx.py
 
-🎯 What: Extracted the `match browser.target_field` logic in `close_file_browser` into a new `handle_file_selection` helper function.
-💡 Why: Improves readability by reducing deep nesting and separating concerns.
-✅ Verification: Ran `cargo check`, `cargo clippy`, and `cargo test` to ensure functionality is preserved.
-✨ Result: `close_file_browser` is much cleaner and `handle_file_selection` handles the individual field updates.
+🎯 What: Removed the unused `sys` import and the unused variable `N` in `re_export_onnx.py`.
+💡 Why: Improves readability and maintainability by removing unused code which triggers static analysis warnings.
+✅ Verification: Ran `pyflakes re_export_onnx.py` to verify the unused symbols are no longer present. Verified that `re_export_onnx.py` parses correctly.
+✨ Result: `pyflakes` issues are resolved and the code is cleaner.

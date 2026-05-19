@@ -1,5 +1,6 @@
-🧪 [testing improvement description]
+🧹 Remove unused import and variable in re_export_onnx.py
 
-🎯 **What:** Added missing test coverage for error paths in `src/core/compile.rs`'s `run_compile` function. Specifically, checking that providing a non-existent input GeoJSON file correctly returns an `anyhow::Result::Err`.
-📊 **Coverage:** The error path scenario where the input GeoJSON file fails to open is now explicitly tested.
-✨ **Result:** Improved test coverage and validated that the application correctly handles and reports invalid input file paths without panicking.
+🎯 What: Removed the unused `sys` import and the unused variable `N` in `re_export_onnx.py`.
+💡 Why: Improves readability and maintainability by removing unused code which triggers static analysis warnings.
+✅ Verification: Ran `pyflakes re_export_onnx.py` to verify the unused symbols are no longer present. Verified that `re_export_onnx.py` parses correctly.
+✨ Result: `pyflakes` issues are resolved and the code is cleaner.
