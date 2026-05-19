@@ -22,7 +22,7 @@ Also generates additional synthetic instances biased toward weak solvers
 Usage: python augment_and_retrain_v4.py
 """
 
-import os, sys, json, time, math, argparse, copy, subprocess
+import os, json, time, math, argparse, copy
 from collections import Counter
 
 import numpy as np
