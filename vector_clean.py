@@ -38,7 +38,6 @@ BATCH_GEOJSON_THRESHOLD = 10_000
 # Max request body size for POST /api/geojson/clean (DoS protection)
 CLEAN_MAX_BODY_BYTES = 50 * 1024 * 1024  # 50 MB
 
-
 async def limit_geojson_clean_body_size(request: Request) -> None:
     """Reject request if Content-Length exceeds CLEAN_MAX_BODY_BYTES."""
     content_length = request.headers.get("content-length")
@@ -52,24 +51,15 @@ async def limit_geojson_clean_body_size(request: Request) -> None:
         except ValueError:
             pass
 
-
-def _haversine_m(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
-    """Haversine distance in meters."""
-    return _haversine_km(lon1, lat1, lon2, lat2) * 1000.0
-
-
 def _round_key(lon: float, lat: float, decimals: int = 6) -> tuple[float, float]:
     return (round(lon, decimals), round(lat, decimals))
-
 
 def _node_id(lon: float, lat: float, decimals: int = 6) -> str:
     return f"{round(lon, decimals)},{round(lat, decimals)}"
 
-
 # ---------------------------------------------------------------------------
 # Options and stats
 # ---------------------------------------------------------------------------
-
 
 class CleanOptions(BaseModel):
     """Options for POST /api/geojson/clean."""
@@ -92,7 +82,6 @@ class CleanOptions(BaseModel):
     include_polygons: bool = False
     include_points: bool = False
 
-
 class CleanStats(BaseModel):
     """Counts returned after cleaning."""
 
@@ -108,11 +97,9 @@ class CleanStats(BaseModel):
     isolates_removed: int = 0
     components_removed: int = 0
 
-
 # ---------------------------------------------------------------------------
 # Geometry helpers
 # ---------------------------------------------------------------------------
-
 
 def _geom_to_shapely(geom: dict[str, Any]) -> LineString | Point | Polygon | None:
     """Convert GeoJSON geometry dict to Shapely. Returns LineString, Point, Polygon, or None."""
@@ -122,7 +109,6 @@ def _geom_to_shapely(geom: dict[str, Any]) -> LineString | Point | Polygon | Non
         return shape(geom)
     except Exception:
         return None
-
 
 def _polygon_to_linestrings(shp: Polygon) -> list[LineString]:
     """Extract exterior and interior rings as LineStrings (no repeated closing point)."""
@@ -144,7 +130,6 @@ def _polygon_to_linestrings(shp: Polygon) -> list[LineString]:
                 lines.append(LineString(coords))
     return lines
 
-
 def _simplify_coords_m(coords: list[list[float]], tolerance_m: float) -> list[list[float]]:
     """Apply Douglas-Peucker simplification; tolerance_m is approximate (equatorial)."""
     if tolerance_m <= 0 or len(coords) < 3:
@@ -155,7 +140,6 @@ def _simplify_coords_m(coords: list[list[float]], tolerance_m: float) -> list[li
     if simplified.is_empty:
         return coords
     return [list(c) for c in simplified.coords]
-
 
 def _make_valid_geom(geom: LineString | Point | None) -> LineString | Point | None:
     """Repair invalid geometry; return None if empty or still invalid."""
@@ -175,7 +159,6 @@ def _make_valid_geom(geom: LineString | Point | None) -> LineString | Point | No
     except Exception:
         return None
 
-
 def _shapely_to_geojson_geom(geom: LineString | Point) -> dict[str, Any]:
     """Convert Shapely geometry to GeoJSON dict (coordinates only for LineString/Point)."""
     if geom.geom_type == "Point":
@@ -183,7 +166,6 @@ def _shapely_to_geojson_geom(geom: LineString | Point) -> dict[str, Any]:
     if geom.geom_type == "LineString":
         return {"type": "LineString", "coordinates": [list(c) for c in geom.coords]}
     return {"type": "LineString", "coordinates": []}
-
 
 def _repair_geojson_geopandas(
     fc: list[dict[str, Any]],
@@ -239,11 +221,9 @@ def _repair_geojson_geopandas(
         })
     return repaired
 
-
 # ---------------------------------------------------------------------------
 # GeoJSON -> Graph (with geometry + properties on edges)
 # ---------------------------------------------------------------------------
-
 
 def _geojson_features_to_graph(
     features: list[dict[str, Any]],
@@ -300,11 +280,9 @@ def _geojson_features_to_graph(
 
     return G, edge_records
 
-
 # ---------------------------------------------------------------------------
 # Graph cleaning steps
 # ---------------------------------------------------------------------------
-
 
 def _remove_selfloops(G: nx.MultiGraph, stats: dict[str, int]) -> None:
     selfloops = list(nx.selfloop_edges(G, keys=True))
@@ -312,7 +290,6 @@ def _remove_selfloops(G: nx.MultiGraph, stats: dict[str, int]) -> None:
         for u, v, k in selfloops:
             G.remove_edge(u, v, k)
         stats["selfloops_removed"] += len(selfloops)
-
 
 def _remove_short_edges(
     G: nx.MultiGraph,
@@ -327,7 +304,6 @@ def _remove_short_edges(
     for u, v, key in to_remove:
         G.remove_edge(u, v, key)
         stats["short_edges_removed"] += 1
-
 
 def _merge_duplicate_nodes(
     G: nx.MultiGraph,
@@ -441,7 +417,6 @@ def _merge_duplicate_nodes(
             seg_km = _haversine_km_vectorized(lon1, lat1, lon2, lat2)
             data["length_m"] = float(np.sum(seg_km) * 1000.0)
 
-
 def _dedupe_edges(G: nx.MultiGraph, stats: dict[str, int]) -> None:
     """Remove duplicate edges: same (u, v) and same geometry hash; keep first."""
     seen: dict[tuple[str, str], set[str]] = {}
@@ -462,7 +437,6 @@ def _dedupe_edges(G: nx.MultiGraph, stats: dict[str, int]) -> None:
     for u, v, key in to_remove:
         G.remove_edge(u, v, key)
 
-
 def _remove_edges_missing_attrs(
     G: nx.MultiGraph,
     required_attrs: list[str] | None,
@@ -481,7 +455,6 @@ def _remove_edges_missing_attrs(
                 break
     for u, v, key in to_remove:
         G.remove_edge(u, v, key)
-
 
 def _merge_property_values(values: list[Any], key: str) -> Any:
     """Merge a list of property values: average numbers, join strings, union sets/lists."""
@@ -515,7 +488,6 @@ def _merge_property_values(values: list[Any], key: str) -> Any:
         return result
     # Default: keep first non-None
     return non_none[0]
-
 
 def _merge_parallel_edges(
     G: nx.MultiGraph,
@@ -552,13 +524,11 @@ def _merge_parallel_edges(
                 G.edges[u, v, k0]["properties"] = merged_props
     stats["parallel_edges_merged"] += merged
 
-
 def _remove_isolates(G: nx.MultiGraph, stats: dict[str, int]) -> None:
     isolates = list(nx.isolates(G))
     if isolates:
         G.remove_nodes_from(isolates)
         stats["isolates_removed"] += len(isolates)
-
 
 def _keep_largest_components(
     G: nx.MultiGraph,
@@ -578,11 +548,9 @@ def _keep_largest_components(
     stats["components_removed"] += len(comps) - max_components
     G.remove_nodes_from(remove)
 
-
 # ---------------------------------------------------------------------------
 # Graph -> GeoJSON
 # ---------------------------------------------------------------------------
-
 
 def _graph_to_geojson(
     G: nx.MultiGraph,
@@ -616,11 +584,9 @@ def _graph_to_geojson(
             )
     return GeoJSONFeatureCollection(type="FeatureCollection", features=features)
 
-
 # ---------------------------------------------------------------------------
 # Main pipeline
 # ---------------------------------------------------------------------------
-
 
 def clean_geojson(
     geojson: dict[str, Any],
@@ -774,22 +740,18 @@ def clean_geojson(
     stats_dict["output_features"] = len(out_fc.features)
     return out_fc, CleanStats(**stats_dict)
 
-
 # ---------------------------------------------------------------------------
 # API
 # ---------------------------------------------------------------------------
-
 
 class CleanRequest(BaseModel):
     geojson: GeoJSONFeatureCollection
     options: CleanOptions = Field(default_factory=CleanOptions)
 
-
 class CleanResponse(BaseModel):
     geojson: GeoJSONFeatureCollection
     stats: CleanStats
     warnings: list[str] = Field(default_factory=list, description="Non-fatal warnings (e.g. high invalid-drop ratio)")
-
 
 @router.post(
     "/api/geojson/clean",
