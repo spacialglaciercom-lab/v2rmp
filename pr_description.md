@@ -1,5 +1,8 @@
 🧪 [testing improvement description]
 
-🎯 **What:** Added missing test coverage for error paths in `src/core/compile.rs`'s `run_compile` function. Specifically, checking that providing a non-existent input GeoJSON file correctly returns an `anyhow::Result::Err`.
-📊 **Coverage:** The error path scenario where the input GeoJSON file fails to open is now explicitly tested.
-✨ **Result:** Improved test coverage and validated that the application correctly handles and reports invalid input file paths without panicking.
+🎯 **What:** Added missing test coverage for `_geom_to_shapely` in `vector_clean.py`. The original implementation had an unchecked generic exception during GeoJSON loading that was completely untested, particularly for invalid coordinates format.
+📊 **Coverage:** Covered 3 cases for `_geom_to_shapely`:
+  - `test_geom_to_shapely_valid`: tests the happy path with valid coordinates.
+  - `test_geom_to_shapely_invalid_no_coords`: tests when coordinates are missing.
+  - `test_geom_to_shapely_invalid_shape`: tests when invalid data (like strings instead of numbers) is passed, checking the generic Exception block.
+✨ **Result:** Improved reliability of the pipeline by verifying that invalid GeoJSON dicts triggering shapely errors will securely return `None` as intended instead of bubbling up unexpected errors.
