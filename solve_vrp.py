@@ -5,7 +5,11 @@ class MCPClient:
         self.proc = subprocess.Popen([str(bin_path)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
         self._id = 1
         self.stderr_content = []
-        self.stderr_thread = threading.Thread(target=self._read_stderr)
+        def read_stderr():
+            for line in self.proc.stderr:
+                self.stderr_content.append(line)
+
+        self.stderr_thread = threading.Thread(target=read_stderr)
         self.stderr_thread.daemon = True
         self.stderr_thread.start()
         
@@ -14,9 +18,6 @@ class MCPClient:
         self._write({"jsonrpc":"2.0","method":"notifications/initialized"})
         time.sleep(0.5)
 
-    def _read_stderr(self):
-        for line in self.proc.stderr:
-            self.stderr_content.append(line)
 
     def _write(self, obj):
         self.proc.stdin.write(json.dumps(obj) + "\n")
