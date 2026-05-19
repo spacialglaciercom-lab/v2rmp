@@ -22,8 +22,6 @@ from shapely.strtree import STRtree
 from .geojson_ops import (
     GeoJSONFeature,
     GeoJSONFeatureCollection,
-    _extract_coords,
-    _haversine_km,
     _haversine_km_vectorized,
 )
 
@@ -51,11 +49,6 @@ async def limit_geojson_clean_body_size(request: Request) -> None:
                 )
         except ValueError:
             pass
-
-
-def _haversine_m(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
-    """Haversine distance in meters."""
-    return _haversine_km(lon1, lat1, lon2, lat2) * 1000.0
 
 
 def _round_key(lon: float, lat: float, decimals: int = 6) -> tuple[float, float]:
@@ -377,7 +370,6 @@ def _merge_duplicate_nodes(
             # canonical = min by string order
             parent[ra] = parent[rb] = min(ra, rb)
 
-    node_to_idx = {n: i for i, n in enumerate(nodes)}
     for i, nid in enumerate(nodes):
         pt = points[i]
         lon, lat = pt.x, pt.y
