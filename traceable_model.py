@@ -203,7 +203,7 @@ class TraceableDecoder(nn.Module):
             # Consume demand at customer
             consumed = demands[torch.arange(B), action].unsqueeze(1)  # [B, 1]
             rem_cap = rem_cap - consumed  # subtract (will be corrected above if at depot)
-            rem_cap = torch.where(at_depot, capacity, rem_cap + consumed)  # fix: don't subtract at depot
+            rem_cap = torch.where(at_depot, capacity, rem_cap)  # fix: don't subtract at depot
         
         actions = torch.stack(actions_list, dim=-1)  # [B, max_steps]
         log_p = torch.stack(log_p_list, dim=-1)      # [B, max_steps]
