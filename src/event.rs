@@ -393,7 +393,7 @@ async fn handle_optimize_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers)
 
                 // Build optimize request
                 use crate::core::optimize::{
-                    run_optimize, OnewayMode, OptimizeRequest, SolverMode,
+                    run_optimize, CppEngine, OnewayMode, OptimizeRequest, SolverMode,
                 };
 
                 let route_path = app.route_file.clone().or_else(|| {
@@ -410,6 +410,7 @@ async fn handle_optimize_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers)
                     depot,
                     oneway_mode: OnewayMode::Respect,
                     mode: SolverMode::Cpp,
+                    cpp_engine: CppEngine::default(),
                     num_vehicles: 1,
                     solver_id: "default".to_string(),
                     coordinates: None,

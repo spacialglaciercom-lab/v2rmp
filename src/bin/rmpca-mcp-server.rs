@@ -51,7 +51,7 @@ use v2rmp::core::nlp::QwenNLParser;
 #[cfg(feature = "ml")]
 use v2rmp::core::nlp::{parse_query, to_vrp_json};
 use v2rmp::core::optimize::{
-    OnewayMode, OptimizeRequest, OptimizeResult, SolverMode, TurnPenalties,
+    CppEngine, OnewayMode, OptimizeRequest, OptimizeResult, SolverMode, TurnPenalties,
 };
 use v2rmp::core::vrp::registry::solve_with;
 use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverOutput, VRPSolverStop, VrpObjective};
@@ -1448,6 +1448,7 @@ async fn handle_optimize(args: &Value) -> Result<Value> {
         depot,
         oneway_mode,
         mode,
+        cpp_engine: CppEngine::default(),
         num_vehicles,
         solver_id,
         coordinates: None,

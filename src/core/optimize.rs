@@ -2,8 +2,11 @@
 use crate::core::geo_types::BBox;
 use crate::core::vrp::registry::solve_with;
 use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective, VRPSolverOutput};
+use geojson::{Feature, FeatureCollection, Geometry, Value as GeoJsonValue};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::io::Read;
+use std::process::Command;
 use std::time::Instant;
 
 /// Filter nodes and edges to only those within a bounding box.
@@ -78,6 +81,16 @@ pub enum SolverMode {
     Vrp,
 }
 
+/// Which C++ engine to use for edge-covering optimization.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+pub enum CppEngine {
+    /// Internal Rust implementation (default)
+    #[default]
+    Internal,
+    /// External rust-optimizer binary (must be installed via cargo install rust-optimizer)
+    ExternalRustOptimizer,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizeRequest {
     pub cache_file: String,
@@ -87,6 +100,9 @@ pub struct OptimizeRequest {
     pub oneway_mode: OnewayMode,
     /// Solver mode: Cpp (default, edge coverage) or Vrp (stop visits).
     pub mode: SolverMode,
+    /// C++ engine: Internal (default) or ExternalRustOptimizer.
+    #[serde(default)]
+    pub cpp_engine: CppEngine,
     /// VRP-only: number of vehicles.
     #[serde(default = "default_num_vehicles")]
     pub num_vehicles: usize,
@@ -720,6 +736,252 @@ pub fn solve_cpp(
     })
 }
 
+/// Convert RmpNode and RmpEdge to GeoJSON FeatureCollection for external optimizer.
+fn rmp_to_geojson(nodes: &[RmpNode], edges: &[RmpEdge]) -> FeatureCollection {
+    use std::collections::HashMap;
+
+    let mut features = Vec::new();
+    let mut edge_map: HashMap<(u32, u32), &RmpEdge> = HashMap::new();
+
+    // Build edge lookup
+    for edge in edges {
+        edge_map.insert((edge.from, edge.to), edge);
+        if edge.oneway == 0 {
+            edge_map.insert((edge.to, edge.from), edge);
+        }
+    }
+
+    // Group edges by their line geometry
+    let mut edge_groups: HashMap<(u32, u32), Vec<&RmpEdge>> = HashMap::new();
+    for edge in edges {
+        let key = if edge.from < edge.to { (edge.from, edge.to) } else { (edge.to, edge.from) };
+        edge_groups.entry(key).or_default().push(edge);
+    }
+
+    // For each edge, create a LineString feature
+    for edge in edges {
+        let from_node = &nodes[edge.from as usize];
+        let to_node = &nodes[edge.to as usize];
+
+        let coords = vec![vec![from_node.lon, from_node.lat], vec![to_node.lon, to_node.lat]];
+
+        let mut properties = serde_json::Map::new();
+        properties.insert("oneway".to_string(), json!(edge.oneway != 0));
+        properties.insert("weight_m".to_string(), json!(edge.weight_m));
+        properties.insert("from".to_string(), json!(edge.from));
+        properties.insert("to".to_string(), json!(edge.to));
+
+        features.push(Feature {
+            bbox: None,
+            geometry: Some(Geometry::new(GeoJsonValue::LineString(coords))),
+            id: None,
+            properties: Some(properties),
+            foreign_members: None,
+        });
+    }
+
+    FeatureCollection {
+        bbox: None,
+        features,
+        foreign_members: None,
+    }
+}
+
+/// Run the external rust-optimizer binary for C++ optimization.
+fn run_external_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
+    let start = Instant::now();
+
+    // 1. Read .rmp file
+    let mut file_data = Vec::new();
+    {
+        let mut file = std::fs::File::open(&req.cache_file)
+            .map_err(|e| anyhow::anyhow!("Failed to open .rmp file '{}': {}", req.cache_file, e))?;
+        file.read_to_end(&mut file_data)?;
+    }
+    let (nodes, edges) = read_rmp_file(&file_data)?;
+
+    if nodes.is_empty() || edges.is_empty() {
+        return Ok(OptimizeResult {
+            total_distance_km: 0.0,
+            total_segments: 0,
+            deadhead_distance_km: 0.0,
+            efficiency_pct: 100.0,
+            turns: TurnSummary {
+                left: 0,
+                right: 0,
+                u_turn: 0,
+                straight: 0,
+            },
+            elapsed_ms: 0,
+            num_routes: 1,
+            routes: Vec::new(),
+            is_partial: false,
+            unreachable_edges: 0,
+        });
+    }
+
+    // 2. Convert to GeoJSON
+    let geojson = rmp_to_geojson(&nodes, &edges);
+
+    // 3. Build request for external optimizer
+    let oneway_mode_str = match req.oneway_mode {
+        OnewayMode::Ignore => "ignore",
+        OnewayMode::Respect => "respect",
+        OnewayMode::Reverse => "reverse",
+    };
+
+    let request_json = json!({
+        "geojson": geojson,
+        "start_lat": req.depot.map(|(lat, _)| lat),
+        "start_lon": req.depot.map(|(_, lon)| lon),
+        "oneway_mode": oneway_mode_str,
+        "service_both_sides": false,
+        "turn_penalties": {
+            "left_turn": req.turn_penalties.left,
+            "right_turn": req.turn_penalties.right,
+            "u_turn": req.turn_penalties.u_turn,
+        },
+    });
+
+    // 4. Call external rust-optimizer binary
+    let mut child = Command::new("rust-optimizer")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to spawn rust-optimizer. Ensure it's installed: cargo install rust-optimizer. Error: {}",
+                e
+            )
+        })?;
+
+    // Write input JSON to stdin
+    use std::io::Write;
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin.write_all(request_json.to_string().as_bytes())?;
+    }
+
+    let output = child.wait_with_output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!(
+            "rust-optimizer failed with exit code {:?}: {}",
+            output.status.code(),
+            stderr
+        );
+    }
+
+    // 5. Parse response
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+
+    // Extract values from response
+    let total_distance_km = response["total_distance_km"]
+        .as_f64()
+        .unwrap_or(0.0);
+    let stats = &response["stats"];
+    let deadhead_distance_km = stats["deadhead_distance_km"]
+        .as_f64()
+        .unwrap_or(0.0);
+    let efficiency = stats["efficiency"].as_f64().unwrap_or(100.0);
+
+    // Build route from response
+    let route_points: Vec<VRPSolverStop> = response["route"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|pt| {
+                    let lat = pt["latitude"].as_f64()?;
+                    let lon = pt["longitude"].as_f64()?;
+                    Some(VRPSolverStop {
+                        lat,
+                        lon,
+                        label: pt["node_id"]
+                            .as_str()
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| format!("Node {:.6},{:.6}", lat, lon)),
+                        demand: None,
+                        arrival_time: None,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // 6. Write GPX if requested
+    if let Some(ref route_path) = req.route_file {
+        if route_path.ends_with(".json") {
+            std::fs::write(route_path, serde_json::to_string_pretty(&response)?)?;
+        } else {
+            // Write as GPX
+            use std::io::{BufWriter, Write};
+            let file = std::fs::File::create(route_path)?;
+            let mut writer = BufWriter::new(file);
+
+            writeln!(writer, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>")?;
+            writeln!(
+                writer,
+                "<gpx version=\"1.1\" creator=\"rmpca-rust-optimizer\" xmlns=\"http://www.topografix.com/GPX/1/1\">"
+            )?;
+            writeln!(writer, "  <trk>")?;
+            writeln!(writer, "    <name>External Rust-Optimizer Route</name>")?;
+            writeln!(writer, "    <trkseg>")?;
+            for stop in &route_points {
+                writeln!(
+                    writer,
+                    "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"></trkpt>",
+                    stop.lat, stop.lon
+                )?;
+            }
+            writeln!(writer, "    </trkseg>")?;
+            writeln!(writer, "  </trk>")?;
+            writeln!(writer, "</gpx>")?;
+            writer.flush()?;
+        }
+    }
+
+    // Count turns based on route points
+    let mut turns = TurnSummary {
+        left: 0,
+        right: 0,
+        u_turn: 0,
+        straight: 0,
+    };
+
+    if route_points.len() > 2 {
+        for i in 1..route_points.len().saturating_sub(1) {
+            let prev = &route_points[i - 1];
+            let curr = &route_points[i];
+            let next = &route_points[i + 1];
+            let b_in = bearing(prev.lat, prev.lon, curr.lat, curr.lon);
+            let b_out = bearing(curr.lat, curr.lon, next.lat, next.lon);
+            let delta = b_out - b_in;
+            match classify_turn(delta) {
+                "left" => turns.left += 1,
+                "right" => turns.right += 1,
+                "u_turn" => turns.u_turn += 1,
+                _ => turns.straight += 1,
+            }
+        }
+    }
+
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+
+    Ok(OptimizeResult {
+        total_distance_km,
+        total_segments: route_points.len(),
+        deadhead_distance_km,
+        efficiency_pct: efficiency,
+        turns,
+        elapsed_ms,
+        num_routes: 1,
+        routes: vec![route_points],
+        is_partial: false,
+        unreachable_edges: 0,
+    })
+}
+
 /// Run the Chinese Postman Problem route optimization (filesystem wrapper).
 fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     let start = Instant::now();
@@ -1081,7 +1343,12 @@ pub fn write_gpx_cpp(path: &str, nodes: &[RmpNode], circuit: &[u32]) -> anyhow::
 /// Run route optimization, dispatching to CPP or VRP based on `req.mode`.
 pub async fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     match req.mode {
-        SolverMode::Cpp => run_cpp_optimize(req),
+        SolverMode::Cpp => {
+            match req.cpp_engine {
+                CppEngine::Internal => run_cpp_optimize(req),
+                CppEngine::ExternalRustOptimizer => run_external_cpp_optimize(req),
+            }
+        }
         SolverMode::Vrp => run_vrp_optimize(req).await,
     }
 }

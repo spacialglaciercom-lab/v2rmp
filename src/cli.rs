@@ -8,7 +8,7 @@ use crate::core::compile::CompileRequest;
 use crate::core::elevation::{FuelCalculator, LocalDem};
 #[cfg(feature = "extract")]
 use crate::core::extract::{BBoxRequest, ExtractRequest, ExtractResult, ExtractSource, RoadClass};
-use crate::core::optimize::{OnewayMode, OptimizeRequest, SolverMode, TurnPenalties};
+use crate::core::optimize::{CppEngine, OnewayMode, OptimizeRequest, SolverMode, TurnPenalties};
 
 /// rmpca - Route optimization and data extraction
 #[derive(Parser)]
@@ -591,6 +591,10 @@ fn default_mode() -> String {
     "cpp".to_string()
 }
 
+fn default_cpp_engine() -> String {
+    "internal".to_string()
+}
+
 fn default_left_penalty() -> f64 {
     1.0
 }
@@ -637,6 +641,11 @@ struct OptimizeArgs {
     #[arg(short, long, default_value = "cpp")]
     #[serde(default = "default_mode")]
     mode: String,
+
+    /// C++ engine: internal or external-rust-optimizer (default: internal)
+    #[arg(long, default_value = "internal")]
+    #[serde(default = "default_cpp_engine")]
+    cpp_engine: String,
 
     /// Left turn penalty (default: 1.0)
     #[arg(long, default_value_t = 1.0)]
@@ -792,6 +801,14 @@ fn parse_oneway(s: &str) -> Result<OnewayMode> {
         "ignore" => Ok(OnewayMode::Ignore),
         "reverse" => Ok(OnewayMode::Reverse),
         other => anyhow::bail!("Unknown oneway mode: {other} (respect|ignore|reverse)"),
+    }
+}
+
+fn parse_cpp_engine(s: &str) -> Result<CppEngine> {
+    match s.to_lowercase().as_str() {
+        "internal" | "" => Ok(CppEngine::Internal),
+        "external-rust-optimizer" | "external" | "rust-optimizer" => Ok(CppEngine::ExternalRustOptimizer),
+        other => anyhow::bail!("Unknown C++ engine: {other} (internal|external-rust-optimizer)"),
     }
 }
 
@@ -967,15 +984,20 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
         "vrp" => SolverMode::Vrp,
         _ => SolverMode::Cpp,
     };
+    let cpp_engine = parse_cpp_engine(&args.cpp_engine)?;
 
     if !json {
         tracing::info!(
-            "Optimizing route from {} (mode: {})",
+            "Optimizing route from {} (mode: {}, engine: {})",
             args.input,
             if mode == SolverMode::Vrp {
                 "VRP"
             } else {
                 "CPP"
+            },
+            match cpp_engine {
+                CppEngine::Internal => "internal",
+                CppEngine::ExternalRustOptimizer => "external-rust-optimizer",
             }
         );
     }
@@ -990,6 +1012,7 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
         depot,
         oneway_mode,
         mode,
+        cpp_engine,
         num_vehicles: args.vehicles,
         solver_id: args.solver,
         coordinates: None,
