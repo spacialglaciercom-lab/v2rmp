@@ -506,12 +506,12 @@ impl App {
             .map(|b| b.previous_view.clone())
             .unwrap_or(View::Home);
 
-        let browser_field = self.file_browser.take().map(|b| b.target_field.clone());
+        let _browser_field = self.file_browser.take().map(|b| b.target_field.clone());
 
         if let Some(path) = selected_path {
             let path_str = path.to_string_lossy().to_string();
 
-            if let Some(field) = browser_field {
+            if let Some(field) = _browser_field {
                 self.handle_file_selection(field, path_str);
             }
         } else {
