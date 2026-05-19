@@ -18,9 +18,8 @@ Usage:
 import json
 import argparse
 import random
-import os
-from typing import List, Dict, Any
-from dataclasses import dataclass, field
+from typing import List, Dict
+from dataclasses import dataclass
 
 # ─── System Prompt ────────────────────────────────────────────────────────────
 
@@ -1224,7 +1223,7 @@ def main():
                     total_asst_msgs += 1
                     total_chars += len(msg["content"])
 
-        print(f"Dataset Statistics:")
+        print("Dataset Statistics:")
         print(f"  Total conversations: {total}")
         print(f"  Unique system prompts: {len(system_prompts)}")
         print(f"  User messages: {total_user_msgs}")

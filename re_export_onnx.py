@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from huggingface_hub import hf_hub_download, HfApi
 import numpy as np
 import os
-import sys
 
 # Must match train_job.py exactly
 @dataclass
@@ -161,7 +160,7 @@ class ONNXModel(nn.Module):
         self.max_steps = max_steps
 
     def forward(self, locs, demand, capacity):
-        B, N = locs.shape[0], locs.shape[1]
+        B, _N = locs.shape[0], locs.shape[1]
         depot_l = torch.zeros(B, 1, 3, device=locs.device, dtype=locs.dtype)
         depot_l[:, :, :2] = 0.5  # depot at (0.5, 0.5, 0.0)
         full_l = torch.cat([depot_l, locs], 1)
