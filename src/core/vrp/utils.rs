@@ -53,7 +53,7 @@ pub fn build_haversine_matrix(locations: &[VRPSolverStop], avg_speed_kmh: f64) -
     }
 
     // Initialize n x n matrix with zeros
-    let mut matrix = vec![vec![DistCell { distance: 0.0, time: 0.0 }; n]; n];
+    let mut matrix = vec![vec![DistCell { distance: 0.0, time: 0.0, path: None }; n]; n];
     const R_KM: f64 = 6371.0;
     let time_factor = 3600.0 / avg_speed_kmh;
 
@@ -71,6 +71,7 @@ pub fn build_haversine_matrix(locations: &[VRPSolverStop], avg_speed_kmh: f64) -
             let cell = DistCell {
                 distance: dist,
                 time: time_sec,
+                path: None,
             };
 
             // Exploit symmetry: dist(i, j) == dist(j, i)
@@ -101,7 +102,8 @@ pub fn build_graph_matrix(
             vec![
                 DistCell {
                     distance: 0.0,
-                    time: 0.0
+                    time: 0.0,
+                    path: None
                 };
                 n_stops
             ];
@@ -153,7 +155,8 @@ pub fn build_graph_matrix(
         vec![
             DistCell {
                 distance: 0.0,
-                time: 0.0
+                time: 0.0,
+                path: None
             };
             n_stops
         ];
@@ -162,16 +165,33 @@ pub fn build_graph_matrix(
 
     for i in 0..n_stops {
         let start_node = stop_nodes[i];
-        let dists = dijkstra(start_node, &adj, n_nodes);
+        let (dists, prev) = dijkstra(start_node, &adj, n_nodes);
 
         for j in 0..n_stops {
             let target_node = stop_nodes[j];
             let d_m = dists[target_node];
+            
+            // Reconstruct path
+            let mut path = Vec::new();
+            if d_m < f64::MAX {
+                let mut curr = target_node;
+                path.push(curr as u32);
+                while let Some(p) = prev[curr] {
+                    curr = p;
+                    path.push(curr as u32);
+                    if curr == start_node {
+                        break;
+                    }
+                }
+                path.reverse();
+            }
+
             let d_km = d_m / 1000.0;
             let time_sec = (d_km / avg_speed_kmh) * 3600.0;
             matrix[i][j] = DistCell {
                 distance: d_km,
                 time: time_sec,
+                path: if path.len() >= 2 { Some(path) } else { None },
             };
         }
     }
@@ -179,7 +199,7 @@ pub fn build_graph_matrix(
     matrix
 }
 
-fn dijkstra(start: usize, adj: &[Vec<(usize, f64)>], n: usize) -> Vec<f64> {
+fn dijkstra(start: usize, adj: &[Vec<(usize, f64)>], n: usize) -> (Vec<f64>, Vec<Option<usize>>) {
     use std::cmp::Ordering;
     use std::collections::BinaryHeap;
 
@@ -204,6 +224,7 @@ fn dijkstra(start: usize, adj: &[Vec<(usize, f64)>], n: usize) -> Vec<f64> {
     }
 
     let mut dists = vec![f64::MAX; n];
+    let mut prev = vec![None; n];
     let mut heap = BinaryHeap::new();
 
     dists[start] = 0.0;
@@ -221,6 +242,7 @@ fn dijkstra(start: usize, adj: &[Vec<(usize, f64)>], n: usize) -> Vec<f64> {
             let next_cost = cost + weight;
             if next_cost < dists[*next] {
                 dists[*next] = next_cost;
+                prev[*next] = Some(position);
                 heap.push(State {
                     cost: next_cost,
                     position: *next,
@@ -228,7 +250,7 @@ fn dijkstra(start: usize, adj: &[Vec<(usize, f64)>], n: usize) -> Vec<f64> {
             }
         }
     }
-    dists
+    (dists, prev)
 }
 
 use super::super::optimize::{RmpEdge, RmpNode};
@@ -293,6 +315,7 @@ pub async fn get_valhalla_matrix(locations: &[VRPSolverStop]) -> Result<DistMatr
             matrix_row.push(DistCell {
                 distance: dist,
                 time,
+                path: None,
             });
         }
         matrix.push(matrix_row);
@@ -947,6 +970,7 @@ mod tests {
         let m: DistMatrix = vec![vec![DistCell {
             distance: 0.0,
             time: 0.0,
+            path: None,
         }]];
         let improved = two_opt_improve(&m, &[0], 300);
         assert_eq!(improved, vec![0]);
@@ -959,20 +983,24 @@ mod tests {
                 DistCell {
                     distance: 0.0,
                     time: 0.0,
+                    path: None,
                 },
                 DistCell {
                     distance: 5.0,
                     time: 100.0,
+                    path: None,
                 },
             ],
             vec![
                 DistCell {
                     distance: 5.0,
                     time: 100.0,
+                    path: None,
                 },
                 DistCell {
                     distance: 0.0,
                     time: 0.0,
+                    path: None,
                 },
             ],
         ];
@@ -1076,20 +1104,24 @@ mod tests {
                 DistCell {
                     distance: 0.0,
                     time: 0.0,
+                    path: None,
                 },
                 DistCell {
                     distance: 10.0,
                     time: 200.0,
+                    path: None,
                 },
             ],
             vec![
                 DistCell {
                     distance: 10.0,
                     time: 200.0,
+                    path: None,
                 },
                 DistCell {
                     distance: 0.0,
                     time: 0.0,
+                    path: None,
                 },
             ],
         ];

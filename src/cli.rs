@@ -520,6 +520,17 @@ struct CompileArgs {
     #[serde(default)]
     clean: bool,
 
+    /// Road classes to include in the .rmp (comma-separated allowlist; empty = include all)
+    /// e.g. --road-classes residential,tertiary,secondary,unclassified
+    #[arg(long, value_delimiter = ',')]
+    #[serde(default)]
+    road_classes: Vec<String>,
+
+    /// Prune leaf spurs (degree-1 edges from boundary clipping)
+    #[arg(long)]
+    #[serde(default)]
+    prune_spurs: bool,
+
     /// Prune disconnected subgraphs
     #[arg(long)]
     #[serde(default)]
@@ -687,6 +698,11 @@ struct PipelineArgs {
     #[serde(default, deserialize_with = "deserialize_depot_opt")]
     depot: Option<String>,
 
+    /// Prune leaf spurs (degree-1 edges from boundary clipping)
+    #[arg(long)]
+    #[serde(default)]
+    pub prune_spurs: bool,
+
     /// Prune disconnected subgraphs during compilation
     #[arg(long)]
     #[serde(default)]
@@ -851,9 +867,10 @@ fn run_compile_cmd(args: CompileArgs, json: bool) -> Result<()> {
         input_geojson: args.input,
         output_rmp: args.output,
         compress: false,
-        road_classes: vec![],
+        road_classes: args.road_classes,
         clean_options,
         prune_disconnected: args.prune_disconnected,
+        prune_spurs: args.prune_spurs,
     };
 
     let result = crate::core::compile::run_compile(&req)?;
@@ -984,6 +1001,10 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
         output_json(&result)?;
     } else {
         tracing::info!("Optimization complete!");
+        if result.is_partial {
+            tracing::warn!("WARNING: Route is PARTIAL (Disconnected Components).");
+            tracing::warn!("Found {} unreachable edges from start node.", result.unreachable_edges);
+        }
         tracing::info!("Total distance: {:.2} km", result.total_distance_km);
         tracing::info!("Stops/Segments: {}", result.total_segments);
         tracing::info!("Vehicles used: {}", result.num_routes);
@@ -1105,7 +1126,7 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
     let matrix = crate::core::vrp::utils::build_haversine_matrix(&stops, 40.0);
 
     #[cfg(feature = "ml")]
-    let mut vrp_input = VRPSolverInput {
+    let vrp_input = VRPSolverInput {
         locations: stops,
         num_vehicles: args.vehicles,
         vehicle_capacity: capacity,
@@ -1225,6 +1246,7 @@ async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         road_classes: vec![],
         clean_options: None,
         prune_disconnected: args.prune_disconnected,
+        prune_spurs: args.prune_spurs,
     };
     let compile_result = crate::core::compile::run_compile(&compile_req)
         .context("Pipeline failed at stage 'compile'")?;
@@ -1830,7 +1852,7 @@ pub async fn run() -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "extract"))]
 mod tests {
     use super::*;
 

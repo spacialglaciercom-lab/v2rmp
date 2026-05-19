@@ -44,6 +44,7 @@ async fn main() -> Result<()> {
         compress: false,
         road_classes: vec![],
         clean_options: None,
+        prune_spurs: false,
     };
     let compile_res = run_compile(&compile_req)?;
     println!(

@@ -15,6 +15,9 @@ pub struct CompileRequest {
     pub clean_options: Option<CleanOptions>,
     #[serde(default)]
     pub prune_disconnected: bool,
+    /// Remove degree-1 leaf edges (boundary spurs) iteratively until graph stabilizes.
+    #[serde(default)]
+    pub prune_spurs: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,7 +53,12 @@ pub fn run_compile(req: &CompileRequest) -> anyhow::Result<CompileResult> {
         geojson = cleaned_fc;
     }
 
-    let (buf, node_count, edge_count) = build_rmp_buffer(&geojson, req.prune_disconnected)?;
+    let (buf, node_count, edge_count) = build_rmp_buffer(
+        &geojson,
+        &req.road_classes,
+        req.prune_disconnected,
+        req.prune_spurs,
+    )?;
 
     // Write output file
     std::fs::write(&req.output_rmp, &buf)
@@ -73,7 +81,9 @@ pub fn run_compile(req: &CompileRequest) -> anyhow::Result<CompileResult> {
 /// Shared by `run_compile` (and the in-memory compile path).
 fn build_rmp_buffer(
     geojson: &geojson::FeatureCollection,
+    road_classes: &[String],
     prune_disconnected: bool,
+    prune_spurs: bool,
 ) -> anyhow::Result<(Vec<u8>, usize, usize)> {
     let mut node_map: HashMap<u64, u32> = HashMap::new();
     let mut nodes: Vec<(f64, f64)> = Vec::new();
@@ -84,6 +94,18 @@ fn build_rmp_buffer(
             Some(g) => g,
             None => continue,
         };
+
+        // Filter by road class allowlist (if non-empty)
+        if !road_classes.is_empty() {
+            let feature_class = feature
+                .properties
+                .as_ref()
+                .and_then(|props| props.get("class"))
+                .and_then(|v| v.as_str());
+            if feature_class.map_or(true, |c| !road_classes.iter().any(|rc| rc == c)) {
+                continue;
+            }
+        }
 
         let oneway = feature
             .properties
@@ -141,6 +163,11 @@ fn build_rmp_buffer(
     // Prune disconnected subgraphs
     if prune_disconnected && !nodes.is_empty() {
         prune_disconnected_components(&mut nodes, &mut edges);
+    }
+
+    // Prune leaf spurs (degree-1 edges, iteratively)
+    if prune_spurs {
+        prune_leaf_spurs(&mut nodes, &mut edges);
     }
 
     let node_count = nodes.len();
@@ -227,6 +254,60 @@ fn prune_disconnected_components(
     *edges = new_edges;
 }
 
+/// Iteratively remove degree-1 leaf nodes and their single incident edge.
+/// Handles boundary clipping artifacts: edges cut at the bbox boundary become
+/// dead-end spurs that force the CPP solver into unnecessary deadhead.
+fn prune_leaf_spurs(
+    nodes: &mut Vec<(f64, f64)>,
+    edges: &mut Vec<(u32, u32, f64, u8)>,
+) {
+    loop {
+        let n = nodes.len();
+        let mut degree = vec![0usize; n];
+        for &(from, to, _, _) in edges.iter() {
+            degree[from as usize] += 1;
+            degree[to as usize] += 1;
+        }
+
+        // Find leaf nodes (degree 0 or 1). A degree-0 node is orphaned.
+        let leaves: Vec<usize> = (0..n).filter(|&i| degree[i] <= 1).collect();
+        if leaves.is_empty() {
+            break;
+        }
+
+        let leaf_set: std::collections::HashSet<usize> = leaves.iter().copied().collect();
+
+        // Keep only edges where both endpoints have degree > 1
+        let kept: Vec<(u32, u32, f64, u8)> = edges
+            .drain(..)
+            .filter(|(from, to, _, _)| {
+                !leaf_set.contains(&(*from as usize))
+                    && !leaf_set.contains(&(*to as usize))
+            })
+            .collect();
+        *edges = kept;
+
+        // Remap node indices
+        let mut old_to_new = vec![None; n];
+        let mut new_nodes = Vec::new();
+        for i in 0..n {
+            if !leaf_set.contains(&i) {
+                old_to_new[i] = Some(new_nodes.len() as u32);
+                new_nodes.push(nodes[i]);
+            }
+        }
+
+        for edge in edges.iter_mut() {
+            edge.0 = old_to_new[edge.0 as usize]
+                .expect("edge endpoint should not be a leaf");
+            edge.1 = old_to_new[edge.1 as usize]
+                .expect("edge endpoint should not be a leaf");
+        }
+
+        *nodes = new_nodes;
+    }
+}
+
 /// Quick validation: check if a file starts with the RMP magic bytes.
 #[allow(dead_code)]
 pub fn is_rmp_file(data: &[u8]) -> bool {
@@ -264,6 +345,7 @@ mod tests {
             road_classes: vec![],
             clean_options: None,
             prune_disconnected: false,
+            prune_spurs: false,
         };
         let result = run_compile(&req);
         assert!(result.is_err());

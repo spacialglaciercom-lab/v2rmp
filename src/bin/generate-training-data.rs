@@ -19,8 +19,8 @@ use tokio::runtime::Runtime;
 
 use v2rmp::core::haversine_m;
 use v2rmp::core::ml::features::InstanceFeatures;
-use v2rmp::core::vrp::registry::{get_solver_list, solve_with};
-use v2rmp::core::vrp::types::{SolverHyperparams, VRPSolverInput, VRPSolverStop, VrpObjective};
+use v2rmp::core::vrp::registry::solve_with;
+use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
 use v2rmp::core::vrp::utils::build_haversine_matrix;
 
 /// Solvers to evaluate (neural/ONNX solvers excluded for CPU compatibility).
@@ -111,7 +111,6 @@ struct InstanceConfig {
     num_vehicles: usize,
     vehicle_capacity: f64,
     objective: VrpObjective,
-    profile: &'static str,
 }
 
 fn generate_biased_instance(rng: &mut FastPrng, profile: GenProfile) -> InstanceConfig {
@@ -140,7 +139,6 @@ fn generate_default(rng: &mut FastPrng) -> InstanceConfig {
         num_vehicles: n_vehicles.max(1),
         vehicle_capacity: 100.0,
         objective,
-        profile: "default",
     }
 }
 
@@ -165,7 +163,6 @@ fn generate_tight_capacity(rng: &mut FastPrng) -> InstanceConfig {
         num_vehicles: n_vehicles.max(1),
         vehicle_capacity: 100.0,
         objective,
-        profile: "tight_capacity",
     }
 }
 
@@ -189,7 +186,6 @@ fn generate_wide_radial(rng: &mut FastPrng) -> InstanceConfig {
         num_vehicles: n_vehicles.max(1),
         vehicle_capacity: 200.0,
         objective,
-        profile: "wide_radial",
     }
 }
 
@@ -215,7 +211,6 @@ fn generate_large_dense(rng: &mut FastPrng) -> InstanceConfig {
         num_vehicles: n_vehicles.max(1),
         vehicle_capacity: 150.0,
         objective,
-        profile: "large_dense",
     }
 }
 
@@ -235,7 +230,6 @@ fn generate_grid_cross(rng: &mut FastPrng) -> InstanceConfig {
         num_vehicles: n_vehicles.max(1),
         vehicle_capacity: 200.0,
         objective,
-        profile: "grid_cross",
     }
 }
 

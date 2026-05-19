@@ -104,6 +104,7 @@ fn run_compile(app: &mut GuiApp) {
         road_classes: Vec::new(),
         clean_options: None,
         prune_disconnected: false,
+        prune_spurs: false,
     };
 
     match crate::core::compile::run_compile(&req) {

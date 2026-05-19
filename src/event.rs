@@ -261,6 +261,7 @@ fn handle_compile_keys(app: &mut App, code: KeyCode, _mods: KeyModifiers) {
                     road_classes: vec![],
                     clean_options: None,
                     prune_disconnected: false,
+                    prune_spurs: false,
                 };
 
                 // Execute compilation

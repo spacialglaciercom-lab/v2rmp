@@ -424,6 +424,10 @@ fn handle_tool_call(params: Value) -> Result<Value> {
                     .get("prune_disconnected")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+                prune_spurs: arguments
+                    .get("prune_spurs")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             };
             let res = run_compile(&req)?;
             let val = json!(res);
