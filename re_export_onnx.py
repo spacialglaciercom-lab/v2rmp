@@ -4,31 +4,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from dataclasses import dataclass
 from huggingface_hub import hf_hub_download, HfApi
 import numpy as np
 import os
 import sys
 
-# Must match train_job.py exactly
-@dataclass
-class Config:
-    problem_size: int = 50
-    embedding_dim: int = 128
-    num_heads: int = 8
-    num_encoder_layers: int = 3
-    ff_hidden_dim: int = 512
-    batch_size: int = 512
-    epochs: int = 500
-    lr: float = 1e-4
-    weight_decay: float = 1e-6
-    max_demand: int = 9
-    capacity: float = 40.0
-    pomo_aug: int = 8
-    log_every: int = 10
-    save_every: int = 100
-    hub_model_id: str = ""
-    push_to_hub: bool = False
+from train_job import Config
 
 
 class MHA(nn.Module):
