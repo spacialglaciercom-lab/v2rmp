@@ -12,11 +12,9 @@ Fixes from v1:
 """
 
 import os
-import sys
-import math
 import argparse
 from dataclasses import dataclass
-from typing import Optional, Tuple
+
 
 import numpy as np
 import torch
@@ -283,7 +281,7 @@ class ONNXModel(nn.Module):
         self.max_steps = max_steps
 
     def forward(self, locs, demand, capacity):
-        B, N = locs.shape[0], locs.shape[1]
+        B = locs.shape[0]
         depot_l = torch.zeros(B, 1, 3, device=locs.device, dtype=locs.dtype)
         depot_l[:, :, :2] = 0.5  # depot at (0.5, 0.5, 0.0)
         full_l = torch.cat([depot_l, locs], 1)
@@ -397,7 +395,6 @@ def train(cfg: Config):
     print(f"Expected routes per instance: ~{cfg.problem_size * ((cfg.max_demand+1)/2) / cfg.capacity:.1f}")
 
     # Logging init
-    history = {"loss": [], "greedy_cost": [], "sample_cost": []}
 
     model = CVRPModel(cfg).to(device)
     n_params = sum(p.numel() for p in model.parameters())
@@ -472,10 +469,10 @@ def train(cfg: Config):
     for seed in range(5):
         torch.manual_seed(1000 + seed)
         cfg_eval = Config(**{**cfg.__dict__, 'batch_size': 128})
-        l, d, c = generate_batch(cfg_eval, device)
+        locs_eval, d, c = generate_batch(cfg_eval, device)
         with torch.no_grad():
-            a, _ = model(l, d, c, greedy=True, max_steps=max_steps)
-            co = tour_cost_batch(l, a, N)
+            a, _ = model(locs_eval, d, c, greedy=True, max_steps=max_steps)
+            co = tour_cost_batch(locs_eval, a, N)
             eval_costs.append(co.mean().item())
 
     print(f"Greedy eval (5×128): {np.mean(eval_costs):.4f} ± {np.std(eval_costs):.4f}")
@@ -483,12 +480,12 @@ def train(cfg: Config):
     # Sampling eval
     torch.manual_seed(42)
     cfg_eval.batch_size = 64
-    l, d, c = generate_batch(cfg_eval, device)
+    locs_eval, d, c = generate_batch(cfg_eval, device)
     with torch.no_grad():
         best_sample_costs = torch.full((64,), float('inf'), device=device)
         for _ in range(1280):
-            a, _ = model(l, d, c, greedy=False, max_steps=max_steps)
-            co = tour_cost_batch(l, a, N)
+            a, _ = model(locs_eval, d, c, greedy=False, max_steps=max_steps)
+            co = tour_cost_batch(locs_eval, a, N)
             best_sample_costs = torch.min(best_sample_costs, co)
         print(f"Best-of-1280 sample: {best_sample_costs.mean():.4f}")
 
