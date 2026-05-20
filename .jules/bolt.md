@@ -28,3 +28,6 @@
 ## 2026-05-09 - [Haversine Matrix Optimization]
 **Learning:** Calculating a distance matrix using the Haversine formula is $O(n^2)$. Redundant trigonometric calls (lat/lon to radians, cosine of latitude) are a major bottleneck. Pre-calculating these $O(n)$ once and exploiting matrix symmetry ($dist(i, j) = dist(j, i)$) provides a significant speedup.
 **Action:** Always pre-calculate trigonometric inputs for $O(n^2)$ geometric loops and use symmetry to halve the workload.
+## 2024-05-18 - [Clean unused imports and variables in train_cvrp.py]
+**Learning:** Ruff fixes can sometimes leave empty definitions behind or fail for certain types of variables. Use specific targeting rather than global replacements.
+**Action:** In the future when cleaning up, verify changes locally using git diff before proceeding, and ensure script can still be imported.

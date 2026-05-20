@@ -27,7 +27,13 @@ Output: data/training_data_balanced.jsonl (same schema as original)
 Usage:  python generate_balanced_training_data.py 6000
 """
 
-import os, sys, json, time, subprocess, math, random
+import os
+import sys
+import json
+import time
+import subprocess
+import math
+import random
 from collections import Counter
 import numpy as np
 
@@ -117,7 +123,7 @@ def generate_instance_for_solver(target_solver: str, seed: int) -> dict:
             lat = base_lat + (rng.random() - 0.5) * area_scale * 2.0
             lon = base_lon + (rng.random() - 0.5) * area_scale * 2.0
         elif pattern == "clustered" or pattern == "clustered_tight":
-            num_clusters = rng.randint(2, 5)
+            rng.randint(2, 5)
             cx = base_lat + (rng.random() - 0.5) * area_scale * 1.2
             cy = base_lon + (rng.random() - 0.5) * area_scale * 1.2
             lat = cx + (rng.random() - 0.5) * 0.25
@@ -342,7 +348,6 @@ def ensure_dummy_rmp():
                        check=True, capture_output=True, timeout=10)
     except Exception:
         # Fallback: create a minimal binary RMP (not valid, but solver only needs coordinates)
-        import struct
         with open(RMP_PATH, "wb") as f:
             f.write(b"rmpca\x01\x00\x00\x00")
         print("WARNING: Using placeholder RMP file")
@@ -380,7 +385,7 @@ def solve_with_rust(instance: dict, solver_id: str) -> float:
     finally:
         try:
             os.remove(csv_path)
-        except:
+        except Exception:
             pass
     return float('inf')
 
@@ -496,7 +501,7 @@ def main():
     print("Done!")
     print(f"  Total generated: {len(records)}")
     print(f"  Saved to: {OUT_PATH}")
-    print(f"  Actual solver distribution:")
+    print("  Actual solver distribution:")
     for sid in SOLVER_IDS:
         print(f"    {sid:18s}: {solver_counts[sid]:5d} ({solver_counts[sid]/max(len(records),1)*100:.1f}%)")
     print(f"  Elapsed: {time.time()-t0:.1f}s")

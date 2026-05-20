@@ -2,12 +2,10 @@
 """HF Job runner for drone CVRP neural solver training."""
 
 import os
-import sys
 import torch
-import numpy as np
 
 # Import the training module
-from train_job import Config, CVRPModel, generate_batch, train, tour_cost_batch, ONNXModel
+from train_job import Config, train
 
 # ── Config from env or defaults ──
 cfg = Config(
@@ -24,7 +22,7 @@ cfg = Config(
     trackio_project=os.environ.get("TRACKIO_PROJECT", "drone-cvrp-training"),
 )
 
-print(f"=== Drone CVRP Neural Solver Training ===")
+print("=== Drone CVRP Neural Solver Training ===")
 print(f"Config: {cfg}")
 print(f"PyTorch: {torch.__version__} | CUDA: {torch.cuda.is_available()}")
 

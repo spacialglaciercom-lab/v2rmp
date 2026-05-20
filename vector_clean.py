@@ -22,7 +22,6 @@ from shapely.strtree import STRtree
 from .geojson_ops import (
     GeoJSONFeature,
     GeoJSONFeatureCollection,
-    _extract_coords,
     _haversine_km,
     _haversine_km_vectorized,
 )
@@ -353,7 +352,6 @@ def _merge_duplicate_nodes(
             # canonical = min by string order
             parent[ra] = parent[rb] = min(ra, rb)
 
-    node_to_idx = {n: i for i, n in enumerate(nodes)}
     for i, nid in enumerate(nodes):
         pt = points[i]
         lon, lat = pt.x, pt.y

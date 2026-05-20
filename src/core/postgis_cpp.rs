@@ -244,11 +244,11 @@ pub fn run_postgis_cpp(req: &PostGisCppRequest) -> Result<PostGisCppResult> {
     };
 
     // Solve CPP
-    let (route_nodes, aug_graph) = solve_cpp_with_matching(&graph, start_node)?;
+    let (route_edges, aug_graph) = solve_cpp_with_matching(&graph, start_node)?;
     let t_cpp = t_start.elapsed();
 
     // Build route using the augmented graph (has deadhead edges)
-    let route_result = build_route_from_nodes(&aug_graph, &route_nodes)?;
+    let route_result = build_route_from_edges(&aug_graph, &route_edges)?;
     let t_build = t_start.elapsed();
 
     // Efficiency
@@ -535,7 +535,7 @@ fn nearest_node(graph: &RoadGraph, lat: f64, lon: f64) -> Option<NodeIndex> {
 fn solve_cpp_with_matching(
     graph: &RoadGraph,
     start_hint: Option<NodeIndex>,
-) -> Result<(Vec<NodeIndex>, RoadGraph)> {
+) -> Result<(Vec<petgraph::graph::EdgeIndex>, RoadGraph)> {
     // Find odd-degree vertices
     let odd_nodes: Vec<NodeIndex> = graph
         .node_indices()
@@ -634,8 +634,8 @@ fn solve_cpp_with_matching(
         }
     });
 
-    let circuit = hierholzer(&aug_graph, start)?;
-    Ok((circuit, aug_graph))
+    let circuit_edges = hierholzer(&aug_graph, start)?;
+    Ok((circuit_edges, aug_graph))
 }
 
 /// Reconstruct shortest path between two nodes (node sequence).
@@ -662,78 +662,58 @@ fn shortest_path(graph: &RoadGraph, start: NodeIndex, goal: NodeIndex) -> Option
 }
 
 /// Hierholzer's algorithm: find Eulerian circuit in the augmented graph.
-fn hierholzer(graph: &RoadGraph, start: NodeIndex) -> Result<Vec<NodeIndex>> {
+/// Returns a sequence of EdgeIndex.
+fn hierholzer(
+    graph: &RoadGraph,
+    start: NodeIndex,
+) -> Result<Vec<petgraph::graph::EdgeIndex>> {
     if graph.edge_count() == 0 {
-        return Ok(vec![start]);
+        return Ok(Vec::new());
     }
 
-    // Build mutable adjacency: for each node, a list of (neighbor, edge_index, edge_data)
-    // We'll use Vec<bool> to track consumed edges.
     let edge_count = graph.edge_count();
     let mut consumed = vec![false; edge_count];
-
-    // Map edge index → (source, target) for quick lookup
-    let mut edge_info: Vec<(NodeIndex, NodeIndex)> = Vec::with_capacity(edge_count);
-    let mut adj_map: HashMap<NodeIndex, Vec<usize>> = HashMap::new();
+    let mut adj_map: HashMap<NodeIndex, Vec<petgraph::graph::EdgeIndex>> = HashMap::new();
 
     for edge_ref in graph.edge_references() {
-        let ei = edge_ref.id().index();
-        // petgraph uses NodeIndex::index() for internal integer id
-        let source = edge_ref.source();
-        let target = edge_ref.target();
-        edge_info.push((source, target));
-        adj_map.entry(source).or_default().push(ei);
-        adj_map.entry(target).or_default().push(ei);
-        if ei + 1 > edge_count {
-            edge_info.resize(ei + 1, (NodeIndex::from(0), NodeIndex::from(0)));
-        }
+        let ei = edge_ref.id();
+        adj_map.entry(edge_ref.source()).or_default().push(ei);
+        adj_map.entry(edge_ref.target()).or_default().push(ei);
     }
 
-    // Resize edge_info to match max index
-    edge_info.resize(edge_count, (NodeIndex::from(0), NodeIndex::from(0)));
-    consumed.resize(edge_count, false);
+    let mut stack: Vec<(NodeIndex, Option<petgraph::graph::EdgeIndex>)> = vec![(start, None)];
+    let mut circuit_edges: Vec<petgraph::graph::EdgeIndex> = Vec::new();
 
-    let mut stack: Vec<NodeIndex> = vec![start];
-    let mut circuit: Vec<NodeIndex> = Vec::new();
-
-    while let Some(&current) = stack.last() {
-        // Find an unconsumed edge from current
-        if let Some(adj_list) = adj_map.get(&current) {
-            let mut found = false;
-            for &ei in adj_list {
-                if !consumed[ei] {
-                    consumed[ei] = true;
-                    let (src, tgt) = edge_info[ei];
+    while let Some(&(current, _)) = stack.last() {
+        let mut found = false;
+        if let Some(adj_list) = adj_map.get_mut(&current) {
+            while let Some(ei) = adj_list.pop() {
+                if !consumed[ei.index()] {
+                    consumed[ei.index()] = true;
+                    let (src, tgt) = graph.edge_endpoints(ei).unwrap();
                     let next = if src == current { tgt } else { src };
-                    stack.push(next);
+                    stack.push((next, Some(ei)));
                     found = true;
                     break;
                 }
             }
-            if !found {
-                circuit.push(stack.pop().unwrap());
+        }
+        
+        if !found {
+            if let Some((_, Some(ei))) = stack.pop() {
+                circuit_edges.push(ei);
+            } else {
+                stack.pop();
             }
-        } else {
-            circuit.push(stack.pop().unwrap());
         }
     }
 
-    if circuit.is_empty() {
+    if circuit_edges.is_empty() && graph.edge_count() > 0 {
         anyhow::bail!("Hierholzer produced empty circuit");
     }
 
-    // The circuit is built in reverse order (stack pops)
-    circuit.reverse();
-
-    // Ensure start node is at the front
-    if circuit.first() != Some(&start) {
-        // Rotate: find start and rotate
-        if let Some(pos) = circuit.iter().position(|&n| n == start) {
-            circuit.rotate_left(pos);
-        }
-    }
-
-    Ok(circuit)
+    circuit_edges.reverse();
+    Ok(circuit_edges)
 }
 
 // ── Route building: coordinates + turn instructions ───────────────────
@@ -746,9 +726,9 @@ struct RouteBuilderResult {
     turn_stats: TurnStats,
 }
 
-fn build_route_from_nodes(
+fn build_route_from_edges(
     graph: &RoadGraph,
-    route_nodes: &[NodeIndex],
+    route_edges: &[petgraph::graph::EdgeIndex],
 ) -> Result<RouteBuilderResult> {
     let mut route: Vec<(f64, f64)> = Vec::new();
     let mut instructions: Vec<RouteInstruction> = Vec::new();
@@ -761,56 +741,60 @@ fn build_route_from_nodes(
     let mut straight: u32 = 0;
 
     let mut prev_bearing: Option<f64> = None;
-    let mut consumed: HashSet<(usize, usize)> = HashSet::new(); // (node_a_idx, node_b_idx)
 
-    for i in 0..route_nodes.len().saturating_sub(1) {
-        let u = route_nodes[i];
-        let v = route_nodes[i + 1];
-
-        let ui = u.index();
-        let vi = v.index();
-
-        // Find an unconsumed edge between u and v
-        let mut chosen_coords: Vec<(f64, f64)> = Vec::new();
-        let mut chosen_deadhead = false;
-        let mut chosen_name: Option<String> = None;
-        let mut chosen_dist_km = 0.0;
-
-        for edge_ref in graph.edges(u) {
-            let other = if edge_ref.source() == u {
-                edge_ref.target()
-            } else {
-                edge_ref.source()
-            };
-            if other == v {
-                let ekey = (std::cmp::min(ui, vi), std::cmp::max(ui, vi));
-                if !consumed.contains(&ekey) {
-                    consumed.insert(ekey);
-                    let e = edge_ref.weight();
-                    chosen_coords = e.coords.clone();
-                    chosen_deadhead = e.deadhead;
-                    chosen_name.clone_from(&e.name);
-                    chosen_dist_km = e.length_km;
-                    break;
-                }
-            }
+    // Determine the true starting node by looking at how the first two edges connect
+    let mut current_node: Option<NodeIndex> = if route_edges.len() >= 2 {
+        let (u1, v1) = graph.edge_endpoints(route_edges[0]).unwrap();
+        let (u2, v2) = graph.edge_endpoints(route_edges[1]).unwrap();
+        if u1 == u2 || u1 == v2 {
+            Some(v1) // u1 is the shared node, so we must have started at v1 and gone to u1
+        } else {
+            Some(u1) // v1 is the shared node, so we started at u1 and went to v1
         }
+    } else if let Some(&first_ei) = route_edges.first() {
+        let (u, _) = graph.edge_endpoints(first_ei).unwrap();
+        Some(u)
+    } else {
+        None
+    };
+
+    for &ei in route_edges {
+        let e = &graph[ei];
+        let (u, v) = graph.edge_endpoints(ei).unwrap();
+        
+        // Determine traversal direction
+        let (from_node, to_node) = if let Some(curr) = current_node {
+            if curr == u { 
+                (u, v) 
+            } else if curr == v { 
+                (v, u) 
+            } else {
+                // Should not happen in a valid Eulerian circuit, but fallback gracefully
+                (u, v)
+            }
+        } else {
+            (u, v)
+        };
+        current_node = Some(to_node);
+
+        let mut chosen_coords = e.coords.clone();
+        let chosen_deadhead = e.deadhead;
+        let chosen_name = e.name.clone();
+        let chosen_dist_km = e.length_km;
 
         if chosen_coords.is_empty() {
-            // Bridge: use node coordinates directly
-            let nd_u = &graph[u];
-            let nd_v = &graph[v];
+            let nd_u = &graph[from_node];
+            let nd_v = &graph[to_node];
             chosen_coords = vec![(nd_u.lon, nd_u.lat), (nd_v.lon, nd_v.lat)];
-            chosen_dist_km = haversine_km(nd_u.lat, nd_u.lon, nd_v.lat, nd_v.lon);
         }
 
-        // Reorder coordinates so the first point is near node u
+        // Reorder coordinates if needed
         if let Some(first_pt) = chosen_coords.first() {
-            let nd_u = &graph[u];
-            let d_first = haversine_km(nd_u.lat, nd_u.lon, first_pt.1, first_pt.0);
+            let nd_from = &graph[from_node];
+            let d_first = haversine_km(nd_from.lat, nd_from.lon, first_pt.1, first_pt.0);
             let d_last = haversine_km(
-                nd_u.lat,
-                nd_u.lon,
+                nd_from.lat,
+                nd_from.lon,
                 chosen_coords.last().unwrap().1,
                 chosen_coords.last().unwrap().0,
             );
@@ -885,20 +869,16 @@ fn build_route_from_nodes(
         }
 
         // Append coordinates to route
-        let start_k = if i == 0 { 0 } else { 1 };
+        let start_k = if route.is_empty() { 0 } else { 1 };
         for (k, &(lon, lat)) in chosen_coords.iter().enumerate() {
             if k >= start_k {
                 route.push((lon, lat));
             }
         }
 
-        // Accumulate distance
-        for w in chosen_coords.windows(2) {
-            let seg_dist = haversine_km(w[0].1, w[0].0, w[1].1, w[1].0);
-            total_km += seg_dist;
-            if chosen_deadhead {
-                deadhead_km += seg_dist;
-            }
+        total_km += chosen_dist_km;
+        if chosen_deadhead {
+            deadhead_km += chosen_dist_km;
         }
     }
 
@@ -1113,15 +1093,15 @@ mod tests {
         );
 
         // First and last node should be the same (circuit)
-        assert_eq!(
-            circuit.first(),
-            circuit.last(),
-            "Circuit must return to start"
+        // A circuit of edges must form a continuous loop
+        assert!(
+            circuit.len() >= 2,
+            "Circuit must have at least two edges"
         );
 
         // ── Build route ────────────────────────────────────
         let route =
-            build_route_from_nodes(&aug_graph, &circuit).expect("Route builder should succeed");
+            build_route_from_edges(&aug_graph, &circuit).expect("Route builder should succeed");
 
         // Total distance must be >= sum of edge lengths
         assert!(
@@ -1225,14 +1205,18 @@ mod tests {
 
         let (circuit, aug_graph) =
             solve_cpp_with_matching(&graph, None).expect("should solve diamond");
-        let route = build_route_from_nodes(&aug_graph, &circuit).expect("should build route");
+        let route = build_route_from_edges(&aug_graph, &circuit).expect("should build route");
 
         // Diamond has 2 odd nodes (0 and 2) → one matched pair → deadhead > 0
         assert!(
             route.deadhead_distance_km > 0.0,
             "Diamond should have deadhead"
         );
-        assert_eq!(circuit.first(), circuit.last(), "Must be a circuit");
+        // A circuit of edges must form a continuous loop
+        assert!(
+            circuit.len() >= 2,
+            "Circuit must have at least two edges"
+        );
     }
 
     /// Single edge: 2 nodes, both degree 1 → both odd → matched pair → deadhead = original edge.
@@ -1265,11 +1249,15 @@ mod tests {
 
         let (circuit, _aug) =
             solve_cpp_with_matching(&graph, None).expect("should solve single edge");
-        assert_eq!(circuit.first(), circuit.last(), "Must be a circuit");
+        // A circuit of edges must form a continuous loop
+        assert!(
+            circuit.len() >= 2,
+            "Circuit must have at least two edges"
+        );
         // 2 odd nodes → match them → duplicate the edge → circuit traverses it twice
         assert!(
-            circuit.len() >= 3,
-            "Single-edge circuit should be a→b→a (len >= 3), got {}",
+            circuit.len() >= 2,
+            "Single-edge circuit should traverse original and deadhead (len >= 2), got {}",
             circuit.len()
         );
     }

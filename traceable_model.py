@@ -292,8 +292,7 @@ def export_trained_to_onnx(checkpoint_path: str, onnx_path: str,
     """
     Load a PyTorch checkpoint from train_cvrp.py, build traceable model, export to ONNX.
     """
-    import os
-    from train_cvrp import CVPRouteModel, CVRPConfig
+    from train_cvrp import CVPRouteModel
     
     ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     train_config = ckpt["config"]

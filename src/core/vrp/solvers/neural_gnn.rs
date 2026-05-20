@@ -167,6 +167,7 @@ impl VRPSolver for NeuralGnnSolver {
         Ok(VRPSolverOutput {
             stops,
             routes: Some(vec![improved.iter().map(|&i| input.locations[i].clone()).collect()]),
+            geometry: None,
             total_distance_km: format!("{:.2}", total_dist),
             total_time_min: (total_time / 60.0) as u32,
             route_stats: None,
