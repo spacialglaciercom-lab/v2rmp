@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import json
-import numpy as np
+import os
 
 # 1. Advanced Policy: Graph Convolutional Network (GCN)
 class GNNPolicy(nn.Module):
@@ -36,7 +35,6 @@ class GNNPolicy(nn.Module):
         scores = self.actor(combined)
         return scores # Returns scores for EVERY node on the map
 
-import os
 
 # 2. Implementation Strategy for ONNX
 def export_gnn():

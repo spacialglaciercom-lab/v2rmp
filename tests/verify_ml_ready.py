@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Quick validation that ml_ready fields propagate correctly."""
-import json, subprocess, select, time
+import json
+import subprocess
+import select
 
 proc = subprocess.Popen(
     ["target/quick/rmpca-mcp-server"],
@@ -41,21 +43,21 @@ print("  ml_ready  :", res.get("ml_ready"))
 print("  model_loaded:", res.get("model_loaded"))
 print("  recommended:", res.get("recommended"))
 assert "ml_ready" in res, "ml_ready missing from predict_solver"
-assert res["ml_ready"] == True, f"Expected ml_ready=True with model present, got {res['ml_ready']}"
+assert res["ml_ready"], f"Expected ml_ready=True with model present, got {res['ml_ready']}"
 
 print("\n=== predict_quality ===")
 res = call_tool("predict_quality", {"stops": stops, "num_vehicles": 1})
 print("  ml_ready  :", res.get("ml_ready"))
 print("  confidence:", res.get("confidence"))
 assert "ml_ready" in res, "ml_ready missing from predict_quality"
-assert res["ml_ready"] == True
+assert res["ml_ready"]
 
 print("\n=== tune_hyperparams ===")
 res = call_tool("tune_hyperparams", {"stops": stops, "num_vehicles": 1})
 print("  ml_ready  :", res.get("ml_ready"))
 print("  max_iter  :", res.get("max_iterations"))
 assert "ml_ready" in res, "ml_ready missing from tune_hyperparams"
-assert res["ml_ready"] == True
+assert res["ml_ready"]
 
 proc.stdin.close()
 proc.wait(timeout=5)

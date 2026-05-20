@@ -1,0 +1,370 @@
+{
+  "rmpca-mcp": [
+    {
+      "name": "download_from_r2",
+      "description": "Download an object from the R2 bucket to a local file.",
+      "required_params": [
+        "local_path",
+        "r2_path"
+      ],
+      "param_names": [
+        "bucket",
+        "local_path",
+        "r2_path"
+      ]
+    },
+    {
+      "name": "list_r2_bucket",
+      "description": "List all objects available in the configured Cloudflare R2 bucket.",
+      "required_params": [],
+      "param_names": [
+        "bucket",
+        "prefix"
+      ]
+    },
+    {
+      "name": "query_supabase",
+      "description": "Execute a SQL query against the Supabase database.",
+      "required_params": [
+        "query"
+      ],
+      "param_names": [
+        "query"
+      ]
+    },
+    {
+      "name": "upload_to_r2",
+      "description": "Upload a local file to the R2 bucket.",
+      "required_params": [
+        "local_path",
+        "r2_path"
+      ],
+      "param_names": [
+        "bucket",
+        "local_path",
+        "r2_path"
+      ]
+    },
+    {
+      "name": "v2rmp_compile",
+      "description": "Compile GeoJSON into .rmp binary format with optional cleaning.",
+      "required_params": [
+        "input_geojson",
+        "output_rmp"
+      ],
+      "param_names": [
+        "input_geojson",
+        "output_rmp",
+        "remove_isolates"
+      ]
+    },
+    {
+      "name": "v2rmp_extract",
+      "description": "Extract road network data from Overture, OSM, or Postgres.",
+      "required_params": [
+        "max_lat",
+        "max_lon",
+        "min_lat",
+        "min_lon",
+        "output_path",
+        "source"
+      ],
+      "param_names": [
+        "max_lat",
+        "max_lon",
+        "min_lat",
+        "min_lon",
+        "output_path",
+        "source"
+      ]
+    },
+    {
+      "name": "v2rmp_generate_osmand_link",
+      "description": "Generate an OsmAnd deep link for importing a GPX file from a public URL.",
+      "required_params": [
+        "gpx_url"
+      ],
+      "param_names": [
+        "gpx_url"
+      ]
+    },
+    {
+      "name": "v2rmp_neural_optimize",
+      "description": "Optimize a route using a Neural Network model (ONNX). Best for complex VRP problems with capacity constraints.",
+      "required_params": [
+        "capacity",
+        "demands",
+        "locations",
+        "model_path"
+      ],
+      "param_names": [
+        "capacity",
+        "demands",
+        "locations",
+        "model_path"
+      ]
+    },
+    {
+      "name": "v2rmp_optimize",
+      "description": "Optimize a route on an .rmp map.",
+      "required_params": [
+        "map_path",
+        "output_route"
+      ],
+      "param_names": [
+        "db_export_table",
+        "depot_lat",
+        "depot_lon",
+        "map_path",
+        "output_route",
+        "u_turn_penalty"
+      ]
+    },
+    {
+      "name": "v2rmp_postgis_cpp",
+      "description": "Solve Chinese Postman Problem directly from a PostGIS road_edges table. Extracts graph topology via SQL, runs optimal Bl",
+      "required_params": [
+        "bbox_max_lat",
+        "bbox_max_lon",
+        "bbox_min_lat",
+        "bbox_min_lon"
+      ],
+      "param_names": [
+        "bbox_max_lat",
+        "bbox_max_lon",
+        "bbox_min_lat",
+        "bbox_min_lon",
+        "database_url",
+        "depot_lat",
+        "depot_lon",
+        "left_turn_penalty",
+        "oneway_mode",
+        "output_path",
+        "right_turn_penalty",
+        "road_classes",
+        "table_name",
+        "u_turn_penalty"
+      ]
+    }
+  ],
+  "rmpca-mcp-server-legacy": [
+    {
+      "name": "clean",
+      "description": "Clean a GeoJSON road network with full control over all cleaning parameters. Runs the 11-stage cleaning pipeline: repair",
+      "required_params": [
+        "input",
+        "output"
+      ],
+      "param_names": [
+        "dedupe_edges",
+        "drop_invalid",
+        "include_points",
+        "include_polygons",
+        "input",
+        "make_valid",
+        "max_components",
+        "merge_node_positions",
+        "merge_parallel_edge_properties",
+        "merge_parallel_edges",
+        "min_length_m",
+        "node_precision_decimals",
+        "node_snap_m",
+        "output",
+        "property_merge_strategy",
+        "remove_isolates",
+        "remove_selfloops",
+        "required_attrs",
+        "simplify_tolerance_m"
+      ]
+    },
+    {
+      "name": "compile",
+      "description": "Compile a GeoJSON road network file into the binary .rmp format. Optionally runs a cleaning pipeline and prunes disconne",
+      "required_params": [
+        "input",
+        "output"
+      ],
+      "param_names": [
+        "clean",
+        "input",
+        "output",
+        "prune_disconnected"
+      ]
+    },
+    {
+      "name": "get_valhalla_matrix",
+      "description": "Fetch a real-road distance/time matrix from the public Valhalla/OSRM API. Takes an array of stop coordinates and returns",
+      "required_params": [
+        "locations"
+      ],
+      "param_names": [
+        "locations"
+      ]
+    },
+    {
+      "name": "haversine_distance",
+      "description": "Calculate the great-circle distance between two WGS-84 lat/lon points using the haversine formula. Returns distance in m",
+      "required_params": [
+        "from",
+        "to"
+      ],
+      "param_names": [
+        "from",
+        "to"
+      ]
+    },
+    {
+      "name": "inspect_rmp",
+      "description": "Parse a .rmp binary network file and return node count, edge count, and bounding box without running optimization. Usefu",
+      "required_params": [
+        "input"
+      ],
+      "param_names": [
+        "input"
+      ]
+    },
+    {
+      "name": "list_solvers",
+      "description": "List available VRP solvers and their labels.",
+      "required_params": [],
+      "param_names": []
+    },
+    {
+      "name": "optimize",
+      "description": "Run route optimization on a .rmp binary network file. Supports CPP (Chinese Postman \u2014 edge coverage) and VRP (Vehicle Ro",
+      "required_params": [
+        "input"
+      ],
+      "param_names": [
+        "depot",
+        "google_maps",
+        "input",
+        "left_penalty",
+        "mode",
+        "num_vehicles",
+        "oneway_mode",
+        "osmand_base_url",
+        "output",
+        "right_penalty",
+        "solver_id",
+        "uturn_penalty"
+      ]
+    },
+    {
+      "name": "parse_routing_query",
+      "description": "Convert a natural-language routing request into a structured VRP JSON config. Extracts entities such as number of packag",
+      "required_params": [
+        "query"
+      ],
+      "param_names": [
+        "query",
+        "use_llm"
+      ]
+    },
+    {
+      "name": "predict_quality",
+      "description": "Predict the expected route quality (gap to optimal and estimated tour length) before actually solving the VRP instance. ",
+      "required_params": [
+        "stops"
+      ],
+      "param_names": [
+        "num_vehicles",
+        "objective",
+        "stops",
+        "vehicle_capacity"
+      ]
+    },
+    {
+      "name": "predict_solver",
+      "description": "Recommend the best VRP solver algorithm for a given instance based on geometric and capacity features. Returns the recom",
+      "required_params": [
+        "stops"
+      ],
+      "param_names": [
+        "google_maps",
+        "num_vehicles",
+        "objective",
+        "osmand_base_url",
+        "stops",
+        "vehicle_capacity"
+      ]
+    },
+    {
+      "name": "route_embedding",
+      "description": "Generate a 12-dimensional feature vector for a VRP instance suitable for similarity search, clustering, or learned-model",
+      "required_params": [
+        "stops"
+      ],
+      "param_names": [
+        "num_vehicles",
+        "objective",
+        "stops",
+        "vehicle_capacity"
+      ]
+    },
+    {
+      "name": "score_route",
+      "description": "Score a solved VRP route on multiple quality dimensions: distance efficiency, load balance, turn quality, and coverage. ",
+      "required_params": [
+        "routes",
+        "stops",
+        "total_distance_km"
+      ],
+      "param_names": [
+        "num_vehicles",
+        "objective",
+        "routes",
+        "stops",
+        "total_distance_km",
+        "vehicle_capacity"
+      ]
+    },
+    {
+      "name": "submit_feedback",
+      "description": "Submit solve-quality feedback for online learning. Records the instance feature vector, the solver that was used, the ac",
+      "required_params": [
+        "solver_id",
+        "stops",
+        "total_distance_km"
+      ],
+      "param_names": [
+        "actual_gap_pct",
+        "elapsed_ms",
+        "log_path",
+        "solver_id",
+        "stops",
+        "total_distance_km"
+      ]
+    },
+    {
+      "name": "tune_hyperparams",
+      "description": "Predict instance-aware solver hyperparameters (max iterations, temperature, cooling rate, tabu tenure, neighbourhood rad",
+      "required_params": [
+        "stops"
+      ],
+      "param_names": [
+        "num_vehicles",
+        "objective",
+        "stops",
+        "vehicle_capacity"
+      ]
+    },
+    {
+      "name": "vrp_solve",
+      "description": "Solve a Vehicle Routing Problem (VRP) with explicit stop coordinates. Unlike the 'optimize' tool (which operates on .rmp",
+      "required_params": [
+        "stops"
+      ],
+      "param_names": [
+        "avg_speed_kmh",
+        "google_maps",
+        "num_vehicles",
+        "objective",
+        "osmand_base_url",
+        "solver_id",
+        "stops",
+        "vehicle_capacity"
+      ]
+    }
+  ]
+}

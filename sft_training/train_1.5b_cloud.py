@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
-"""v2rmp Agent SFT Training — QLoRA on Qwen2.5-1.5B-Instruct.
-
-Embeds dataset inline for HF Jobs compatibility.
-Pushes final adapter to Hub: aerialblancaservices/v2rmp-agent-1.5b
-"""
 import json
-import os
 import torch
 from datasets import Dataset
 from peft import LoraConfig, TaskType
 from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer
 from trl import SFTConfig, SFTTrainer
+from huggingface_hub import hf_hub_download
+"""v2rmp Agent SFT Training — QLoRA on Qwen2.5-1.5B-Instruct.
+
+Embeds dataset inline for HF Jobs compatibility.
+Pushes final adapter to Hub: aerialblancaservices/v2rmp-agent-1.5b
+"""
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 MODEL_ID = "Qwen/Qwen2.5-1.5B-Instruct"
 OUTPUT_DIR = "./v2rmp-agent-sft-1.5b"
 HUB_MODEL_ID = "aerialblancaservices/v2rmp-agent-1.5b"
 # ─── Load dataset from Hub ──────────────────────────────────────────────────
-from huggingface_hub import hf_hub_download
 
 DATASET_REPO = "aerialblancaservices/v2rmp-sft-data"
 DATASET_FILE = "dataset.jsonl"
@@ -96,10 +95,10 @@ training_args = SFTConfig(
 
 eb = training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps
 print(f"\n{'='*60}")
-print(f"v2rmp Agent SFT Training — 1.5B")
+print("v2rmp Agent SFT Training — 1.5B")
 print(f"{'='*60}")
 print(f"  Model:       {MODEL_ID}")
-print(f"  Method:      QLoRA (4-bit + LoRA r=16)")
+print("  Method:      QLoRA (4-bit + LoRA r=16)")
 print(f"  Dataset:     {len(train_dataset)} train / {len(eval_dataset)} eval")
 print(f"  LR:          {training_args.learning_rate:.1e}")
 print(f"  Epochs:      {training_args.num_train_epochs}")
@@ -130,5 +129,5 @@ trainer = SFTTrainer(
 print("Starting training...")
 trainer.train()
 
-print(f"\nTraining complete!")
+print("\nTraining complete!")
 print(f"Model pushed to: https://huggingface.co/{HUB_MODEL_ID}")

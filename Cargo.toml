@@ -1,6 +1,6 @@
 [package]
 name = "v2rmp"
-version = "0.5.5"
+version = "0.5.7"
 edition = "2021"
 authors = ["spacialglaciercom-lab"]
 description = "rmpca — Route Optimization TUI & Agent Engine"

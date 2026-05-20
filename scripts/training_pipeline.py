@@ -8,11 +8,9 @@
 # ///
 
 import os
-import sys
 import json
 import subprocess
 import requests
-import numpy as np
 
 CVRPLIB_URL = "http://vrp.atd-lab.inf.puc-rio.br/media/com_vrp/instances/X/X-n101-k25.vrp"
 BKS_URL = "http://vrp.atd-lab.inf.puc-rio.br/media/com_vrp/instances/X/X-n101-k25.sol"
@@ -37,7 +35,8 @@ def parse_vrp(path):
     
     for line in lines:
         line = line.strip()
-        if not line: continue
+        if not line:
+            continue
         if line.startswith("CAPACITY"):
             capacity = int(line.split(":")[1])
         elif line.startswith("NODE_COORD_SECTION"):

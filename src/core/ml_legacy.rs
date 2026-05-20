@@ -429,9 +429,10 @@ mod tests {
         let input = make_input(stops.clone(), 1);
         let output = VRPSolverOutput {
             stops: stops.clone(),
-            routes: Some(vec![stops.clone()]),
-            total_distance_km: "3.0".into(),
-            total_time_min: 10,
+            routes: Some(vec![stops]),
+            geometry: None,
+            total_distance_km: format!("{:.2}", 0.0),
+            total_time_min: 0,
             route_stats: None,
             route_metrics: None,
             unassigned: None,

@@ -1,4 +1,4 @@
-🧪 [testing improvement description]
+🧹 [Fix unused local Config class in re_export_onnx.py]
 
 🎯 **What:** Added missing test coverage for `_geom_to_shapely` in `vector_clean.py`. The original implementation had an unchecked generic exception during GeoJSON loading that was completely untested, particularly for invalid coordinates format.
 📊 **Coverage:** Covered 3 cases for `_geom_to_shapely`:

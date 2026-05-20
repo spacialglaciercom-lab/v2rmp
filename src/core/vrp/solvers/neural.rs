@@ -74,6 +74,7 @@ impl VRPSolver for NeuralSolver {
         Ok(VRPSolverOutput {
             stops: stops.clone(),
             routes: Some(vec![stops]),
+            geometry: None,
             total_distance_km: format!("{:.2}", resp.total_cost),
             total_time_min: resp.solve_time_ms as u32 / 60, // Rough estimate
             route_stats: None,
