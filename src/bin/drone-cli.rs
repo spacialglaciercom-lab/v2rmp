@@ -20,6 +20,10 @@ enum Commands {
         #[arg(long, default_value = "FlyCart30")]
         drone: String,
 
+        /// Override battery capacity in Wh
+        #[arg(long)]
+        battery_wh: Option<f64>,
+
         /// Path to GeoJSON file with customers (point features with 'demand' property)
         #[arg(long)]
         customers: String,
@@ -74,6 +78,7 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Solve {
             drone,
+            battery_wh,
             customers,
             depot_lat,
             depot_lon,
@@ -111,6 +116,7 @@ fn main() -> Result<()> {
 
             let instance = DroneVrpInstance {
                 drone_model: model.clone(),
+                battery_capacity_wh: battery_wh,
                 depot: [depot_lat, depot_lon],
                 customers: customer_coords,
                 demands_kg: demands,

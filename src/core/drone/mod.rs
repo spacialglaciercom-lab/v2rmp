@@ -71,6 +71,7 @@ pub struct NoFlyZone {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DroneVrpInstance {
     pub drone_model: DroneModel,
+    pub battery_capacity_wh: Option<f64>,
     pub depot: [f64; 2],
     pub customers: Vec<[f64; 2]>,
     pub demands_kg: Vec<f64>,
