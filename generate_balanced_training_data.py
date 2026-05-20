@@ -123,7 +123,7 @@ def generate_instance_for_solver(target_solver: str, seed: int) -> dict:
             lat = base_lat + (rng.random() - 0.5) * area_scale * 2.0
             lon = base_lon + (rng.random() - 0.5) * area_scale * 2.0
         elif pattern == "clustered" or pattern == "clustered_tight":
-            rng.randint(2, 5)
+
             cx = base_lat + (rng.random() - 0.5) * area_scale * 1.2
             cy = base_lon + (rng.random() - 0.5) * area_scale * 1.2
             lat = cx + (rng.random() - 0.5) * 0.25
