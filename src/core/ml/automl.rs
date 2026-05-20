@@ -120,7 +120,8 @@ pub fn predict_hyperparams(features: &InstanceFeatures) -> SolverHyperparams {
 
 impl SolverHyperparams {
     /// Sensible defaults tuned on a broad synthetic instance set.
-    pub fn default_fallback() -> Self {
+    #[allow(dead_code)]
+    pub fn new() -> Self {
         Self {
             max_iterations: 1000,
             temperature: 100.0,

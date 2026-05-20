@@ -28,14 +28,3 @@ use candle_core::Device;
 
 // Re-export the legacy rule-based module for backwards compatibility.
 // New code should prefer `selector::predict_solver`.
-
-/// Returns the best available device (CUDA > Metal > CPU).
-#[cfg(feature = "ml")]
-pub fn best_device() -> candle_core::Result<Device> {
-    let device = Device::cuda_if_available(0)?;
-    if matches!(device, Device::Cpu) {
-        Device::metal_if_available(0)
-    } else {
-        Ok(device)
-    }
-}

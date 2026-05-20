@@ -13,10 +13,12 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Embedding dimension for road segments.
+#[allow(dead_code)]
 pub const EMBED_DIM: usize = 64;
 
 /// Learned embedding for a road segment (edge in the original graph).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct RoadEmbedding {
     pub edge_idx: usize,
     pub vector: Vec<f32>,
@@ -178,30 +180,11 @@ fn try_embed_network(
 
 /// Embed a road network graph.
 ///
-/// Converts the nodes and edges to a line graph, uses a loaded GraphSAGE model
-/// to produce 64-dim learned representations for each road segment.
-pub fn embed_network(
-    nodes: &[RmpNode],
-    edges: &[RmpEdge],
-    model_path: Option<&Path>,
-) -> Vec<RoadEmbedding> {
-    let path = model_path
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(default_model_path);
-
-    if !path.exists() {
-        tracing::debug!("GraphSAGE model not found at {:?}, returning empty", path);
-        return Vec::new();
-    }
-
-    match try_embed_network(nodes, edges, &path) {
-        Ok(embs) => embs,
-        Err(e) => {
-            tracing::warn!(
-                "GraphSAGE embedding failed: {}. Returning empty embeddings.",
-                e
-            );
-            Vec::new()
-        }
-    }
+/// Currently returns random-normal embeddings as a placeholder.
+/// A real implementation would load a pre-trained GraphSAGE model
+/// (PyTorch → ONNX → Candle) or train directly in Rust.
+#[allow(dead_code)]
+pub fn embed_network(_nodes: &[RmpNode], _edges: &[RmpEdge]) -> Vec<RoadEmbedding> {
+    // TODO: load GraphSAGE/Graph Attention model and run inference.
+    Vec::new()
 }

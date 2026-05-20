@@ -39,16 +39,10 @@ use v2rmp::core::extract::{BBoxRequest, ExtractRequest, ExtractResult, ExtractSo
 use v2rmp::core::ml::automl::predict_hyperparams;
 #[cfg(feature = "ml")]
 use v2rmp::core::ml::features::InstanceFeatures;
-#[cfg(feature = "ml")]
-use v2rmp::core::ml::feedback::{log_solve, SolveLogEntry};
-#[cfg(feature = "ml")]
+use v2rmp::core::ml::selector::{predict_solver, default_model_path};
 use v2rmp::core::ml::quality_predictor::predict_quality;
-#[cfg(feature = "ml")]
-use v2rmp::core::ml::selector::{default_model_path, predict_solver};
-use v2rmp::core::ml_legacy::{route_feature_vector, score_route, RouteFeatures};
-#[cfg(feature = "ml")]
-use v2rmp::core::nlp::QwenNLParser;
-#[cfg(feature = "ml")]
+use v2rmp::core::ml::automl::predict_hyperparams;
+use v2rmp::core::ml_legacy::{RouteFeatures, score_route, route_feature_vector};
 use v2rmp::core::nlp::{parse_query, to_vrp_json};
 #[cfg(feature = "ml")]
 use v2rmp::core::nlp::QwenNLParser;
@@ -2262,40 +2256,24 @@ fn handle_predict_solver(args: &Value) -> Result<Value> {
         anyhow::bail!("ML feature is not enabled. Cannot use predict_solver.");
     }
 
-    #[cfg(feature = "ml")]
-    {
-        let stops_val = args
-            .get("stops")
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
-
-        let stops: Vec<VRPSolverStop> = stops_val
-            .iter()
-            .enumerate()
-            .map(|(i, s)| {
-                let lat = s
-                    .get("lat")
-                    .and_then(|v| v.as_f64())
-                    .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
-                let lon = s
-                    .get("lon")
-                    .and_then(|v| v.as_f64())
-                    .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
-                let label = s.get("label").and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let demand = s.get("demand").and_then(|v| v.as_f64());
-                Ok(VRPSolverStop {
-                    lat,
-                    lon,
-                    label: if label.is_empty() {
-                        format!("Stop {}", i)
-                    } else {
-                        label
-                    },
-                    demand,
-                    arrival_time: None,
-                })
+    let stops: Vec<VRPSolverStop> = stops_val
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let lat = s.get("lat").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+            let lon = s.get("lon").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+            let label = s.get("label").and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let demand = s.get("demand").and_then(|v| v.as_f64());
+            Ok(VRPSolverStop {
+                lat,
+                lon,
+                label: if label.is_empty() { format!("Stop {}", i) } else { label },
+                demand,
+                arrival_time: None,
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -3294,61 +3272,8 @@ async fn main() -> Result<()> {
                         .map_err(|e| anyhow::anyhow!("{e}")),
                     "inspect_rmp" => handle_inspect_rmp(&args)
                         .map_err(|e| anyhow::anyhow!("{e}")),
-                    "pipeline" => {
-                        match tokio::time::timeout(
-                            std::time::Duration::from_secs(30),
-                            handle_pipeline(&args)
-                        ).await {
-                            Ok(Ok(v)) => Ok(v),
-                            Ok(Err(e)) => Err(anyhow::anyhow!("{e}")),
-                            Err(_elapsed) => Ok(json!({
-                                "error": "timeout",
-                                "stage": "pipeline",
-                                "retryable": true,
-                                "hint": "Overture S3 extraction or pipeline stage exceeded 30-second timeout. Use extract_overture directly with a smaller bbox, or run offline."
-                            })),
-                        }
-                    }
-                    #[cfg(feature = "extract")]
-                    "elevation_profile" => {
-                        handle_elevation_profile(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
-                    "list_solvers" => {
-                        handle_list_solvers(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
-                    "haversine_distance" => {
-                        handle_haversine_distance(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
-                    #[cfg(feature = "extract")]
-                    "elevation_stats" => {
-                        handle_elevation_stats(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
-                    #[cfg(feature = "extract")]
-                    "dem_info" => handle_dem_info(&args).map_err(|e| anyhow::anyhow!("{e}")),
-                    #[cfg(feature = "extract")]
-                    "fuel_estimate" => {
-                        handle_fuel_estimate(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
-                    "inspect_rmp" => handle_inspect_rmp(&args).map_err(|e| anyhow::anyhow!("{e}")),
-                    "predict_solver" => {
-                        handle_predict_solver(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
-                    "predict_quality" => {
-                        handle_predict_quality(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
-                    "score_route" => handle_score_route(&args).map_err(|e| anyhow::anyhow!("{e}")),
-                    "route_embedding" => {
-                        handle_route_embedding(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
-                    "tune_hyperparams" => {
-                        handle_tune_hyperparams(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
-                    "submit_feedback" => {
-                        handle_submit_feedback(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
-                    "parse_routing_query" => {
-                        handle_parse_routing_query(&args).map_err(|e| anyhow::anyhow!("{e}"))
-                    }
+                    "pipeline" => handle_pipeline(&args).await,
+                    "get_valhalla_matrix" => handle_get_valhalla_matrix(&args).await,
                     "predict_solver" => handle_predict_solver(&args)
                         .map_err(|e| anyhow::anyhow!("{e}")),
                     "score_route" => handle_score_route(&args)
@@ -3360,15 +3285,6 @@ async fn main() -> Result<()> {
                     "tune_hyperparams" => handle_tune_hyperparams(&args)
                         .map_err(|e| anyhow::anyhow!("{e}")),
                     "parse_routing_query" => handle_parse_routing_query(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-
-                    "submit_feedback" => handle_submit_feedback(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "embed" => handle_embed(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "classify_turn" => handle_classify_turn(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "parse_csv_stops" => handle_parse_csv_stops(&args)
                         .map_err(|e| anyhow::anyhow!("{e}")),
                     other => {
                         send_err(&req.id, -32602, &format!("Unknown tool: {other}"));
