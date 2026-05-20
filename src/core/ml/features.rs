@@ -90,7 +90,8 @@ impl InstanceFeatures {
         // Centroid of stops
         let centroid_lat = lats.iter().sum::<f64>() / lats.len() as f64;
         let centroid_lon = lons.iter().sum::<f64>() / lons.len() as f64;
-        let depot_centroid_dist = haversine_m(depot.lat, depot.lon, centroid_lat, centroid_lon) / 1000.0;
+        let depot_centroid_dist =
+            haversine_m(depot.lat, depot.lon, centroid_lat, centroid_lon) / 1000.0;
 
         // ── Demand features ───────────────────────────────────────────
         let demands: Vec<f64> = others.iter().filter_map(|s| s.demand).collect();
@@ -297,9 +298,13 @@ fn knn_graph_features(stops: &[&VRPSolverStop], k: usize) -> KnnFeatures {
         for _ in 0..sample {
             let i = (rand_u32() as usize) % n;
             let j = (rand_u32() as usize) % n;
-            if i == j { continue; }
+            if i == j {
+                continue;
+            }
             let d = dists[i][j];
-            if d > max_d { max_d = d; }
+            if d > max_d {
+                max_d = d;
+            }
             sum_d += d;
             count += 1;
         }
@@ -318,7 +323,9 @@ fn knn_graph_features(stops: &[&VRPSolverStop], k: usize) -> KnnFeatures {
     let mut edge_count = 0;
     for i in 0..n {
         for &j in &adj[i] {
-            if i >= j { continue; }
+            if i >= j {
+                continue;
+            }
             let di = degrees[i] as f64;
             let dj = degrees[j] as f64;
             sum_xy += di * dj;

@@ -1,0 +1,151 @@
+{
+  "description": "Baseline snapshot of v2rmp MCP server tools. Used by tests/check_mcp_compatibility.py to detect regressions.",
+  "generated_at": "2026-05-18",
+  "server_name": "v2rmp-mcp-server",
+  "protocol_version": "2024-11-05",
+  "tools": [
+    {
+      "name": "list_r2_bucket",
+      "description": "List all objects available in the configured Cloudflare R2 bucket.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": { "type": "string" },
+          "prefix": { "type": "string" }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "upload_to_r2",
+      "description": "Upload a local file to the R2 bucket.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "local_path": { "type": "string" },
+          "r2_path": { "type": "string" },
+          "bucket": { "type": "string" }
+        },
+        "required": ["local_path", "r2_path"]
+      }
+    },
+    {
+      "name": "download_from_r2",
+      "description": "Download an object from the R2 bucket to a local file.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "r2_path": { "type": "string" },
+          "local_path": { "type": "string" },
+          "bucket": { "type": "string" }
+        },
+        "required": ["r2_path", "local_path"]
+      }
+    },
+    {
+      "name": "query_supabase",
+      "description": "Execute a SQL query against the Supabase database.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "v2rmp_extract",
+      "description": "Extract road network data from Overture, OSM, or Postgres.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "enum": ["overture", "osm", "postgres", "r2"] },
+          "min_lon": { "type": "number" },
+          "min_lat": { "type": "number" },
+          "max_lon": { "type": "number" },
+          "max_lat": { "type": "number" },
+          "output_path": { "type": "string" }
+        },
+        "required": ["source", "min_lon", "min_lat", "max_lon", "max_lat", "output_path"]
+      }
+    },
+    {
+      "name": "v2rmp_compile",
+      "description": "Compile GeoJSON into .rmp binary format with optional cleaning.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input_geojson": { "type": "string" },
+          "output_rmp": { "type": "string" },
+          "remove_isolates": { "type": "boolean" }
+        },
+        "required": ["input_geojson", "output_rmp"]
+      }
+    },
+    {
+      "name": "v2rmp_optimize",
+      "description": "Optimize a route on an .rmp map.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "map_path": { "type": "string" },
+          "output_route": { "type": "string" },
+          "u_turn_penalty": { "type": "number" },
+          "depot_lat": { "type": "number" },
+          "depot_lon": { "type": "number" },
+          "db_export_table": { "type": "string" }
+        },
+        "required": ["map_path", "output_route"]
+      }
+    },
+    {
+      "name": "v2rmp_postgis_cpp",
+      "description": "Solve Chinese Postman Problem directly from a PostGIS road_edges table. Extracts graph topology via SQL, runs optimal Blossom V matching for deadheading, and returns a GeoJSON route with turn-by-turn instructions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bbox_min_lon": { "type": "number", "description": "Bounding box west longitude" },
+          "bbox_min_lat": { "type": "number", "description": "Bounding box south latitude" },
+          "bbox_max_lon": { "type": "number", "description": "Bounding box east longitude" },
+          "bbox_max_lat": { "type": "number", "description": "Bounding box north latitude" },
+          "depot_lat": { "type": "number", "description": "Optional depot/start latitude" },
+          "depot_lon": { "type": "number", "description": "Optional depot/start longitude" },
+          "left_turn_penalty": { "type": "number", "description": "Left turn penalty in meters (default: 50)" },
+          "right_turn_penalty": { "type": "number", "description": "Right turn penalty in meters (default: 0)" },
+          "u_turn_penalty": { "type": "number", "description": "U-turn penalty in meters (default: 500)" },
+          "oneway_mode": { "type": "string", "enum": ["ignore", "respect", "reverse"], "description": "How to handle one-way streets (default: respect)" },
+          "road_classes": { "type": "array", "items": { "type": "string" }, "description": "Road classes to include (default: residential, tertiary, secondary, unclassified, living_street, road)" },
+          "table_name": { "type": "string", "description": "PostGIS table name (default: road_edges)" },
+          "database_url": { "type": "string", "description": "PostgreSQL connection URL (falls back to DATABASE_URL env var)" },
+          "output_path": { "type": "string", "description": "Optional file path to write JSON result" }
+        },
+        "required": ["bbox_min_lon", "bbox_min_lat", "bbox_max_lon", "bbox_max_lat"]
+      }
+    },
+    {
+      "name": "v2rmp_neural_optimize",
+      "description": "Optimize a route using a Neural Network model (ONNX). Best for complex VRP problems with capacity constraints.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "model_path": { "type": "string", "description": "Path to the .onnx model file" },
+          "locations": { "type": "array", "items": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number" } }, "description": "List of [lat, lon] coordinates. Index 0 is the depot." },
+          "demands": { "type": "array", "items": { "type": "number" }, "description": "Demands for each location (0 for depot)" },
+          "capacity": { "type": "number", "description": "Vehicle capacity" }
+        },
+        "required": ["model_path", "locations", "demands", "capacity"]
+      }
+    },
+    {
+      "name": "v2rmp_generate_osmand_link",
+      "description": "Generate an OsmAnd deep link for importing a GPX file from a public URL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "gpx_url": { "type": "string", "description": "Publicly accessible URL of the GPX file" }
+        },
+        "required": ["gpx_url"]
+      }
+    }
+  ]
+}

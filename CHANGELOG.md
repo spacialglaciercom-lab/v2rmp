@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-05-16
+
+### Added
+- **Graph Embeddings**: New engine for generating dense vector representations of road networks.
+  - Supported methods: `node2vec`, `LINE`, `FastRP`, and `Spatial` structural features.
+  - Available via CLI (`rmpca graph-embed`), TUI (new view), and Agent API.
+  - Supports node and edge embeddings (via Hadamard product).
+- **Graph Embeddings TUI**: Dedicated view for configuring and running embedding generation.
+
+### Fixed
+- **GUI build**: Fixed compilation error when the `gui` feature was enabled but the `extract` feature was disabled.
+
+## [0.4.6] - 2026-05-11
+
+### Added
+- **AutoML hyperparameter tuner**: Predicts optimal solver settings (max iterations, temperature, tabu tenure) based on instance features using a learned MLP model.
+- **Instance Feature Extraction**: 28-dimensional geometric and graph-theoretic feature vector ( Prim MST, spectral gap, clustering coefficient) for VRP instances.
+- **Learned Solver Selector**: Neural ensemble that recommends the best algorithm for a given routing problem.
+- **Neural-Guided Local Search**: Solvers now use MLP-based move scoring (16-dim features) to prioritize the best neighborhood improvements.
+- **LLM-based NLP Query Parser**: Integration with Qwen2.5-0.5B-Instruct for natural language routing request parsing.
+- **Route Quality Predictor**: Pre-solve estimation of gap-to-optimal and tour length.
+- **Expanded MCP Server**: Now includes 21 tools covering the full AI/ML routing stack.
+
+### Changed
+- **Heavy Feature Gating**: All AI/ML dependencies (candle, tokenizers) are now optional and gated behind the `ml` feature flag.
+
 ## [0.4.3] - 2026-05-08
 
 ### Added

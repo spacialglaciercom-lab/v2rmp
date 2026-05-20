@@ -8,11 +8,23 @@
 //!
 //! All inference is pure Rust via Candle. Training happens offline in Python.
 
+#[cfg(feature = "ml")]
 pub mod automl;
+#[cfg(feature = "ml")]
 pub mod features;
+#[cfg(feature = "ml")]
+pub mod feedback;
+#[cfg(feature = "ml")]
 pub mod graph_embed;
+#[cfg(feature = "ml")]
+pub mod node_embed;
+#[cfg(feature = "ml")]
 pub mod quality_predictor;
+#[cfg(feature = "ml")]
 pub mod selector;
+
+#[cfg(feature = "ml")]
+use candle_core::Device;
 
 // Re-export the legacy rule-based module for backwards compatibility.
 // New code should prefer `selector::predict_solver`.

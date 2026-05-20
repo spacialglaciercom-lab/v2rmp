@@ -8,11 +8,12 @@ This document describes the heavy ML/AI integration into v2rmp (rmpca), a Rust C
 
 ### Existing ML/AI Touchpoints
 
-| Module | File | Current Capabilities | Gap |
+| Module | File | Current Capabilities | Status |
 |--------|------|---------------------|-----|
-| `ml` | `src/core/ml.rs` | Rule-based solver selection (`predict_solver`), route quality scoring (`score_route`), 12-dim feature vectors (`route_feature_vector`) | No learned model — purely heuristic scoring. No training pipeline. |
-| `embed` | `src/core/embed.rs` | BERT text embeddings via Candle (BAAI/bge-small-en-v1.5) | Only batch text embed. No semantic search index, no fine-tuning. |
-| MCP Server | `src/bin/rmpca-mcp-server.rs` | 15+ tools incl. `predict_solver`, `score_route`, `route_embedding` | `predict_solver` returns heuristic scores, not learned predictions. |
+| `ml` | `src/core/ml/` | Neural solver selection, quality prediction, AutoML, GraphSAGE | Implemented (v0.5.0) |
+| `training` | `train_models.py` | NumPy-based offline training pipeline for all models | Implemented (v0.5.0) |
+| `embed` | `src/core/embed.rs` | BERT text embeddings via Candle (BAAI/bge-small-en-v1.5) | Existing |
+| MCP Server | `src/bin/rmpca-mcp-server.rs` | 15+ tools incl. `predict_solver`, `score_route`, `route_embedding` | Upgraded to learned models |
 | VRP Solvers | `src/core/vrp/solvers/*.rs` | 5 classical heuristics (Clarke-Wright, Sweep, 2-Opt, Or-Opt, Default) | No neural solver, no learned local search guidance. |
 | Elevation | `src/core/elevation/` | DEM GeoTIFF queries, fuel estimation | No ML-based terrain-aware weighting. |
 
@@ -249,7 +250,7 @@ User Input
 - [ ] `graph_embed_network` MCP tool
 
 ### Phase 3: Neural Solvers (v0.7.0)
-- [ ] `vrp::solvers::neural_guided` — Neural move selector for 2-Opt/Or-Opt
+- [x] `vrp::solvers::neural_guided` — Neural move selector for 2-Opt/Or-Opt
 - [ ] `neural_vrp_solve` MCP tool
 - [ ] Online learning loop from solve logs
 

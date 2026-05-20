@@ -1,9 +1,5 @@
-#![cfg(feature = "cli")]
-mod app;
-mod cli;
-mod core;
-mod event;
-mod ui;
+#[cfg(feature = "cli")]
+use v2rmp::{app, cli, event, ui};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -37,7 +33,10 @@ async fn run_tui() -> anyhow::Result<()> {
 
     // App init
     let mut app = app::App::new();
-    app.log(app::LogLevel::Info, format!("rmpca v{} started", env!("CARGO_PKG_VERSION")));
+    app.log(
+        app::LogLevel::Info,
+        format!("rmpca v{} started", env!("CARGO_PKG_VERSION")),
+    );
     app.log(
         app::LogLevel::Info,
         "Ready — select a workflow step to begin",
@@ -63,4 +62,11 @@ async fn run_tui() -> anyhow::Result<()> {
     terminal.show_cursor()?;
 
     Ok(())
+}
+
+#[cfg(not(feature = "cli"))]
+fn main() {
+    eprintln!("Error: The 'cli' feature must be enabled to build the rmpca binary.");
+    eprintln!("   cargo run --bin rmpca --features cli");
+    std::process::exit(1);
 }

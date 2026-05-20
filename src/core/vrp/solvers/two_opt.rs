@@ -3,7 +3,12 @@
 use super::super::types::*;
 use super::super::utils::{matrix_get_dist, matrix_get_time};
 
-fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize) -> SolveResult {
+fn solve(
+    matrix: &DistMatrix,
+    locations: &[VRPSolverStop],
+    num_vehicles: usize,
+    hyperparams: Option<&SolverHyperparams>,
+) -> SolveResult {
     let n = matrix.len();
     if n <= 1 {
         return SolveResult {
@@ -14,12 +19,15 @@ fn solve(matrix: &DistMatrix, locations: &[VRPSolverStop], num_vehicles: usize) 
     }
 
     let mut routes = crate::core::vrp::utils::build_sweep_routes(matrix, locations, num_vehicles);
+    let max_iter = hyperparams.map(|p| p.max_iterations).unwrap_or(300);
 
     // 2-opt improvement per route
     for route in &mut routes {
         let mut improved = true;
-        while improved {
+        let mut iter = 0;
+        while improved && iter < max_iter {
             improved = false;
+            iter += 1;
             let r_len = route.len();
             for i in 1..r_len.saturating_sub(1) {
                 for k in (i + 1)..r_len {
@@ -80,7 +88,12 @@ impl VRPSolver for TwoOptSolver {
             .matrix
             .as_ref()
             .ok_or("2-Opt solver requires a distance matrix")?;
-        let result = solve(matrix, &input.locations, input.num_vehicles);
+        let result = solve(
+            matrix,
+            &input.locations,
+            input.num_vehicles,
+            input.hyperparams.as_ref(),
+        );
         Ok(result.into_output(input))
     }
     fn clone_box(&self) -> Box<dyn VRPSolver> {
@@ -90,8 +103,8 @@ impl VRPSolver for TwoOptSolver {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::vrp::test_utils::{make_input, make_stop};
     use super::*;
+    use crate::core::vrp::test_utils::{make_input, make_stop};
 
     #[tokio::test]
     async fn test_two_opt_single_depot() {
@@ -122,6 +135,7 @@ mod tests {
             use_time_windows: false,
             window_open: None,
             window_close: None,
+            hyperparams: None,
         };
         let solver = TwoOptSolver;
         let err = solver.solve(&input).await.unwrap_err();

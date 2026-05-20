@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "v2rmp": {
+      "command": "/home/rmp/v2rmp/target/debug/rmpca-mcp-server-legacy",
+      "args": []
+    },
+    "zilliz-codebase": {
+      "command": "/home/rmp/v2rmp/target/debug/zilliz-mcp-server",
+      "args": [],
+      "env": {
+        "ZILLIZ_TOKEN": "${ZILLIZ_TOKEN}"
+      }
+    }
+  }
+}
