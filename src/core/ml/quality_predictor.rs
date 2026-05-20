@@ -9,7 +9,7 @@
 
 use crate::core::ml::features::InstanceFeatures;
 use anyhow::{Context, Result};
-use candle_core::{Device, DType, Tensor};
+use candle_core::{DType, Device, Tensor};
 use candle_nn::{linear, Linear, Module, VarBuilder};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -50,7 +50,12 @@ impl QualityPredictor {
         let lin1 = linear(NUM_FEATURES, HIDDEN1, vb.pp("lin1"))?;
         let lin2 = linear(HIDDEN1, HIDDEN2, vb.pp("lin2"))?;
         let lin3 = linear(HIDDEN2, NUM_OUTPUTS, vb.pp("lin3"))?;
-        Ok(Self { lin1, lin2, lin3, device })
+        Ok(Self {
+            lin1,
+            lin2,
+            lin3,
+            device,
+        })
     }
 
     /// Predict gap (%) and tour length (km) from instance features.
@@ -111,16 +116,20 @@ pub fn predict_quality(features: &InstanceFeatures) -> QualityPrediction {
     let path = default_model_path();
     if path.exists() {
         match QualityPredictor::from_file(&path) {
-            Ok(model) => {
-                match model.predict(features) {
-                    Ok(pred) => return pred,
-                    Err(e) => {
-                        tracing::warn!("Quality predictor inference failed: {}. Falling back to heuristic.", e);
-                    }
+            Ok(model) => match model.predict(features) {
+                Ok(pred) => return pred,
+                Err(e) => {
+                    tracing::warn!(
+                        "Quality predictor inference failed: {}. Falling back to heuristic.",
+                        e
+                    );
                 }
-            }
+            },
             Err(e) => {
-                tracing::warn!("Failed to load quality predictor: {}. Falling back to heuristic.", e);
+                tracing::warn!(
+                    "Failed to load quality predictor: {}. Falling back to heuristic.",
+                    e
+                );
             }
         }
     }

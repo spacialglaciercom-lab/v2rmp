@@ -8,13 +8,13 @@
 
 use tokio::runtime::Runtime;
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use v2rmp::core::ml::features::InstanceFeatures;
 use v2rmp::core::ml::selector::{predict_solver, NeuralPrediction};
 use v2rmp::core::vrp::registry::{get_solver_list, solve_with};
 use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
 use v2rmp::core::vrp::utils::build_haversine_matrix;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 
 struct FastPrng(u64);
 
@@ -31,7 +31,9 @@ impl FastPrng {
         ((self.next() >> 11) as f64) / ((1u64 << 53) as f64)
     }
     fn range(&mut self, lo: usize, hi: usize) -> usize {
-        if lo >= hi { return lo; }
+        if lo >= hi {
+            return lo;
+        }
         lo + (self.next() as usize % (hi - lo))
     }
 }
@@ -100,7 +102,11 @@ fn generate_instance(seed_offset: usize) -> Vec<VRPSolverStop> {
     stops
 }
 
-fn make_input(stops: Vec<VRPSolverStop>, num_vehicles: usize, objective: VrpObjective) -> VRPSolverInput {
+fn make_input(
+    stops: Vec<VRPSolverStop>,
+    num_vehicles: usize,
+    objective: VrpObjective,
+) -> VRPSolverInput {
     let matrix = build_haversine_matrix(&stops, 40.0);
     VRPSolverInput {
         locations: stops,
@@ -134,14 +140,17 @@ fn main() {
     let rt = Runtime::new().expect("Tokio runtime");
     let solver_ids = get_solver_list();
 
-    println!("Evaluating neural solver selector on {} held-out instances...", n_test);
+    println!(
+        "Evaluating neural solver selector on {} held-out instances...",
+        n_test
+    );
     println!("Solver IDs: {:?}", solver_ids);
     println!();
 
     let mut neural_wins = 0usize;
     let mut default_wins = 0usize;
     let mut or_opt_wins = 0usize;
-    let oracle_wins = 0usize;
+    let _oracle_wins = 0usize;
 
     let mut neural_total_dist = 0.0f64;
     let mut default_total_dist = 0.0f64;
@@ -163,6 +172,7 @@ fn main() {
             confidence: 0.0,
             runner_up: None,
             all_scores: vec![],
+            model_used: false,
         });
 
         // Run all solvers
@@ -186,9 +196,7 @@ fn main() {
                 hyperparams: input.hyperparams.clone(),
             };
 
-            let result = rt.block_on(async {
-                solve_with(solver_id, &input_clone).await
-            });
+            let result = rt.block_on(async { solve_with(solver_id, &input_clone).await });
 
             let dist = match result {
                 Ok(output) => output.total_distance_km.parse().unwrap_or(f64::MAX),
@@ -242,13 +250,38 @@ fn main() {
     println!("========================================");
     println!();
     println!("--- Selector Accuracy ---");
-    println!("  Top-1 accuracy:  {}/{} ({:.1}%)", selector_correct, n_test, selector_correct as f64 / n_test as f64 * 100.0);
-    println!("  Top-2 accuracy:  {}/{} ({:.1}%)", selector_top2, n_test, selector_top2 as f64 / n_test as f64 * 100.0);
+    println!(
+        "  Top-1 accuracy:  {}/{} ({:.1}%)",
+        selector_correct,
+        n_test,
+        selector_correct as f64 / n_test as f64 * 100.0
+    );
+    println!(
+        "  Top-2 accuracy:  {}/{} ({:.1}%)",
+        selector_top2,
+        n_test,
+        selector_top2 as f64 / n_test as f64 * 100.0
+    );
     println!();
     println!("--- Best-Solver Distribution ---");
-    println!("  Neural (predicted): {}/{} ({:.1}%)", neural_wins, n_test, neural_wins as f64 / n_test as f64 * 100.0);
-    println!("  Always-default:     {}/{} ({:.1}%)", default_wins, n_test, default_wins as f64 / n_test as f64 * 100.0);
-    println!("  Always-or_opt:      {}/{} ({:.1}%)", or_opt_wins, n_test, or_opt_wins as f64 / n_test as f64 * 100.0);
+    println!(
+        "  Neural (predicted): {}/{} ({:.1}%)",
+        neural_wins,
+        n_test,
+        neural_wins as f64 / n_test as f64 * 100.0
+    );
+    println!(
+        "  Always-default:     {}/{} ({:.1}%)",
+        default_wins,
+        n_test,
+        default_wins as f64 / n_test as f64 * 100.0
+    );
+    println!(
+        "  Always-or_opt:      {}/{} ({:.1}%)",
+        or_opt_wins,
+        n_test,
+        or_opt_wins as f64 / n_test as f64 * 100.0
+    );
     println!();
     println!("--- Total Distance (lower is better) ---");
     println!("  Neural predicted:   {:.2} km", neural_total_dist);
@@ -257,7 +290,16 @@ fn main() {
     println!("  Oracle (best):      {:.2} km", oracle_total_dist);
     println!();
     println!("--- Gap to Oracle ---");
-    println!("  Neural:    {:.2}%", (neural_total_dist - oracle_total_dist) / oracle_total_dist * 100.0);
-    println!("  Default:   {:.2}%", (default_total_dist - oracle_total_dist) / oracle_total_dist * 100.0);
-    println!("  Or-Opt:    {:.2}%", (or_opt_total_dist - oracle_total_dist) / oracle_total_dist * 100.0);
+    println!(
+        "  Neural:    {:.2}%",
+        (neural_total_dist - oracle_total_dist) / oracle_total_dist * 100.0
+    );
+    println!(
+        "  Default:   {:.2}%",
+        (default_total_dist - oracle_total_dist) / oracle_total_dist * 100.0
+    );
+    println!(
+        "  Or-Opt:    {:.2}%",
+        (or_opt_total_dist - oracle_total_dist) / oracle_total_dist * 100.0
+    );
 }

@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """v2rmp MCP Tools Test Harness v2 — faster, with per-test timeout."""
-import json, os, subprocess, sys, math, struct, select, time
+import json
+import subprocess
+import sys
+import math
+import struct
+import select
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-# Prefer the quick profile binary with ML feature; fall back to release build
-SERVER_BIN = ROOT / "target" / "quick" / "rmpca-mcp-server"
+# Prefer debug build
+SERVER_BIN = ROOT / "target" / "debug" / "rmpca-mcp-server-legacy"
 if not SERVER_BIN.exists():
-    SERVER_BIN = ROOT / "target" / "release" / "rmpca-mcp-server"
+    SERVER_BIN = ROOT / "target" / "release" / "rmpca-mcp-server-legacy"
 TEST_DIR = ROOT / "mcp_test_data"
 
 def generate_city_grid_geojson(min_lon, min_lat, grid_size=6, spacing_m=200.0):
@@ -217,7 +223,7 @@ def main():
     actual_dem = TEST_DIR / "mountain.dem.vrt"
 
     stops = generate_delivery_stops(-0.04, 45.76, num_stops=6)
-    print(f"Data ready. Starting server ...")
+    print("Data ready. Starting server ...")
 
     client = MCPClient(SERVER_BIN)
     results = {}

@@ -4,7 +4,7 @@ This document outlines the formal verification requirements for Lean 4, mapping 
 
 ## 1. Algorithm Overview
 
-The module `src/core/optimize.rs` implements a Chinese Postman Problem (CPP) route optimization on multigraphs representing road networks. The core process relies on:
+The module `src/core/optimize.rs` implements a Chinese Postman Problem (CPP) route optimization on multigraphs representing road networks. The formal multigraph parameters are defined by a tuple $M = (V, E, s, t)$, where $V$ is a set of vertices, $E$ is a multiset of edges, and $s, t : E \rightarrow V$ are the source and target functions. A key requirement is handling parallel edges correctly. The core process relies on:
 1. Converting the multigraph into an Eulerian multigraph via minimum weight perfect matching on odd-degree vertices.
 2. Finding an Eulerian circuit using Hierholzer's algorithm.
 
@@ -12,7 +12,7 @@ The module `src/core/optimize.rs` implements a Chinese Postman Problem (CPP) rou
 
 To verify correctness in Lean 4, the following properties must hold:
 
-*   **Eulerian Graph Property:** After adding duplicate edges (Step 5 in the code), the degree of every vertex in the adjacency list `adj` must be even.
+*   **Eulerian Graph Property:** After adding duplicate edges (Step 5 in the code), the degree of every vertex in the adjacency list `adj` must be even. Furthermore, by the **Handshaking Lemma**, the sum of all vertex degrees must be twice the number of edges, which is crucial for proving graph connectivity and parity properties during multigraph matching.
     *   *Invariant:* `∀ v ∈ V, degree(v) ≡ 0 (mod 2)`
 *   **Edge Conservation:** The sum of all edges initially in `adj` must equal the total number of edges traversed in the circuit. Each edge must be visited exactly once.
 *   **Hierholzer Loop Invariant:** At any point during the while loop execution:
@@ -22,7 +22,7 @@ To verify correctness in Lean 4, the following properties must hold:
 *   **Termination:** The algorithm is guaranteed to terminate because in each iteration exactly one of two things happens:
     *   An edge is removed from `adj` and added to `stack`.
     *   An element is popped from `stack` and added to `circuit_with_edges`.
-    *   Since the number of edges is finite and strictly decreases in `adj`, and elements in `stack` are bounded by the number of edges + 1, the loop must terminate.
+    *   Since the number of edges is finite and strictly decreases in `adj`, and elements in `stack` are bounded by the number of edges + 1, the loop must terminate. This termination can be modeled using a well-founded lexicographically decreasing measure: `(total remaining edges in the adjacency list, stack length)`.
 
 ## 3. Boundary Conditions
 
@@ -50,7 +50,10 @@ The algorithm mutates state primarily in four ways during the execution of Hierh
 
 Let $V$ be the number of vertices and $E$ be the total number of edges (original + duplicated).
 
-*   **Odd Vertices & Matching:** Finding odd vertices is $\mathcal{O}(V)$. The greedy minimum-weight perfect matching involves sorting odd vertices $\mathcal{O}(V_{\text{odd}} \log V_{\text{odd}})$ and a linear search bounded by $\mathcal{O}(V_{\text{odd}}^2)$.
+*   **Odd Vertices & Matching:** Finding odd vertices is $\mathcal{O}(V)$. The minimum-weight perfect matching involves:
+    *   **All-Pairs Shortest Paths (APSP):** Running Dijkstra's algorithm from each odd vertex, taking $\mathcal{O}(V_{\text{odd}} \times (E \log V))$ time.
+    *   **Exact Matching (Bitmask DP):** For $V_{\text{odd}} \le 24$, an exact Dynamic Programming approach is used, taking $\mathcal{O}(V_{\text{odd}}^2 \times 2^{V_{\text{odd}}})$ time and $\mathcal{O}(2^{V_{\text{odd}}})$ space.
+    *   **Greedy Fallback:** For $V_{\text{odd}} > 24$, a greedy approach is used, bounding the search to $\mathcal{O}(V_{\text{odd}}^2)$.
 *   **Hierholzer's Algorithm Loop:**
     *   The `while` loop runs exactly $2E + 1$ times.
     *   Finding the reverse edge in `adj` requires an $\mathcal{O}(\text{degree}(v))$ search.

@@ -43,10 +43,18 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
             ui.heading("Bounding Box Filter (optional)");
             ui.label("Only optimize nodes within this area. Leave empty for full map.");
             if let Some(bbox) = app.optimize_bbox {
-                ui.colored_label(egui::Color32::from_rgb(80, 220, 80),
-                    format!("{:.4},{:.4} to {:.4},{:.4}", bbox.min_lon, bbox.min_lat, bbox.max_lon, bbox.max_lat));
+                ui.colored_label(
+                    egui::Color32::from_rgb(80, 220, 80),
+                    format!(
+                        "{:.4},{:.4} to {:.4},{:.4}",
+                        bbox.min_lon, bbox.min_lat, bbox.max_lon, bbox.max_lat
+                    ),
+                );
             } else {
-                ui.colored_label(egui::Color32::from_rgb(140, 140, 140), "(full map — no filter)");
+                ui.colored_label(
+                    egui::Color32::from_rgb(140, 140, 140),
+                    "(full map — no filter)",
+                );
             }
             ui.horizontal(|ui| {
                 ui.label("min_lon,min_lat,max_lon,max_lat:");
@@ -66,12 +74,21 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
                                 max_lon: xlo,
                                 max_lat: xla,
                             });
-                            app.log(LogLevel::Success, format!("BBox filter set: {:.4},{:.4} to {:.4},{:.4}", mlo, mla, xlo, xla));
+                            app.log(
+                                LogLevel::Success,
+                                format!(
+                                    "BBox filter set: {:.4},{:.4} to {:.4},{:.4}",
+                                    mlo, mla, xlo, xla
+                                ),
+                            );
                         } else {
                             app.log(LogLevel::Error, "Invalid coordinates");
                         }
                     } else {
-                        app.log(LogLevel::Error, "Use format: min_lon,min_lat,max_lon,max_lat");
+                        app.log(
+                            LogLevel::Error,
+                            "Use format: min_lon,min_lat,max_lon,max_lat",
+                        );
                     }
                 }
                 if ui.button("✕ Clear").clicked() {
@@ -87,12 +104,21 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
             ui.heading("Output");
             if let Some(ref path) = app.cache_file {
                 let gpx_path = path.replace(".rmp", "_cpp.gpx");
-                ui.colored_label(egui::Color32::from_rgb(80, 220, 80), format!("GPX → {}", gpx_path));
+                ui.colored_label(
+                    egui::Color32::from_rgb(80, 220, 80),
+                    format!("GPX → {}", gpx_path),
+                );
             } else {
-                ui.colored_label(egui::Color32::from_rgb(140, 140, 140), "(load .rmp to see output path)");
+                ui.colored_label(
+                    egui::Color32::from_rgb(140, 140, 140),
+                    "(load .rmp to see output path)",
+                );
             }
             if let Some(ref path) = app.route_file {
-                ui.colored_label(egui::Color32::from_rgb(80, 220, 80), format!("JSON → {}", path));
+                ui.colored_label(
+                    egui::Color32::from_rgb(80, 220, 80),
+                    format!("JSON → {}", path),
+                );
             }
         });
 
@@ -100,15 +126,27 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
         ui.group(|ui| {
             ui.heading("Turn Penalties");
             ui.horizontal(|ui| {
-                ui.add(egui::DragValue::new(&mut app.turn_penalties.left).speed(0.1).range(0.0..=60.0));
+                ui.add(
+                    egui::DragValue::new(&mut app.turn_penalties.left)
+                        .speed(0.1)
+                        .range(0.0..=60.0),
+                );
                 ui.label("Left turn (s)");
             });
             ui.horizontal(|ui| {
-                ui.add(egui::DragValue::new(&mut app.turn_penalties.right).speed(0.1).range(0.0..=60.0));
+                ui.add(
+                    egui::DragValue::new(&mut app.turn_penalties.right)
+                        .speed(0.1)
+                        .range(0.0..=60.0),
+                );
                 ui.label("Right turn (s)");
             });
             ui.horizontal(|ui| {
-                ui.add(egui::DragValue::new(&mut app.turn_penalties.u_turn).speed(0.1).range(0.0..=60.0));
+                ui.add(
+                    egui::DragValue::new(&mut app.turn_penalties.u_turn)
+                        .speed(0.1)
+                        .range(0.0..=60.0),
+                );
                 ui.label("U-turn (s)");
             });
         });
@@ -118,9 +156,15 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
             ui.heading("Depot (optional)");
             ui.label("Starting point for the CPP tour.");
             if let Some((lat, lon)) = app.depot_coords {
-                ui.colored_label(egui::Color32::from_rgb(80, 220, 80), format!("Depot: {:.4},{:.4}", lat, lon));
+                ui.colored_label(
+                    egui::Color32::from_rgb(80, 220, 80),
+                    format!("Depot: {:.4},{:.4}", lat, lon),
+                );
             } else {
-                ui.colored_label(egui::Color32::from_rgb(140, 140, 140), "(not set — arbitrary start node)");
+                ui.colored_label(
+                    egui::Color32::from_rgb(140, 140, 140),
+                    "(not set — arbitrary start node)",
+                );
             }
             ui.horizontal(|ui| {
                 ui.label("Depot (lat,lon):");
@@ -128,9 +172,15 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
                 if ui.button("Set Depot").clicked() {
                     let parts: Vec<&str> = app.map_depot_text.split(',').collect();
                     if parts.len() == 2 {
-                        if let (Ok(lat), Ok(lon)) = (parts[0].trim().parse::<f64>(), parts[1].trim().parse::<f64>()) {
+                        if let (Ok(lat), Ok(lon)) = (
+                            parts[0].trim().parse::<f64>(),
+                            parts[1].trim().parse::<f64>(),
+                        ) {
                             app.depot_coords = Some((lat, lon));
-                            app.log(LogLevel::Success, format!("Depot set: {:.4},{:.4}", lat, lon));
+                            app.log(
+                                LogLevel::Success,
+                                format!("Depot set: {:.4},{:.4}", lat, lon),
+                            );
                         }
                     }
                 }
@@ -145,9 +195,21 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
                 egui::ComboBox::from_id_salt("oneway_select")
                     .selected_text(format!("{:?}", app.oneway_mode))
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut app.oneway_mode, crate::core::optimize::OnewayMode::Ignore, "Ignore");
-                        ui.selectable_value(&mut app.oneway_mode, crate::core::optimize::OnewayMode::Respect, "Respect");
-                        ui.selectable_value(&mut app.oneway_mode, crate::core::optimize::OnewayMode::Reverse, "Reverse");
+                        ui.selectable_value(
+                            &mut app.oneway_mode,
+                            crate::core::optimize::OnewayMode::Ignore,
+                            "Ignore",
+                        );
+                        ui.selectable_value(
+                            &mut app.oneway_mode,
+                            crate::core::optimize::OnewayMode::Respect,
+                            "Respect",
+                        );
+                        ui.selectable_value(
+                            &mut app.oneway_mode,
+                            crate::core::optimize::OnewayMode::Reverse,
+                            "Reverse",
+                        );
                     });
             });
         });
@@ -156,7 +218,10 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
         ui.group(|ui| {
             super::status_label(ui, &app.optimize_status);
             let can_run = app.cache_file.is_some();
-            if ui.add_enabled(can_run, egui::Button::new("🔄 Run CPP")).clicked() {
+            if ui
+                .add_enabled(can_run, egui::Button::new("🔄 Run CPP"))
+                .clicked()
+            {
                 run_optimize(app);
             }
         });
@@ -184,7 +249,10 @@ fn run_optimize(app: &mut GuiApp) {
         }
     };
 
-    app.optimize_status = Status::Running { progress: 0, message: "Running CPP\u{2026}".to_string() };
+    app.optimize_status = Status::Running {
+        progress: 0,
+        message: "Running CPP\u{2026}".to_string(),
+    };
     app.log(LogLevel::Info, "Starting Chinese Postman optimization");
 
     // Read the RMP file
@@ -209,33 +277,57 @@ fn run_optimize(app: &mut GuiApp) {
 
     // Filter by bounding box if set
     if app.optimize_bbox.is_some() {
-        let (filtered_nodes, filtered_edges) = crate::core::optimize::filter_bbox(
-            &nodes, &edges, app.optimize_bbox
-        );
+        let (filtered_nodes, filtered_edges) =
+            crate::core::optimize::filter_bbox(&nodes, &edges, app.optimize_bbox);
         if filtered_nodes.is_empty() {
             app.optimize_status = Status::Error("No nodes in bounding box".to_string());
             app.log(LogLevel::Error, "Bounding box contains no nodes");
             return;
         }
-        app.log(LogLevel::Info, format!(
-            "BBox filter: {} of {} nodes, {} of {} edges",
-            filtered_nodes.len(), nodes.len(), filtered_edges.len(), edges.len()
-        ));
+        app.log(
+            LogLevel::Info,
+            format!(
+                "BBox filter: {} of {} nodes, {} of {} edges",
+                filtered_nodes.len(),
+                nodes.len(),
+                filtered_edges.len(),
+                edges.len()
+            ),
+        );
         nodes = filtered_nodes;
         edges = filtered_edges;
     }
 
     // Solve CPP on the (possibly filtered) graph
-    match crate::core::optimize::solve_cpp(&nodes, &edges, app.oneway_mode, depot, app.turn_penalties) {
+    match crate::core::optimize::solve_cpp(
+        &nodes,
+        &edges,
+        app.oneway_mode,
+        depot,
+        app.turn_penalties,
+    ) {
         Ok(cpp) => {
             app.optimize_status = Status::Done(format!(
                 "{:.2} km, {} segments, {:.1}% efficiency",
-                cpp.summary.total_distance_km, cpp.summary.total_segments, cpp.summary.efficiency_pct
+                cpp.summary.total_distance_km,
+                cpp.summary.total_segments,
+                cpp.summary.efficiency_pct
             ));
-            app.log(LogLevel::Success, format!(
-                "CPP complete: {:.2} km, {} segments, {:.2} km deadhead",
-                cpp.summary.total_distance_km, cpp.summary.total_segments, cpp.summary.deadhead_distance_km
-            ));
+            app.log(
+                LogLevel::Success,
+                format!(
+                    "CPP complete: {:.2} km, {} segments, {:.2} km deadhead",
+                    cpp.summary.total_distance_km,
+                    cpp.summary.total_segments,
+                    cpp.summary.deadhead_distance_km
+                ),
+            );
+            if cpp.summary.is_partial {
+                app.log(
+                    LogLevel::Warning,
+                    format!("PARTIAL ROUTE: {} edges were unreachable from start node.", cpp.summary.unreachable_edges)
+                );
+            }
 
             // Write GPX output
             let gpx_path = cache_path.replace(".rmp", "_cpp.gpx");
@@ -257,8 +349,14 @@ fn run_optimize(app: &mut GuiApp) {
                     "efficiency_pct": cpp.summary.efficiency_pct,
                     "nodes": nodes.iter().enumerate().map(|(i, n)| serde_json::json!({"id": i, "lat": n.lat, "lon": n.lon})).collect::<Vec<_>>(),
                 });
-                match std::fs::write(route_path, serde_json::to_string_pretty(&route_json).unwrap_or_default()) {
-                    Ok(_) => app.log(LogLevel::Success, format!("Route JSON written: {}", route_path)),
+                match std::fs::write(
+                    route_path,
+                    serde_json::to_string_pretty(&route_json).unwrap_or_default(),
+                ) {
+                    Ok(_) => app.log(
+                        LogLevel::Success,
+                        format!("Route JSON written: {}", route_path),
+                    ),
                     Err(e) => app.log(LogLevel::Warn, format!("Failed to write route JSON: {}", e)),
                 }
             }

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-05-16
+
+### Added
+- **Graph Embeddings**: New engine for generating dense vector representations of road networks.
+  - Supported methods: `node2vec`, `LINE`, `FastRP`, and `Spatial` structural features.
+  - Available via CLI (`rmpca graph-embed`), TUI (new view), and Agent API.
+  - Supports node and edge embeddings (via Hadamard product).
+- **Graph Embeddings TUI**: Dedicated view for configuring and running embedding generation.
+
+### Fixed
+- **GUI build**: Fixed compilation error when the `gui` feature was enabled but the `extract` feature was disabled.
+
 ## [0.4.6] - 2026-05-11
 
 ### Added

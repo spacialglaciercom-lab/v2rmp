@@ -26,7 +26,12 @@ Usage:
 All models exported as Candle-compatible safetensors to models/.
 """
 
-import os, sys, json, time, math, argparse
+import os
+import sys
+import json
+import time
+import math
+import argparse
 from collections import Counter
 from typing import List, Tuple
 
@@ -34,7 +39,9 @@ import numpy as np
 from safetensors.numpy import save_file
 
 try:
-    import torch, torch.nn as nn, torch.nn.functional as F
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
     torch.manual_seed(42)
 except ImportError:
     raise RuntimeError("PyTorch is required.")
@@ -460,7 +467,7 @@ def main():
 
     # Show class distribution before/after
     c_before = Counter(Y_label)
-    print(f"\n  Class distribution BEFORE:")
+    print("\n  Class distribution BEFORE:")
     for sid in SOLVER_IDS:
         print(f"    {sid:18s}: {c_before[SOLVER_TO_IDX[sid]]:5d} ({c_before[SOLVER_TO_IDX[sid]]/len(entries)*100:.1f}%)")
 
@@ -480,7 +487,7 @@ def main():
         pred = m(torch.from_numpy(X).float()).argmax(dim=1).numpy()
     print(f"  Full-data accuracy: {np.mean(pred == Y_label):.4f}")
     c_after = Counter(pred)
-    print(f"\n  Class distribution AFTER (predictions):")
+    print("\n  Class distribution AFTER (predictions):")
     for sid in SOLVER_IDS:
         print(f"    {sid:18s}: {c_after[SOLVER_TO_IDX[sid]]:5d} ({c_after[SOLVER_TO_IDX[sid]]/len(X)*100:.1f}%)")
 

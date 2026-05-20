@@ -2,11 +2,11 @@
 //!
 //! Logs solve results (features, solver, quality) for periodic retraining.
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use anyhow::Result;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SolveLogEntry {
@@ -35,10 +35,7 @@ pub fn log_solve(entry: SolveLogEntry, log_path: Option<&Path>) -> Result<()> {
     }
 
     let json = serde_json::to_string(&entry)?;
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
 
     writeln!(file, "{}", json)?;
     Ok(())
