@@ -8,11 +8,12 @@ pub mod embed;
 #[cfg(feature = "extract")]
 pub mod extract;
 pub mod geo_types;
-pub mod metrics;
+pub mod optimize;
 #[cfg(feature = "ml")]
 pub mod ml;
+#[cfg(feature = "ml")]
 pub mod ml_legacy;
-pub mod neural_routing;
+#[cfg(feature = "ml")]
 pub mod nlp;
 pub mod optimize;
 pub mod partition;

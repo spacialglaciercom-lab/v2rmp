@@ -1,23 +1,3 @@
-#![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(
-    dead_code,
-    unused_imports,
-    unused_variables,
-    unused_macros,
-    clippy::all
-)]
-#![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(
-    dead_code,
-    unused_imports,
-    unused_variables,
-    unused_macros,
-    clippy::all
-)]
 //! Geometric and routing utilities for VRP solvers.
 //!
 //! Provides distance-matrix construction, zone clustering,
@@ -37,11 +17,18 @@ pub fn haversine_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 /// Optimized with pre-calculated radians/cosines and matrix symmetry.
 pub fn build_haversine_matrix(locations: &[VRPSolverStop], avg_speed_kmh: f64) -> DistMatrix {
     let n = locations.len();
-    if n == 0 {
-        return Vec::new();
-    }
+    let mut matrix = vec![
+        vec![
+            DistCell {
+                distance: 0.0,
+                time: 0.0
+            };
+            n
+        ];
+        n
+    ];
 
-    // Pre-calculate radians and cosines to avoid redundant trig calls in the O(n²) loop
+    // Pre-calculate radians and cosines for O(n) instead of O(n^2)
     let loc_rads: Vec<(f64, f64, f64)> = locations
         .iter()
         .map(|l| {
@@ -51,9 +38,7 @@ pub fn build_haversine_matrix(locations: &[VRPSolverStop], avg_speed_kmh: f64) -
         })
         .collect();
 
-    // Initialize n x n matrix with zeros
-    let mut matrix = vec![vec![DistCell { distance: 0.0, time: 0.0, path: None }; n]; n];
-    const R_KM: f64 = 6371.0;
+    const R: f64 = 6371.0; // Earth radius in km
     let time_factor = 3600.0 / avg_speed_kmh;
 
     for i in 0..n {
@@ -68,134 +53,16 @@ pub fn build_haversine_matrix(locations: &[VRPSolverStop], avg_speed_kmh: f64) -
             let a = (dlat / 2.0).sin().powi(2)
                 + cos_lat1 * cos_lat2 * (dlon / 2.0).sin().powi(2);
             let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-            let dist = R_KM * c;
-            let time_sec = dist * time_factor;
+            let dist = R * c;
+            let time = dist * time_factor;
 
             let cell = DistCell {
                 distance: dist,
-                time: time_sec,
-                path: None,
+                time,
             };
 
-            // Exploit symmetry: dist(i, j) == dist(j, i)
             matrix[i][j] = cell.clone();
             matrix[j][i] = cell;
-        }
-    }
-    matrix
-}
-
-#[cfg(feature = "ml")]
-type EmbeddingsSlice<'a> = &'a [crate::core::ml::graph_embed::RoadEmbedding];
-#[cfg(not(feature = "ml"))]
-type EmbeddingsSlice<'a> = &'a [()];
-
-/// Build a distance matrix using shortest paths on the road network graph.
-pub fn build_graph_matrix(
-    stops: &[VRPSolverStop],
-    nodes: &[RmpNode],
-    edges: &[RmpEdge],
-    embeddings: Option<EmbeddingsSlice>,
-    avg_speed_kmh: f64,
-) -> DistMatrix {
-    let n_stops = stops.len();
-    let n_nodes = nodes.len();
-    if n_stops == 0 || n_nodes == 0 {
-        return vec![
-            vec![
-                DistCell {
-                    distance: 0.0,
-                    time: 0.0,
-                    path: None
-                };
-                n_stops
-            ];
-            n_stops
-        ];
-    }
-
-    // 1. Build adjacency list
-    let mut adj = vec![Vec::new(); n_nodes];
-    for (i, edge) in edges.iter().enumerate() {
-        let mut weight = edge.weight_m;
-        
-        // Apply learned embedding if available
-        #[cfg(feature = "ml")]
-        if let Some(embs) = embeddings {
-            if let Some(emb) = embs.get(i) {
-                // Use first dimension as a learned bias for now
-                // Research basis: GAIN (2107.07791)
-                let bias = emb.vector.get(0).copied().unwrap_or(0.0);
-                weight *= (1.0 + bias as f64).max(0.1_f64);
-            }
-        }
-
-        adj[edge.from as usize].push((edge.to as usize, weight));
-        if edge.oneway == 0 {
-            adj[edge.to as usize].push((edge.from as usize, weight));
-        }
-    }
-
-    // 2. Map stops to nearest nodes
-    let stop_nodes: Vec<usize> = stops
-        .iter()
-        .map(|stop| {
-            let mut best_node = 0;
-            let mut best_dist = f64::MAX;
-            for (i, node) in nodes.iter().enumerate() {
-                let d = haversine_m(stop.lat, stop.lon, node.lat, node.lon);
-                if d < best_dist {
-                    best_dist = d;
-                    best_node = i;
-                }
-            }
-            best_node
-        })
-        .collect();
-
-    // 3. Dijkstra from each stop node
-    let mut matrix = vec![
-        vec![
-            DistCell {
-                distance: 0.0,
-                time: 0.0,
-                path: None
-            };
-            n_stops
-        ];
-        n_stops
-    ];
-
-    for i in 0..n_stops {
-        let start_node = stop_nodes[i];
-        let (dists, prev) = dijkstra(start_node, &adj, n_nodes);
-
-        for j in 0..n_stops {
-            let target_node = stop_nodes[j];
-            let d_m = dists[target_node];
-            
-            // Reconstruct path
-            let mut path = Vec::new();
-            if d_m < f64::MAX {
-                let mut curr = target_node;
-                path.push(curr as u32);
-                while let Some(p) = prev[curr] {
-                    curr = p;
-                    path.push(curr as u32);
-                    if curr == start_node {
-                        break;
-                    }
-                }
-                path.reverse();
-            }
-
-            let d_km = d_m / 1000.0;
-            let time_sec = (d_km / avg_speed_kmh) * 3600.0;
-            matrix[i][j] = DistCell {
-                distance: d_km,
-                time: time_sec,
-                path: if path.len() >= 2 { Some(path) } else { None },
-            };
         }
     }
 
@@ -1099,6 +966,7 @@ mod tests {
         let route = nearest_neighbor_route(&m, &[0], 0);
         assert_eq!(route, vec![0]);
     }
+
 
     #[test]
     fn test_matrix_get_helpers() {
