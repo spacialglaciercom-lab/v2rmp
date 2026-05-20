@@ -8,7 +8,7 @@ use crate::core::compile::CompileRequest;
 use crate::core::elevation::{FuelCalculator, LocalDem};
 #[cfg(feature = "extract")]
 use crate::core::extract::{BBoxRequest, ExtractRequest, ExtractResult, ExtractSource, RoadClass};
-use crate::core::optimize::{OnewayMode, OptimizeRequest, SolverMode, TurnPenalties};
+use crate::core::optimize::{CppEngine, OnewayMode, OptimizeRequest, SolverMode, TurnPenalties};
 
 /// rmpca - Route optimization and data extraction
 #[derive(Parser)]
@@ -520,6 +520,17 @@ struct CompileArgs {
     #[serde(default)]
     clean: bool,
 
+    /// Road classes to include in the .rmp (comma-separated allowlist; empty = include all)
+    /// e.g. --road-classes residential,tertiary,secondary,unclassified
+    #[arg(long, value_delimiter = ',')]
+    #[serde(default)]
+    road_classes: Vec<String>,
+
+    /// Prune leaf spurs (degree-1 edges from boundary clipping)
+    #[arg(long)]
+    #[serde(default)]
+    prune_spurs: bool,
+
     /// Prune disconnected subgraphs
     #[arg(long)]
     #[serde(default)]
@@ -580,6 +591,10 @@ fn default_mode() -> String {
     "cpp".to_string()
 }
 
+fn default_cpp_engine() -> String {
+    "internal".to_string()
+}
+
 fn default_left_penalty() -> f64 {
     1.0
 }
@@ -626,6 +641,11 @@ struct OptimizeArgs {
     #[arg(short, long, default_value = "cpp")]
     #[serde(default = "default_mode")]
     mode: String,
+
+    /// C++ engine: internal or external-rust-optimizer (default: internal)
+    #[arg(long, default_value = "internal")]
+    #[serde(default = "default_cpp_engine")]
+    cpp_engine: String,
 
     /// Left turn penalty (default: 1.0)
     #[arg(long, default_value_t = 1.0)]
@@ -686,6 +706,11 @@ struct PipelineArgs {
     #[arg(long)]
     #[serde(default, deserialize_with = "deserialize_depot_opt")]
     depot: Option<String>,
+
+    /// Prune leaf spurs (degree-1 edges from boundary clipping)
+    #[arg(long)]
+    #[serde(default)]
+    pub prune_spurs: bool,
 
     /// Prune disconnected subgraphs during compilation
     #[arg(long)]
@@ -779,6 +804,14 @@ fn parse_oneway(s: &str) -> Result<OnewayMode> {
     }
 }
 
+fn parse_cpp_engine(s: &str) -> Result<CppEngine> {
+    match s.to_lowercase().as_str() {
+        "internal" | "" => Ok(CppEngine::Internal),
+        "external-rust-optimizer" | "external" | "rust-optimizer" => Ok(CppEngine::ExternalRustOptimizer),
+        other => anyhow::bail!("Unknown C++ engine: {other} (internal|external-rust-optimizer)"),
+    }
+}
+
 // ── Output helpers ────────────────────────────────────────────────────
 
 fn output_json<T: Serialize>(value: &T) -> Result<()> {
@@ -851,9 +884,10 @@ fn run_compile_cmd(args: CompileArgs, json: bool) -> Result<()> {
         input_geojson: args.input,
         output_rmp: args.output,
         compress: false,
-        road_classes: vec![],
+        road_classes: args.road_classes,
         clean_options,
         prune_disconnected: args.prune_disconnected,
+        prune_spurs: args.prune_spurs,
     };
 
     let result = crate::core::compile::run_compile(&req)?;
@@ -950,15 +984,20 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
         "vrp" => SolverMode::Vrp,
         _ => SolverMode::Cpp,
     };
+    let cpp_engine = parse_cpp_engine(&args.cpp_engine)?;
 
     if !json {
         tracing::info!(
-            "Optimizing route from {} (mode: {})",
+            "Optimizing route from {} (mode: {}, engine: {})",
             args.input,
             if mode == SolverMode::Vrp {
                 "VRP"
             } else {
                 "CPP"
+            },
+            match cpp_engine {
+                CppEngine::Internal => "internal",
+                CppEngine::ExternalRustOptimizer => "external-rust-optimizer",
             }
         );
     }
@@ -973,6 +1012,7 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
         depot,
         oneway_mode,
         mode,
+        cpp_engine,
         num_vehicles: args.vehicles,
         solver_id: args.solver,
         coordinates: None,
@@ -984,6 +1024,10 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
         output_json(&result)?;
     } else {
         tracing::info!("Optimization complete!");
+        if result.is_partial {
+            tracing::warn!("WARNING: Route is PARTIAL (Disconnected Components).");
+            tracing::warn!("Found {} unreachable edges from start node.", result.unreachable_edges);
+        }
         tracing::info!("Total distance: {:.2} km", result.total_distance_km);
         tracing::info!("Stops/Segments: {}", result.total_segments);
         tracing::info!("Vehicles used: {}", result.num_routes);
@@ -1105,7 +1149,7 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
     let matrix = crate::core::vrp::utils::build_haversine_matrix(&stops, 40.0);
 
     #[cfg(feature = "ml")]
-    let mut vrp_input = VRPSolverInput {
+    let vrp_input = VRPSolverInput {
         locations: stops,
         num_vehicles: args.vehicles,
         vehicle_capacity: capacity,
@@ -1225,6 +1269,7 @@ async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         road_classes: vec![],
         clean_options: None,
         prune_disconnected: args.prune_disconnected,
+        prune_spurs: args.prune_spurs,
     };
     let compile_result = crate::core::compile::run_compile(&compile_req)
         .context("Pipeline failed at stage 'compile'")?;
@@ -1830,7 +1875,7 @@ pub async fn run() -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "extract"))]
 mod tests {
     use super::*;
 

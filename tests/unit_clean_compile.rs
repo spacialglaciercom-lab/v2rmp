@@ -102,6 +102,7 @@ fn test_compile_city_grid() {
         road_classes: vec![],
         clean_options: None,
         prune_disconnected: false,
+        prune_spurs: false,
     };
 
     let result = run_compile(&req).unwrap();

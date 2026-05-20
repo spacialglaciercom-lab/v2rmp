@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """v2rmp Agent SFT Training — self-contained for HF Jobs."""
-import json, torch
-from datasets import load_dataset, Dataset
+import torch
+from datasets import Dataset
 from peft import LoraConfig, TaskType
 from transformers import BitsAndBytesConfig
 from trl import SFTConfig, SFTTrainer
 
 # ─── Build dataset inline ─────────────────────────────────────────────────────
 # Generate the dataset by running the builder, then writing to /tmp
-import sys, os
+import sys
 sys.path.insert(0, '/home/rmp/v2rmp/sft_training')
 from v2rmp_dataset_builder import V2RMPDatasetBuilder
 
@@ -76,7 +76,7 @@ training_args = SFTConfig(
 eb = training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps
 print(f"\n{'='*60}\nv2rmp Agent SFT Training\n{'='*60}")
 print(f"  Model:       {MODEL_ID}")
-print(f"  Method:      QLoRA (4-bit NF4 + LoRA r=16)")
+print("  Method:      QLoRA (4-bit NF4 + LoRA r=16)")
 print(f"  Dataset:     {len(train_dataset)} train / {len(eval_dataset)} eval")
 print(f"  LR:          {training_args.learning_rate:.1e}")
 print(f"  Epochs:      {training_args.num_train_epochs}")

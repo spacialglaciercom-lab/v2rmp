@@ -322,6 +322,12 @@ fn run_optimize(app: &mut GuiApp) {
                     cpp.summary.deadhead_distance_km
                 ),
             );
+            if cpp.summary.is_partial {
+                app.log(
+                    LogLevel::Warning,
+                    format!("PARTIAL ROUTE: {} edges were unreachable from start node.", cpp.summary.unreachable_edges)
+                );
+            }
 
             // Write GPX output
             let gpx_path = cache_path.replace(".rmp", "_cpp.gpx");

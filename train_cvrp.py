@@ -16,17 +16,16 @@ Usage:
 """
 
 import argparse
-import math
 import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
 
 # ============================================================================
@@ -388,7 +387,6 @@ class CVPRouteModel(nn.Module):
             actions: [B, steps]
             log_p:   [B, steps] (only if return_log_p)
         """
-        B = locs.shape[0]
         
         # Ensure proper shapes
         if demands.dim() == 2:
@@ -422,7 +420,6 @@ def compute_route_cost(locs: torch.Tensor, actions: torch.Tensor) -> torch.Tenso
         cost: [B] — total distance
     """
     B = locs.shape[0]
-    steps = actions.shape[1]
     
     # Gather locations in visit order
     gathered = locs[torch.arange(B).unsqueeze(1), actions]  # [B, steps, 2]
@@ -475,9 +472,7 @@ def train_pomo(model: CVPRouteModel, config: CVRPConfig):
         demands = demands.to(config.device)
         capacity = capacity.to(config.device)
         
-        B = locs.shape[0]
         N = config.problem_size
-        Np1 = N + 1
         
         # ---- POMO: duplicate each instance N times, each with a different start node ----
         # We'll do this efficiently by using the model's forward once per start node
@@ -631,7 +626,6 @@ def export_to_onnx(model: CVPRouteModel, config: CVRPConfig,
             # But it sends N nodes; we need to prepend the depot
             
             B = locs.shape[0]
-            N_nodes = locs.shape[1]
             
             # Add depot at (0.5, 0.5) with demand 0
             depot_loc = torch.full((B, 1, 2), 0.5, device=locs.device, dtype=locs.dtype)

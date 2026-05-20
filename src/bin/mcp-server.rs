@@ -4,7 +4,7 @@ use std::io::{self, BufRead, Write};
 use v2rmp::core::compile::{run_compile, CompileRequest};
 #[cfg(feature = "extract")]
 use v2rmp::core::extract::{BBoxRequest, ExtractRequest, ExtractSource, RoadClass};
-use v2rmp::core::optimize::{run_optimize, OnewayMode, OptimizeRequest, SolverMode, TurnPenalties};
+use v2rmp::core::optimize::{run_optimize, CppEngine, OnewayMode, OptimizeRequest, SolverMode, TurnPenalties};
 use v2rmp::core::postgis_cpp::{run_postgis_cpp, PostGisCppRequest};
 use v2rmp::core::r2::R2Storage;
 
@@ -192,6 +192,24 @@ fn handle_message(message: Value) -> Option<Value> {
                                 "capacity": { "type": "number", "description": "Vehicle capacity" }
                             },
                             "required": ["model_path", "locations", "demands", "capacity"]
+                        }
+                    },
+                    {
+                        "name": "v2rmp_rust_optimizer",
+                        "description": "Optimize a route using the external rust-optimizer binary (CPP). Solves Chinese Postman Problem on an .rmp map.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "map_path": { "type": "string", "description": "Path to input .rmp binary network file" },
+                                "output_route": { "type": "string", "description": "Optional output GPX route file path" },
+                                "depot_lat": { "type": "number", "description": "Optional depot/start latitude" },
+                                "depot_lon": { "type": "number", "description": "Optional depot/start longitude" },
+                                "oneway_mode": { "type": "string", "enum": ["ignore", "respect", "reverse"], "description": "How to handle one-way streets (default: respect)" },
+                                "left_turn_penalty": { "type": "number", "description": "Left turn penalty (default: 1.0)" },
+                                "right_turn_penalty": { "type": "number", "description": "Right turn penalty (default: 0.0)" },
+                                "u_turn_penalty": { "type": "number", "description": "U-turn penalty (default: 5.0)" }
+                            },
+                            "required": ["map_path"]
                         }
                     },
                     {
@@ -424,6 +442,10 @@ fn handle_tool_call(params: Value) -> Result<Value> {
                     .get("prune_disconnected")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+                prune_spurs: arguments
+                    .get("prune_spurs")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             };
             let res = run_compile(&req)?;
             let val = json!(res);
@@ -467,6 +489,7 @@ fn handle_tool_call(params: Value) -> Result<Value> {
                 depot,
                 oneway_mode: OnewayMode::Respect,
                 mode: SolverMode::Cpp,
+                cpp_engine: CppEngine::default(),
                 num_vehicles: 1,
                 solver_id: "default".to_string(),
                 coordinates: None,
@@ -477,6 +500,69 @@ fn handle_tool_call(params: Value) -> Result<Value> {
             let val = json!(res);
             Ok(json!({
                 "content": [{ "type": "text", "text": format!("Optimized: {:.2} km", res.total_distance_km) }],
+                "structured": val,
+                "isError": false
+            }))
+        }
+        "v2rmp_rust_optimizer" => {
+            let penalties = TurnPenalties {
+                left: arguments
+                    .get("left_turn_penalty")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(1.0),
+                right: arguments
+                    .get("right_turn_penalty")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0),
+                u_turn: arguments
+                    .get("u_turn_penalty")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(5.0),
+            };
+            let depot = if let (Some(lat), Some(lon)) = (
+                arguments.get("depot_lat").and_then(Value::as_f64),
+                arguments.get("depot_lon").and_then(Value::as_f64),
+            ) {
+                Some((lat, lon))
+            } else {
+                None
+            };
+
+            let oneway_mode = match arguments
+                .get("oneway_mode")
+                .and_then(Value::as_str)
+                .unwrap_or("respect")
+            {
+                "ignore" => OnewayMode::Ignore,
+                "reverse" => OnewayMode::Reverse,
+                _ => OnewayMode::Respect,
+            };
+
+            let req = OptimizeRequest {
+                cache_file: arguments
+                    .get("map_path")
+                    .and_then(Value::as_str)
+                    .context("Missing map_path")?
+                    .to_string(),
+                route_file: arguments
+                    .get("output_route")
+                    .and_then(Value::as_str)
+                    .map(|s| s.to_string()),
+                turn_penalties: penalties,
+                depot,
+                oneway_mode,
+                mode: SolverMode::Cpp,
+                cpp_engine: CppEngine::ExternalRustOptimizer,
+                num_vehicles: 1,
+                solver_id: "default".to_string(),
+                coordinates: None,
+            };
+
+            let rt = tokio::runtime::Runtime::new()?;
+            let res = rt.block_on(async { run_optimize(&req).await })?;
+            let val = json!(res);
+            Ok(json!({
+                "content": [{ "type": "text", "text": format!("Rust-Optimizer: {:.2} km", res.total_distance_km) }],
                 "structured": val,
                 "isError": false
             }))
