@@ -38,7 +38,6 @@ Hardware recommendations:
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -192,9 +191,9 @@ def main():
     quantization_config = None
     if args.qlora:
         quantization_config = get_qlora_config()
-        print(f"⚡ QLoRA enabled: 4-bit NF4 quantization with double quantization")
+        print("⚡ QLoRA enabled: 4-bit NF4 quantization with double quantization")
     else:
-        print(f"📊 Training in bf16 (no quantization)")
+        print("📊 Training in bf16 (no quantization)")
 
     # ── Build run name ─────────────────────────────────────────────────────
     run_name = args.run_name or build_run_name(args)
@@ -211,7 +210,7 @@ def main():
     # ── Training config ────────────────────────────────────────────────────
     effective_batch = args.batch_size * args.gradient_accumulation
     print(f"\n{'='*60}")
-    print(f"v2rmp Agent SFT Training")
+    print("v2rmp Agent SFT Training")
     print(f"{'='*60}")
     print(f"  Model:              {args.model}")
     print(f"  Dataset:            {len(train_dataset)} train examples")
@@ -307,21 +306,21 @@ def main():
 
     # ── Summary ────────────────────────────────────────────────────────────
     print(f"\n{'='*60}")
-    print(f"Training Complete!")
+    print("Training Complete!")
     print(f"{'='*60}")
     print(f"  Output: {args.output_dir}")
     print(f"  LoRA adapters saved to: {args.output_dir}")
-    print(f"\n  To use the fine-tuned model:")
-    print(f"  ```python")
-    print(f"  from peft import PeftModel")
-    print(f"  from transformers import AutoModelForCausalLM, AutoTokenizer")
-    print(f"  ")
+    print("\n  To use the fine-tuned model:")
+    print("  ```python")
+    print("  from peft import PeftModel")
+    print("  from transformers import AutoModelForCausalLM, AutoTokenizer")
+    print("  ")
     print(f"  base = AutoModelForCausalLM.from_pretrained('{args.model}')")
     print(f"  model = PeftModel.from_pretrained(base, '{args.output_dir}')")
     print(f"  tokenizer = AutoTokenizer.from_pretrained('{args.model}')")
-    print(f"  ```")
+    print("  ```")
     if args.push_to_hub and args.hub_model_id:
-        print(f"\n  Or load directly:")
+        print("\n  Or load directly:")
         print(f"  model = PeftModel.from_pretrained(base, '{args.hub_model_id}')")
     print(f"{'='*60}")
 

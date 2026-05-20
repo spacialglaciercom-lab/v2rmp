@@ -7,16 +7,11 @@ mountainous terrain, delivery clusters, coastal routes, etc.)
 """
 
 import json
-import os
 import subprocess
 import sys
-import time
 import math
-import tempfile
 import struct
 from pathlib import Path
-from dataclasses import dataclass, asdict
-from typing import Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 SERVER_BIN = ROOT / "target" / "release" / "rmpca-mcp-server"
@@ -358,7 +353,7 @@ class MCPClient:
             "method": "initialize",
             "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "test-harness", "version": "1.0"}},
         }
-        resp = self._send(req)
+        self._send(req)
         # Notify initialized
         self.proc.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
         self.proc.stdin.flush()

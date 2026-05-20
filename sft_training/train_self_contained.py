@@ -14,13 +14,17 @@ Covers:
 Usage:
   python v2rmp_dataset_builder.py --output dataset.jsonl --num-examples 2000
 """
-
 import json
 import argparse
 import random
-import os
-from typing import List, Dict, Any
-from dataclasses import dataclass, field
+from typing import List, Dict
+from dataclasses import dataclass
+import torch
+from datasets import Dataset
+from peft import LoraConfig, TaskType
+from transformers import BitsAndBytesConfig
+from trl import SFTConfig, SFTTrainer
+
 
 # ─── System Prompt ────────────────────────────────────────────────────────────
 
@@ -1224,7 +1228,7 @@ def main():
                     total_asst_msgs += 1
                     total_chars += len(msg["content"])
 
-        print(f"Dataset Statistics:")
+        print("Dataset Statistics:")
         print(f"  Total conversations: {total}")
         print(f"  Unique system prompts: {len(system_prompts)}")
         print(f"  User messages: {total_user_msgs}")
@@ -1251,12 +1255,6 @@ The dataset is embedded directly in this script so it works in HF Jobs
 which has no access to local files.
 """
 
-import json
-import torch
-from datasets import Dataset
-from peft import LoraConfig, TaskType
-from transformers import BitsAndBytesConfig
-from trl import SFTConfig, SFTTrainer
 # V2RMPDatasetBuilder is defined above in this file
 
 # ─── Build dataset ────────────────────────────────────────────────────────────
@@ -1355,10 +1353,10 @@ training_args = SFTConfig(
 
 effective_batch = training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps
 print(f"\n{'='*60}")
-print(f"v2rmp Agent SFT Training")
+print("v2rmp Agent SFT Training")
 print(f"{'='*60}")
 print(f"  Model:              {MODEL_ID}")
-print(f"  Method:             QLoRA (4-bit NF4 + LoRA r=16)")
+print("  Method:             QLoRA (4-bit NF4 + LoRA r=16)")
 print(f"  Dataset:            {len(train_dataset)} train / {len(eval_dataset)} eval")
 print(f"  Learning rate:      {training_args.learning_rate:.1e}")
 print(f"  Epochs:             {training_args.num_train_epochs}")
@@ -1390,5 +1388,5 @@ trainer.save_model()
 print(f"📤 Pushing to Hub: {HUB_MODEL_ID}")
 trainer.push_to_hub()
 
-print(f"\n✅ Training complete!")
+print("\n✅ Training complete!")
 print(f"   Model: https://huggingface.co/{HUB_MODEL_ID}")

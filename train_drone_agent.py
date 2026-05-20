@@ -1,10 +1,8 @@
 import json
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import numpy as np
 import random
-from collections import deque
 
 import os
 
@@ -89,7 +87,6 @@ class PolicyNet(nn.Module):
 def train():
     env = DroneEnv(node_vectors)
     model = PolicyNet()
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
     
     print("Starting training...")
     for episode in range(100):
@@ -111,7 +108,8 @@ def train():
             
             total_reward += reward
             state = next_state
-            if done: break
+            if done:
+                break
             
         print(f"Episode {episode}: Reward {total_reward:.2f}")
 
