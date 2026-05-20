@@ -11,7 +11,9 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let green = ratatui::style::Color::Green;
 
     let csv_display = match &app.vrp_csv_file {
-        Some(p) => ratatui::text::Span::styled(p.clone(), ratatui::style::Style::default().fg(green)),
+        Some(p) => {
+            ratatui::text::Span::styled(p.clone(), ratatui::style::Style::default().fg(green))
+        }
         None => ratatui::text::Span::styled(
             "(not set)".to_string(),
             ratatui::style::Style::default().fg(yellow),
@@ -19,7 +21,9 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     };
 
     let rmp_display = match &app.vrp_input_file {
-        Some(p) => ratatui::text::Span::styled(p.clone(), ratatui::style::Style::default().fg(green)),
+        Some(p) => {
+            ratatui::text::Span::styled(p.clone(), ratatui::style::Style::default().fg(green))
+        }
         None => ratatui::text::Span::styled(
             "(not set)".to_string(),
             ratatui::style::Style::default().fg(gray),
@@ -27,14 +31,19 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     };
 
     let capacity_display = match app.vrp_capacity {
-        Some(c) => ratatui::text::Span::styled(format!("{:.1}", c), ratatui::style::Style::default().fg(yellow)),
-        None => ratatui::text::Span::styled("(unlimited)", ratatui::style::Style::default().fg(gray)),
+        Some(c) => ratatui::text::Span::styled(
+            format!("{:.1}", c),
+            ratatui::style::Style::default().fg(yellow),
+        ),
+        None => {
+            ratatui::text::Span::styled("(unlimited)", ratatui::style::Style::default().fg(gray))
+        }
     };
 
     let status_text = format!("Status: {}", app.vrp_status);
     let status_color = app.vrp_status.color();
 
-    let lines = vec![
+    let mut lines = vec![
         ratatui::text::Line::from(ratatui::text::Span::styled(
             "VRP Solver — Multi-Vehicle Route Planning",
             ratatui::style::Style::default()
@@ -90,6 +99,37 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             capacity_display,
         ]),
         ratatui::text::Line::from(""),
+    ];
+
+    if !app.google_maps_urls.is_empty() {
+        lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+            "Google Maps Links (Clickable in some terminals):",
+            ratatui::style::Style::default().fg(cyan),
+        )));
+        for (i, url) in app.google_maps_urls.iter().enumerate() {
+            lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+                format!("R{}: {}", i + 1, url),
+                ratatui::style::Style::default().fg(green),
+            )));
+        }
+        lines.push(ratatui::text::Line::from(""));
+    }
+
+    if !app.osmand_links.is_empty() {
+        lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+            "OsmAnd Import Links (Requires GPX hosting):",
+            ratatui::style::Style::default().fg(cyan),
+        )));
+        for (i, url) in app.osmand_links.iter().enumerate() {
+            lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+                format!("R{}: {}", i + 1, url),
+                ratatui::style::Style::default().fg(green),
+            )));
+        }
+        lines.push(ratatui::text::Line::from(""));
+    }
+
+    lines.extend(vec![
         ratatui::text::Line::from(ratatui::text::Span::raw(
             "────────────────────────────────────",
         )),
@@ -102,11 +142,15 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ratatui::text::Line::from("  [I]  Set road network .rmp (optional)"),
         ratatui::text::Line::from("  [O]  Set output directory"),
         ratatui::text::Line::from("  [V]  Set number of vehicles"),
-        ratatui::text::Line::from("  [A]  Change algorithm (greedy|savings|local_search|simulated_annealing)"),
+        ratatui::text::Line::from(
+            "  [A]  Change algorithm (greedy|savings|local_search|simulated_annealing)",
+        ),
         ratatui::text::Line::from("  [K]  Set vehicle capacity"),
+        ratatui::text::Line::from("  [L]  Set OsmAnd base URL"),
+        ratatui::text::Line::from("  [X]  Clear depots"),
         ratatui::text::Line::from("  [Enter]  Run VRP solver"),
         ratatui::text::Line::from("  [Esc]  Return to home"),
-    ];
+    ]);
 
     let paragraph = ratatui::widgets::Paragraph::new(lines);
     f.render_widget(paragraph, inner);

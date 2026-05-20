@@ -13,7 +13,7 @@ import random
 import struct
 import zlib
 from pathlib import Path
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Tuple, Dict, Any
 import numpy as np
 
 # ── Constants ────────────────────────────────────────────────────────────
@@ -137,7 +137,6 @@ def generate_mountain_terrain(
     """
     Mountain road network with switchbacks and a valley road.
     """
-    rng = random.Random(seed)
     features = []
     mpx = m_per_deg_lon(center_lat)
     mp_lat = M_PER_DEG_LAT
