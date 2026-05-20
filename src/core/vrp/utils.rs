@@ -41,16 +41,15 @@ pub fn build_haversine_matrix(locations: &[VRPSolverStop], avg_speed_kmh: f64) -
         return Vec::new();
     }
 
-    // Pre-calculate radians and cosines to avoid redundant trig calls in the O(n^2) loop
-    let mut lats_rad = Vec::with_capacity(n);
-    let mut lons_rad = Vec::with_capacity(n);
-    let mut cos_lats = Vec::with_capacity(n);
-    for loc in locations {
-        let lat_rad = loc.lat.to_radians();
-        lats_rad.push(lat_rad);
-        lons_rad.push(loc.lon.to_radians());
-        cos_lats.push(lat_rad.cos());
-    }
+    // Pre-calculate radians and cosines to avoid redundant trig calls in the O(n²) loop
+    let loc_rads: Vec<(f64, f64, f64)> = locations
+        .iter()
+        .map(|l| {
+            let lat_r = l.lat.to_radians();
+            let lon_r = l.lon.to_radians();
+            (lat_r, lon_r, lat_r.cos())
+        })
+        .collect();
 
     // Initialize n x n matrix with zeros
     let mut matrix = vec![vec![DistCell { distance: 0.0, time: 0.0, path: None }; n]; n];
@@ -58,12 +57,16 @@ pub fn build_haversine_matrix(locations: &[VRPSolverStop], avg_speed_kmh: f64) -
     let time_factor = 3600.0 / avg_speed_kmh;
 
     for i in 0..n {
+        let (lat1_r, lon1_r, cos_lat1) = loc_rads[i];
+
         for j in (i + 1)..n {
-            let dlat = lats_rad[j] - lats_rad[i];
-            let dlon = lons_rad[j] - lons_rad[i];
+            let (lat2_r, lon2_r, cos_lat2) = loc_rads[j];
+
+            let dlat = lat2_r - lat1_r;
+            let dlon = lon2_r - lon1_r;
 
             let a = (dlat / 2.0).sin().powi(2)
-                + cos_lats[i] * cos_lats[j] * (dlon / 2.0).sin().powi(2);
+                + cos_lat1 * cos_lat2 * (dlon / 2.0).sin().powi(2);
             let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
             let dist = R_KM * c;
             let time_sec = dist * time_factor;
