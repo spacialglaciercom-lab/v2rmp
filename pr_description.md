@@ -1,8 +1,16 @@
-🧹 [Fix unused local Config class in re_export_onnx.py]
+# 🧹 Remove unused `_haversine_m` function
 
-🎯 **What:** Added missing test coverage for `_geom_to_shapely` in `vector_clean.py`. The original implementation had an unchecked generic exception during GeoJSON loading that was completely untested, particularly for invalid coordinates format.
-📊 **Coverage:** Covered 3 cases for `_geom_to_shapely`:
-  - `test_geom_to_shapely_valid`: tests the happy path with valid coordinates.
-  - `test_geom_to_shapely_invalid_no_coords`: tests when coordinates are missing.
-  - `test_geom_to_shapely_invalid_shape`: tests when invalid data (like strings instead of numbers) is passed, checking the generic Exception block.
-✨ **Result:** Improved reliability of the pipeline by verifying that invalid GeoJSON dicts triggering shapely errors will securely return `None` as intended instead of bubbling up unexpected errors.
+## 🎯 What
+Removed the unused `_haversine_m` function from `vector_clean.py`.
+
+## 💡 Why
+AST analysis and a full codebase search showed that `_haversine_m` in `vector_clean.py` was completely unused. Removing dead code improves code health, reduces maintenance burden, and ensures new developers don't mistakenly depend on obsolete code. We still have the highly optimized `_haversine_km` and `_haversine_km_vectorized` functions which are used where necessary.
+
+## ✅ Verification
+1. Confirmed absence of function calls for `_haversine_m(` and `vector_clean._haversine_m` throughout the entire codebase.
+2. Formatted file and syntax checked `vector_clean.py`.
+3. Validated clean compile of `vector_clean.py`.
+4. Addressed an existing issue on `master` caused by trailing braces in rust files to ensure the workspace builds locally without errors.
+
+## ✨ Result
+A slightly leaner python graph cleaning script, improved maintainability by reducing dead code.
