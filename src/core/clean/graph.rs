@@ -516,6 +516,19 @@ mod tests {
         );
         g
     }
+    #[test]
+    fn test_build_graph_missing_geometry() {
+        let feature = Feature {
+            bbox: None,
+            geometry: None,
+            id: None,
+            properties: None,
+            foreign_members: None,
+        };
+        let graph = build_graph(&[feature], 5).unwrap();
+        assert_eq!(graph.node_count(), 0);
+        assert_eq!(graph.edge_count(), 0);
+    }
 
     #[test]
     fn test_remove_selfloops() {

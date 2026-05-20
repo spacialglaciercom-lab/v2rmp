@@ -9,7 +9,6 @@ fn solve(
     locations: &[VRPSolverStop],
     num_vehicles: usize,
     balance_load: bool,
-    hyperparams: Option<&SolverHyperparams>,
 ) -> SolveResult {
     let n = matrix.len();
     if n <= 1 {

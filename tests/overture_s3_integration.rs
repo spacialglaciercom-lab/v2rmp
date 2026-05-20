@@ -12,7 +12,7 @@ mod overture_s3_integration {
 
     fn build_store() -> Arc<dyn ObjectStore> {
         let opts =
-            object_store::ClientOptions::new().with_timeout(std::time::Duration::from_secs(120));
+            object_store::ClientOptions::new().with_timeout(std::time::Duration::from_secs(30));
         let store = AmazonS3Builder::new()
             .with_bucket_name(BUCKET)
             .with_region(REGION)

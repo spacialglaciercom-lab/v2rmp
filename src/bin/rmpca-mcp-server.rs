@@ -31,21 +31,14 @@ use v2rmp::core::clean::{clean_geojson, CleanOptions};
 use v2rmp::core::compile::{CompileRequest, CompileResult};
 #[cfg(feature = "extract")]
 use v2rmp::core::elevation::local::LocalDem;
-#[cfg(feature = "extract")]
 use v2rmp::core::elevation::FuelCalculator;
-#[cfg(feature = "extract")]
 use v2rmp::core::extract::{BBoxRequest, ExtractRequest, ExtractResult, ExtractSource, RoadClass};
-#[cfg(feature = "ml")]
-use v2rmp::core::ml::automl::predict_hyperparams;
-#[cfg(feature = "ml")]
-use v2rmp::core::ml::features::InstanceFeatures;
-use v2rmp::core::ml::selector::{predict_solver, default_model_path};
-use v2rmp::core::ml::quality_predictor::predict_quality;
-use v2rmp::core::ml::automl::predict_hyperparams;
-use v2rmp::core::ml_legacy::{RouteFeatures, score_route, route_feature_vector};
-use v2rmp::core::nlp::{parse_query, to_vrp_json};
-#[cfg(feature = "ml")]
-use v2rmp::core::nlp::QwenNLParser;
+use v2rmp::core::optimize::{
+    OnewayMode, OptimizeRequest, OptimizeResult, SolverMode, TurnPenalties,
+};
+use v2rmp::core::vrp::registry::solve_with;
+use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
+use v2rmp::core::vrp::utils::{build_haversine_matrix, get_valhalla_matrix};
 
 // ── JSON-RPC / MCP types ───────────────────────────────────────────────────
 
@@ -1722,7 +1715,9 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
                 .get("lon")
                 .and_then(|v| v.as_f64())
                 .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
-            let label = s.get("label").and_then(|v| v.as_str())
+            let label = s
+                .get("label")
+                .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
             let demand = s.get("demand").and_then(|v| v.as_f64());
@@ -3250,28 +3245,30 @@ async fn main() -> Result<()> {
                     "extract_overture" => handle_extract_overture(&args).await,
                     #[cfg(feature = "extract")]
                     "extract_osm" => handle_extract_osm(&args).await,
-                    "compile" => handle_compile(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "compile" => handle_compile(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     "optimize" => handle_optimize(&args).await,
-                    "clean" => handle_clean(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "clean" => handle_clean(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     "vrp_solve" => handle_vrp_solve(&args).await,
-                    "elevation_query" => handle_elevation_query(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "elevation_profile" => handle_elevation_profile(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "list_solvers" => handle_list_solvers(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "haversine_distance" => handle_haversine_distance(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "elevation_stats" => handle_elevation_stats(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "dem_info" => handle_dem_info(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "fuel_estimate" => handle_fuel_estimate(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "inspect_rmp" => handle_inspect_rmp(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "elevation_query" => {
+                        handle_elevation_query(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "elevation_profile" => {
+                        handle_elevation_profile(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "list_solvers" => {
+                        handle_list_solvers(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "haversine_distance" => {
+                        handle_haversine_distance(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "elevation_stats" => {
+                        handle_elevation_stats(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "dem_info" => handle_dem_info(&args).map_err(|e| anyhow::anyhow!("{e}")),
+                    "fuel_estimate" => {
+                        handle_fuel_estimate(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "inspect_rmp" => handle_inspect_rmp(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     "pipeline" => handle_pipeline(&args).await,
                     "get_valhalla_matrix" => handle_get_valhalla_matrix(&args).await,
                     "predict_solver" => handle_predict_solver(&args)
