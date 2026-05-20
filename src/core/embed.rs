@@ -13,7 +13,7 @@ pub struct Embedder {
 
 impl Embedder {
     pub fn new() -> Result<Self> {
-        let device = Device::Cpu;
+        let device = crate::core::ml::best_device()?;
         let api = Api::new()?;
         let repo = api.repo(Repo::model("BAAI/bge-small-en-v1.5".to_string()));
 

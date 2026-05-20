@@ -4,9 +4,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::clean::{clean_geojson, CleanOptions};
 use crate::core::compile::CompileRequest;
+#[cfg(feature = "extract")]
 use crate::core::elevation::{FuelCalculator, LocalDem};
-use crate::core::extract::{BBoxRequest, ExtractRequest, ExtractSource, RoadClass};
-use crate::core::optimize::{OnewayMode, OptimizeRequest, SolverMode, TurnPenalties};
+#[cfg(feature = "extract")]
+use crate::core::extract::{BBoxRequest, ExtractRequest, ExtractResult, ExtractSource, RoadClass};
+use crate::core::optimize::{CppEngine, OnewayMode, OptimizeRequest, SolverMode, TurnPenalties};
 
 /// rmpca - Route optimization and data extraction
 #[derive(Parser)]
@@ -24,6 +26,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Extract road network data from Overture Maps
+    #[cfg(feature = "extract")]
     Extract(ExtractArgs),
     /// Compile GeoJSON into binary .rmp format
     Compile(CompileArgs),
@@ -34,6 +37,7 @@ enum Commands {
     /// Solve Vehicle Routing Problem (VRP) for multiple agents
     Vrp(VrpArgs),
     /// Run the full pipeline: extract -> clean -> compile -> optimize
+    #[cfg(feature = "extract")]
     Pipeline(PipelineArgs),
     /// List available resources (maps, routes)
     List(ListArgs),
@@ -42,9 +46,25 @@ enum Commands {
     /// Start a headless, long-running JSON-RPC/STDIO server for frontend integrations
     Serve(ServeArgs),
     /// Generate embeddings for text using fastembed
+    #[cfg(feature = "ml")]
     Embed(EmbedArgs),
     /// DEM elevation queries from local GeoTIFF
+    #[cfg(feature = "extract")]
     Elevation(ElevationArgs),
+    /// Predict the best VRP solver for a set of stops
+    #[cfg(feature = "ml")]
+    PredictSolver(PredictSolverArgs),
+    /// Predict expected route quality before solving
+    #[cfg(feature = "ml")]
+    PredictQuality(PredictQualityArgs),
+    /// Tune solver hyperparameters for an instance
+    #[cfg(feature = "ml")]
+    TuneHyperparams(TuneHyperparamsArgs),
+    /// Parse a natural-language routing query into JSON
+    ParseQuery(ParseQueryArgs),
+    /// Generate node/edge embeddings for a road network graph
+    #[cfg(feature = "ml")]
+    GraphEmbed(GraphEmbedArgs),
 }
 
 #[derive(clap::Args, Serialize, Deserialize)]
@@ -52,6 +72,84 @@ struct EmbedArgs {
     /// Text to embed (can be specified multiple times)
     #[arg(short, long, action = clap::ArgAction::Append)]
     text: Vec<String>,
+}
+
+// ── Graph Embed ──────────────────────────────────────────────────────
+
+#[derive(clap::Args, Serialize, Deserialize)]
+#[serde(default)]
+struct GraphEmbedArgs {
+    /// Input .rmp cache file
+    #[arg(short, long)]
+    input: String,
+
+    /// Embedding method
+    #[arg(short, long, value_enum, default_value = "node2vec")]
+    method: crate::core::ml::node_embed::EmbedMethod,
+
+    /// Embedding dimension (default: 64)
+    #[arg(short, long, default_value = "64")]
+    dim: usize,
+
+    /// Walk length for node2vec (default: 30)
+    #[arg(long, default_value = "30")]
+    walk_length: usize,
+
+    /// Number of walks per node for node2vec (default: 10)
+    #[arg(long, default_value = "10")]
+    num_walks: usize,
+
+    /// Return parameter p for node2vec (default: 1.0)
+    #[arg(long, default_value = "1.0")]
+    p: f64,
+
+    /// In-out parameter q for node2vec (default: 1.0)
+    #[arg(long, default_value = "1.0")]
+    q: f64,
+
+    /// Skip-gram window size (default: 5)
+    #[arg(long, default_value = "5")]
+    window: usize,
+
+    /// Number of negative samples (default: 5)
+    #[arg(long, default_value = "5")]
+    negative_samples: usize,
+
+    /// Learning rate (default: 0.025)
+    #[arg(long, default_value = "0.025")]
+    lr: f64,
+
+    /// Number of training epochs for LINE (default: 5)
+    #[arg(long, default_value = "5")]
+    epochs: usize,
+
+    /// Include edge embeddings (derived via Hadamard product)
+    #[arg(long, default_value = "false")]
+    include_edges: bool,
+
+    /// Output file path (JSON). If omitted, prints to stdout.
+    #[arg(short, long)]
+    output: Option<String>,
+}
+
+impl Default for GraphEmbedArgs {
+    fn default() -> Self {
+        Self {
+            input: String::new(),
+            method: crate::core::ml::node_embed::EmbedMethod::Node2Vec,
+            dim: 64,
+            walk_length: 30,
+            num_walks: 10,
+            p: 1.0,
+            q: 1.0,
+            window: 5,
+            negative_samples: 5,
+            lr: 0.025,
+            epochs: 5,
+            include_edges: false,
+            output: None,
+        }
+    }
 }
 
 // ── Elevation ─────────────────────────────────────────────────────────
@@ -135,6 +233,57 @@ struct FuelElevationArgs {
     base_consumption: f64,
 }
 
+// ── Predict Solver ─────────────────────────────────────────────────────
+
+#[derive(clap::Args, Serialize, Deserialize)]
+#[cfg(feature = "ml")]
+struct PredictSolverArgs {
+    /// Path to JSON file with stops array (first = depot) or '-' for stdin
+    #[arg(short, long, default_value = "-")]
+    input: String,
+    /// Output results as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+// ── Predict Quality ────────────────────────────────────────────────────
+
+#[derive(clap::Args, Serialize, Deserialize)]
+#[cfg(feature = "ml")]
+struct PredictQualityArgs {
+    /// Path to JSON file with stops array (first = depot) or '-' for stdin
+    #[arg(short, long, default_value = "-")]
+    input: String,
+    /// Output results as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+// ── Tune Hyperparams ─────────────────────────────────────────────────
+
+#[derive(clap::Args, Serialize, Deserialize)]
+#[cfg(feature = "ml")]
+struct TuneHyperparamsArgs {
+    /// Path to JSON file with stops array (first = depot) or '-' for stdin
+    #[arg(short, long, default_value = "-")]
+    input: String,
+    /// Output results as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+// ── Parse Query ────────────────────────────────────────────────────────
+
+#[derive(clap::Args, Serialize, Deserialize)]
+struct ParseQueryArgs {
+    /// Natural language routing query
+    #[arg(short, long)]
+    query: String,
+    /// Output results as JSON
+    #[arg(long)]
+    json: bool,
+}
+
 #[derive(clap::Args)]
 struct ServeArgs {}
 
@@ -162,13 +311,19 @@ struct AgentArgs {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum AgentTask {
+    #[cfg(feature = "extract")]
     Extract(ExtractArgs),
     Compile(CompileArgs),
     Clean(CleanArgs),
     Optimize(OptimizeArgs),
     Vrp(VrpArgs),
+    #[cfg(feature = "extract")]
     Pipeline(PipelineArgs),
+    #[cfg(feature = "ml")]
     Embed(EmbedArgs),
+    #[cfg(feature = "ml")]
+    GraphEmbed(GraphEmbedArgs),
+    #[cfg(feature = "extract")]
     Elevation(ElevationArgs),
 }
 
@@ -304,6 +459,16 @@ struct VrpArgs {
     #[arg(long)]
     #[serde(default)]
     coordinates: Option<String>,
+
+    /// Generate Google Maps URL links for the routes
+    #[arg(long, default_value_t = false)]
+    #[serde(default)]
+    google_maps: bool,
+
+    /// Public base URL for OsmAnd GPX import links (e.g. https://pub-xxx.r2.dev)
+    #[arg(long)]
+    #[serde(default)]
+    osmand_base_url: Option<String>,
 }
 
 // ── Extract ───────────────────────────────────────────────────────────
@@ -354,6 +519,17 @@ struct CompileArgs {
     #[arg(long)]
     #[serde(default)]
     clean: bool,
+
+    /// Road classes to include in the .rmp (comma-separated allowlist; empty = include all)
+    /// e.g. --road-classes residential,tertiary,secondary,unclassified
+    #[arg(long, value_delimiter = ',')]
+    #[serde(default)]
+    road_classes: Vec<String>,
+
+    /// Prune leaf spurs (degree-1 edges from boundary clipping)
+    #[arg(long)]
+    #[serde(default)]
+    prune_spurs: bool,
 
     /// Prune disconnected subgraphs
     #[arg(long)]
@@ -415,6 +591,10 @@ fn default_mode() -> String {
     "cpp".to_string()
 }
 
+fn default_cpp_engine() -> String {
+    "internal".to_string()
+}
+
 fn default_left_penalty() -> f64 {
     1.0
 }
@@ -462,6 +642,11 @@ struct OptimizeArgs {
     #[serde(default = "default_mode")]
     mode: String,
 
+    /// C++ engine: internal or external-rust-optimizer (default: internal)
+    #[arg(long, default_value = "internal")]
+    #[serde(default = "default_cpp_engine")]
+    cpp_engine: String,
+
     /// Left turn penalty (default: 1.0)
     #[arg(long, default_value_t = 1.0)]
     #[serde(default = "default_left_penalty")]
@@ -485,6 +670,16 @@ struct OptimizeArgs {
     #[arg(long, default_value = "default")]
     #[serde(default = "default_solver", alias = "solver_id")]
     solver: String,
+
+    /// Generate Google Maps URL links for the routes
+    #[arg(long, default_value_t = false)]
+    #[serde(default)]
+    google_maps: bool,
+
+    /// Public base URL for OsmAnd GPX import links (e.g. https://pub-xxx.r2.dev)
+    #[arg(long)]
+    #[serde(default)]
+    osmand_base_url: Option<String>,
 }
 
 // ── Pipeline ──────────────────────────────────────────────────────────
@@ -512,6 +707,11 @@ struct PipelineArgs {
     #[serde(default, deserialize_with = "deserialize_depot_opt")]
     depot: Option<String>,
 
+    /// Prune leaf spurs (degree-1 edges from boundary clipping)
+    #[arg(long)]
+    #[serde(default)]
+    pub prune_spurs: bool,
+
     /// Prune disconnected subgraphs during compilation
     #[arg(long)]
     #[serde(default)]
@@ -523,6 +723,7 @@ struct PipelineArgs {
     pub pbf: Option<String>,
 }
 
+#[cfg(feature = "extract")]
 #[derive(Serialize)]
 struct PipelineResult {
     extract: crate::core::extract::ExtractResult,
@@ -533,6 +734,7 @@ struct PipelineResult {
 
 // ── Parsing helpers ───────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn parse_bbox(s: &str) -> Result<(f64, f64, f64, f64)> {
     let parts: Vec<f64> = s
         .split(',')
@@ -544,6 +746,7 @@ fn parse_bbox(s: &str) -> Result<(f64, f64, f64, f64)> {
     Ok((parts[0], parts[1], parts[2], parts[3]))
 }
 
+#[cfg(feature = "extract")]
 fn parse_road_classes(classes: &[String]) -> Result<Vec<RoadClass>> {
     if classes.is_empty() {
         return Ok(RoadClass::all_vehicle());
@@ -569,6 +772,7 @@ fn parse_road_classes(classes: &[String]) -> Result<Vec<RoadClass>> {
         .collect()
 }
 
+#[cfg(feature = "extract")]
 fn parse_source(s: &str) -> Result<ExtractSource> {
     match s {
         "osm" => Ok(ExtractSource::Osm),
@@ -600,6 +804,14 @@ fn parse_oneway(s: &str) -> Result<OnewayMode> {
     }
 }
 
+fn parse_cpp_engine(s: &str) -> Result<CppEngine> {
+    match s.to_lowercase().as_str() {
+        "internal" | "" => Ok(CppEngine::Internal),
+        "external-rust-optimizer" | "external" | "rust-optimizer" => Ok(CppEngine::ExternalRustOptimizer),
+        other => anyhow::bail!("Unknown C++ engine: {other} (internal|external-rust-optimizer)"),
+    }
+}
+
 // ── Output helpers ────────────────────────────────────────────────────
 
 fn output_json<T: Serialize>(value: &T) -> Result<()> {
@@ -617,6 +829,7 @@ fn init_tracing() {
 
 // ── Command handlers ──────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 async fn run_extract_cmd(args: ExtractArgs, json: bool) -> Result<()> {
     let (min_lon, min_lat, max_lon, max_lat) = parse_bbox(&args.bbox)?;
     let road_classes = parse_road_classes(&args.road_classes)?;
@@ -671,9 +884,10 @@ fn run_compile_cmd(args: CompileArgs, json: bool) -> Result<()> {
         input_geojson: args.input,
         output_rmp: args.output,
         compress: false,
-        road_classes: vec![],
+        road_classes: args.road_classes,
         clean_options,
         prune_disconnected: args.prune_disconnected,
+        prune_spurs: args.prune_spurs,
     };
 
     let result = crate::core::compile::run_compile(&req)?;
@@ -770,19 +984,23 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
         "vrp" => SolverMode::Vrp,
         _ => SolverMode::Cpp,
     };
+    let cpp_engine = parse_cpp_engine(&args.cpp_engine)?;
 
     if !json {
         tracing::info!(
-            "Optimizing route from {} (mode: {})",
+            "Optimizing route from {} (mode: {}, engine: {})",
             args.input,
             if mode == SolverMode::Vrp {
                 "VRP"
             } else {
                 "CPP"
+            },
+            match cpp_engine {
+                CppEngine::Internal => "internal",
+                CppEngine::ExternalRustOptimizer => "external-rust-optimizer",
             }
         );
     }
-
     let req = OptimizeRequest {
         cache_file: args.input.clone(),
         route_file: args.output.clone(),
@@ -794,8 +1012,10 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
         depot,
         oneway_mode,
         mode,
+        cpp_engine,
         num_vehicles: args.vehicles,
         solver_id: args.solver,
+        coordinates: None,
     };
 
     let result = crate::core::optimize::run_optimize(&req).await?;
@@ -804,6 +1024,10 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
         output_json(&result)?;
     } else {
         tracing::info!("Optimization complete!");
+        if result.is_partial {
+            tracing::warn!("WARNING: Route is PARTIAL (Disconnected Components).");
+            tracing::warn!("Found {} unreachable edges from start node.", result.unreachable_edges);
+        }
         tracing::info!("Total distance: {:.2} km", result.total_distance_km);
         tracing::info!("Stops/Segments: {}", result.total_segments);
         tracing::info!("Vehicles used: {}", result.num_routes);
@@ -817,6 +1041,50 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
         tracing::info!("Elapsed: {} ms", result.elapsed_ms);
         if let Some(ref path) = args.output {
             tracing::info!("Route written to: {path}");
+        }
+
+        if args.google_maps {
+            if result.routes.is_empty() {
+                tracing::warn!("No routes available for Google Maps URL");
+            } else {
+                for (i, route) in result.routes.iter().enumerate() {
+                    // For long routes (CPP), we might need to sample points
+                    // Google Maps limit is ~20 points for /dir/
+                    let max_points = 20;
+                    let sampled_points = if route.len() > max_points {
+                        let step = route.len() / max_points;
+                        route
+                            .iter()
+                            .step_by(step)
+                            .take(max_points)
+                            .collect::<Vec<_>>()
+                    } else {
+                        route.iter().collect::<Vec<_>>()
+                    };
+
+                    let mut url = "https://www.google.com/maps/dir/".to_string();
+                    for stop in sampled_points {
+                        url.push_str(&format!("{:.6},{:.6}/", stop.lat, stop.lon));
+                    }
+                    if result.routes.len() > 1 {
+                        tracing::info!("Route {} Google Maps (Sampled): {}", i + 1, url);
+                    } else {
+                        tracing::info!("Google Maps (Sampled): {}", url);
+                    }
+                }
+            }
+        }
+
+        if let Some(ref base_url) = args.osmand_base_url {
+            if let Some(ref path) = args.output {
+                let filename = std::path::Path::new(path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("route.gpx");
+                let gpx_url = format!("{}/{}", base_url.trim_end_matches('/'), filename);
+                let osmand_link = crate::core::vrp::utils::generate_osmand_import_url(&gpx_url);
+                tracing::info!("OsmAnd Link: {}", osmand_link);
+            }
         }
     }
 
@@ -858,7 +1126,7 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
     let mut stops = Vec::new();
 
     // 1. Add depot
-    stops.push(crate::core::vrp::types::VRPSolverStop {
+    stops.push(VRPSolverStop {
         lat: depots[0].0,
         lon: depots[0].1,
         label: "Depot".into(),
@@ -880,16 +1148,18 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
 
     let matrix = crate::core::vrp::utils::build_haversine_matrix(&stops, 40.0);
 
-    let vrp_input = crate::core::vrp::types::VRPSolverInput {
+    #[cfg(feature = "ml")]
+    let vrp_input = VRPSolverInput {
         locations: stops,
         num_vehicles: args.vehicles,
         vehicle_capacity: capacity,
-        objective: crate::core::vrp::types::VrpObjective::MinDistance,
+        objective: VrpObjective::MinDistance,
         matrix: Some(matrix),
         service_time_secs: Some(30.0),
         use_time_windows: false,
         window_open: None,
         window_close: None,
+        hyperparams: None,
     };
 
     let output = crate::core::vrp::registry::solve_with(solver_id, &vrp_input)
@@ -903,6 +1173,35 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
             let path = format!("{}/vehicle_{}.gpx", args.output_dir, i + 1);
             crate::core::optimize::write_gpx_multi(&path, std::slice::from_ref(route))?;
             tracing::info!("Wrote route to {}", path);
+
+            if args.google_maps {
+                // Google Maps URL limit is ~20 points for /dir/
+                // Format: https://www.google.com/maps/dir/lat1,lon1/lat2,lon2/...
+                let chunks = route.chunks(20);
+                for (chunk_idx, chunk) in chunks.enumerate() {
+                    let mut url = "https://www.google.com/maps/dir/".to_string();
+                    for stop in chunk {
+                        url.push_str(&format!("{:.6},{:.6}/", stop.lat, stop.lon));
+                    }
+                    if route.chunks(20).count() > 1 {
+                        tracing::info!(
+                            "Vehicle {} Google Maps (Part {}): {}",
+                            i + 1,
+                            chunk_idx + 1,
+                            url
+                        );
+                    } else {
+                        tracing::info!("Vehicle {} Google Maps: {}", i + 1, url);
+                    }
+                }
+            }
+
+            if let Some(ref base_url) = args.osmand_base_url {
+                let filename = format!("vehicle_{}.gpx", i + 1);
+                let gpx_url = format!("{}/{}", base_url.trim_end_matches('/'), filename);
+                let osmand_link = crate::core::vrp::utils::generate_osmand_import_url(&gpx_url);
+                tracing::info!("Vehicle {} OsmAnd Link: {}", i + 1, osmand_link);
+            }
         }
     } else {
         tracing::warn!("No routes produced by VRP solver.");
@@ -911,6 +1210,7 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "extract")]
 async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
     let (min_lon, min_lat, max_lon, max_lat) = parse_bbox(&args.bbox)?;
     let source = parse_source(&args.source)?;
@@ -969,6 +1269,7 @@ async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         road_classes: vec![],
         clean_options: None,
         prune_disconnected: args.prune_disconnected,
+        prune_spurs: args.prune_spurs,
     };
     let compile_result = crate::core::compile::run_compile(&compile_req)
         .context("Pipeline failed at stage 'compile'")?;
@@ -986,6 +1287,7 @@ async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         mode: SolverMode::Cpp,
         num_vehicles: 1,
         solver_id: "clarke_wright".to_string(),
+        coordinates: None,
     };
     let optimize_result = crate::core::optimize::run_optimize(&optimize_req)
         .await
@@ -1042,13 +1344,19 @@ async fn run_agent_cmd(args: AgentArgs, json: bool) -> Result<()> {
         serde_json::from_reader(input).context("Failed to parse agent task JSON")?;
 
     match task {
+        #[cfg(feature = "extract")]
         AgentTask::Extract(a) => run_extract_cmd(a, json).await,
         AgentTask::Compile(a) => run_compile_cmd(a, json),
         AgentTask::Clean(a) => run_clean_cmd(a, json),
         AgentTask::Optimize(a) => run_optimize_cmd(a, json).await,
         AgentTask::Vrp(a) => run_vrp_cmd(a, json).await,
+        #[cfg(feature = "extract")]
         AgentTask::Pipeline(a) => run_pipeline_cmd(a, json).await,
+        #[cfg(feature = "ml")]
         AgentTask::Embed(a) => run_embed_cmd(a, json).await,
+        #[cfg(feature = "ml")]
+        AgentTask::GraphEmbed(a) => run_graph_embed_cmd(a, json),
+        #[cfg(feature = "extract")]
         AgentTask::Elevation(a) => run_elevation_cmd(a, json),
     }
 }
@@ -1079,13 +1387,19 @@ async fn run_serve_cmd(_args: ServeArgs) -> Result<()> {
         match serde_json::from_str::<AgentTask>(&line) {
             Ok(task) => {
                 let res = match task {
+                    #[cfg(feature = "extract")]
                     AgentTask::Extract(a) => run_extract_cmd(a, true).await,
                     AgentTask::Compile(a) => run_compile_cmd(a, true),
                     AgentTask::Clean(a) => run_clean_cmd(a, true),
                     AgentTask::Optimize(a) => run_optimize_cmd(a, true).await,
                     AgentTask::Vrp(a) => run_vrp_cmd(a, true).await,
+                    #[cfg(feature = "extract")]
                     AgentTask::Pipeline(a) => run_pipeline_cmd(a, true).await,
+                    #[cfg(feature = "ml")]
                     AgentTask::Embed(a) => run_embed_cmd(a, true).await,
+                    #[cfg(feature = "ml")]
+                    AgentTask::GraphEmbed(a) => run_graph_embed_cmd(a, true),
+                    #[cfg(feature = "extract")]
                     AgentTask::Elevation(a) => run_elevation_cmd(a, true),
                 };
                 if let Err(e) = res {
@@ -1105,6 +1419,7 @@ async fn run_serve_cmd(_args: ServeArgs) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "ml")]
 async fn run_embed_cmd(args: EmbedArgs, json: bool) -> Result<()> {
     if !json {
         tracing::info!("Generating embeddings for {} texts...", args.text.len());
@@ -1126,6 +1441,83 @@ async fn run_embed_cmd(args: EmbedArgs, json: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(not(feature = "ml"))]
+#[allow(dead_code)]
+async fn run_embed_cmd(_args: EmbedArgs, _json: bool) -> Result<()> {
+    anyhow::bail!("ML feature is not enabled. Cannot generate embeddings.");
+}
+
+// ── Graph Embed handler ─────────────────────────────────────────────
+
+#[cfg(feature = "ml")]
+fn run_graph_embed_cmd(args: GraphEmbedArgs, json: bool) -> Result<()> {
+    use crate::core::ml::node_embed::{EmbedConfig, embed_graph};
+    use crate::core::optimize::read_rmp_file;
+    use std::io::Read;
+
+    // Load .rmp file
+    let mut file_data = Vec::new();
+    std::fs::File::open(&args.input)?
+        .read_to_end(&mut file_data)?;
+    let (nodes, edges) = read_rmp_file(&file_data)?;
+
+    if nodes.is_empty() {
+        anyhow::bail!("No nodes found in .rmp file: {}", args.input);
+    }
+
+    if !json {
+        tracing::info!(
+            "Road network: {} nodes, {} edges from {}",
+            nodes.len(),
+            edges.len(),
+            args.input
+        );
+    }
+
+    let config = EmbedConfig {
+        method: args.method,
+        dimensions: args.dim,
+        walk_length: args.walk_length,
+        num_walks: args.num_walks,
+        p: args.p,
+        q: args.q,
+        window: args.window,
+        negative_samples: args.negative_samples,
+        lr: args.lr,
+        epochs: args.epochs,
+        threads: 1,
+        include_edges: args.include_edges,
+    };
+
+    let result = embed_graph(&nodes, &edges, &config)?;
+
+    let output_data = serde_json::to_string_pretty(&result)?;
+
+    match &args.output {
+        Some(path) => {
+            std::fs::write(path, &output_data)?;
+            if !json {
+                tracing::info!(
+                    "Wrote {} node embeddings (dim={}) to {}",
+                    result.num_nodes,
+                    result.dimensions,
+                    path
+                );
+            }
+        }
+        None => {
+            println!("{}", output_data);
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(not(feature = "ml"))]
+fn run_graph_embed_cmd(_args: GraphEmbedArgs, _json: bool) -> Result<()> {
+    anyhow::bail!("ML feature is not enabled. Cannot generate graph embeddings.");
 }
 
 fn run_list_cmd(args: ListArgs, json: bool) -> Result<()> {
@@ -1164,6 +1556,7 @@ fn run_list_cmd(args: ListArgs, json: bool) -> Result<()> {
 
 // ── Elevation handler ─────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn run_elevation_cmd(args: ElevationArgs, json: bool) -> Result<()> {
     let dem_path = std::path::Path::new(&args.dem);
     if !json {
@@ -1296,6 +1689,143 @@ fn run_elevation_cmd(args: ElevationArgs, json: bool) -> Result<()> {
     Ok(())
 }
 
+// ── New ML command handlers ────────────────────────────────────────────
+
+#[cfg(feature = "ml")]
+use crate::core::ml::automl::predict_hyperparams;
+#[cfg(feature = "ml")]
+use crate::core::ml::features::InstanceFeatures;
+#[cfg(feature = "ml")]
+use crate::core::ml::quality_predictor::predict_quality;
+#[cfg(feature = "ml")]
+use crate::core::ml::selector::{default_model_path, predict_solver};
+use crate::core::nlp::{parse_query, to_vrp_json};
+use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
+
+#[cfg(feature = "ml")]
+fn parse_stops_json(path: &str) -> Result<Vec<VRPSolverStop>> {
+    let stops: Vec<VRPSolverStop> = if path == "-" {
+        serde_json::from_reader(std::io::stdin())?
+    } else {
+        let f = std::fs::File::open(path)?;
+        serde_json::from_reader(f)?
+    };
+    Ok(stops)
+}
+
+#[cfg(feature = "ml")]
+async fn run_predict_solver_cmd(args: PredictSolverArgs) -> Result<()> {
+    let stops = parse_stops_json(&args.input)?;
+    let input = VRPSolverInput {
+        locations: stops,
+        num_vehicles: 1,
+        vehicle_capacity: 100.0,
+        objective: VrpObjective::MinDistance,
+        matrix: None,
+        service_time_secs: None,
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+        hyperparams: None,
+    };
+    let pred = predict_solver(&input, Some(&default_model_path()))?;
+    if args.json {
+        output_json(&pred)?;
+    } else {
+        println!(
+            "Recommended solver: {} (confidence: {:.2}%)",
+            pred.recommended,
+            pred.confidence * 100.0
+        );
+        if let Some((ref id, score)) = pred.runner_up {
+            println!("Runner-up: {} ({:.2}%)", id, score as f64 * 100.0);
+        }
+        for (id, score) in &pred.all_scores {
+            println!("  {:20} {:.2}%", id, score * 100.0);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "ml")]
+async fn run_predict_quality_cmd(args: PredictQualityArgs) -> Result<()> {
+    let stops = parse_stops_json(&args.input)?;
+    let input = VRPSolverInput {
+        locations: stops,
+        num_vehicles: 1,
+        vehicle_capacity: 100.0,
+        objective: VrpObjective::MinDistance,
+        matrix: None,
+        service_time_secs: None,
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+        hyperparams: None,
+    };
+    let features = InstanceFeatures::from_input(&input);
+    let pred = predict_quality(&features);
+    if args.json {
+        output_json(&pred)?;
+    } else {
+        println!("Predicted gap to optimal: {:.1}%", pred.predicted_gap_pct);
+        println!(
+            "Predicted tour length:    {:.1} km",
+            pred.predicted_tour_length_km
+        );
+        println!("Confidence:               {:.2}", pred.confidence);
+    }
+    Ok(())
+}
+
+#[cfg(feature = "ml")]
+async fn run_tune_hyperparams_cmd(args: TuneHyperparamsArgs) -> Result<()> {
+    let stops = parse_stops_json(&args.input)?;
+    let input = VRPSolverInput {
+        locations: stops,
+        num_vehicles: 1,
+        vehicle_capacity: 100.0,
+        objective: VrpObjective::MinDistance,
+        matrix: None,
+        service_time_secs: None,
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+        hyperparams: None,
+    };
+    let features = InstanceFeatures::from_input(&input);
+    let params = predict_hyperparams(&features);
+    if args.json {
+        output_json(&params)?;
+    } else {
+        println!("Suggested hyperparameters:");
+        println!("  max_iterations:      {}", params.max_iterations);
+        println!("  temperature:         {:.1}", params.temperature);
+        println!("  tabu_tenure:         {}", params.tabu_tenure);
+        println!("  cooling_rate:        {:.4}", params.cooling_rate);
+        println!("  neighbourhood_radius: {}", params.neighbourhood_radius);
+    }
+    Ok(())
+}
+
+fn run_parse_query_cmd(args: ParseQueryArgs) -> Result<()> {
+    let parsed = parse_query(&args.query);
+    let json = to_vrp_json(&parsed);
+    if args.json {
+        output_json(&json)?;
+    } else {
+        println!("Variant: {}", parsed.variant);
+        println!("Config: {}", serde_json::to_string_pretty(&json)?);
+        if !parsed.entities.is_empty() {
+            println!("Entities:");
+            for (k, v) in &parsed.entities {
+                println!("  {} = {}", k, v);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "extract")]
 fn read_json_input<T: serde::de::DeserializeOwned>(path: &str) -> Result<T> {
     let input: Box<dyn std::io::Read> = if path == "-" {
         Box::new(std::io::stdin())
@@ -1312,17 +1842,30 @@ pub async fn run() -> Result<()> {
     init_tracing();
 
     let result = match cli.command {
+        #[cfg(feature = "extract")]
         Commands::Extract(args) => run_extract_cmd(args, cli.json).await,
         Commands::Compile(args) => run_compile_cmd(args, cli.json),
         Commands::Clean(args) => run_clean_cmd(args, cli.json),
         Commands::Optimize(args) => run_optimize_cmd(args, cli.json).await,
         Commands::Vrp(args) => run_vrp_cmd(args, cli.json).await,
+        #[cfg(feature = "extract")]
         Commands::Pipeline(args) => run_pipeline_cmd(args, cli.json).await,
         Commands::List(args) => run_list_cmd(args, cli.json),
         Commands::Agent(args) => run_agent_cmd(args, cli.json).await,
         Commands::Serve(args) => run_serve_cmd(args).await,
+        #[cfg(feature = "ml")]
         Commands::Embed(args) => run_embed_cmd(args, cli.json).await,
+        #[cfg(feature = "extract")]
         Commands::Elevation(args) => run_elevation_cmd(args, cli.json),
+        #[cfg(feature = "ml")]
+        Commands::PredictSolver(args) => run_predict_solver_cmd(args).await,
+        #[cfg(feature = "ml")]
+        Commands::PredictQuality(args) => run_predict_quality_cmd(args).await,
+        #[cfg(feature = "ml")]
+        Commands::TuneHyperparams(args) => run_tune_hyperparams_cmd(args).await,
+        Commands::ParseQuery(args) => run_parse_query_cmd(args),
+        #[cfg(feature = "ml")]
+        Commands::GraphEmbed(args) => run_graph_embed_cmd(args, cli.json),
     };
 
     if let Err(e) = result {
@@ -1331,4 +1874,49 @@ pub async fn run() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(all(test, feature = "extract"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_bbox_valid() {
+        let result = parse_bbox("-122.4,37.7,-122.3,37.8");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), (-122.4, 37.7, -122.3, 37.8));
+    }
+
+    #[test]
+    fn test_parse_bbox_too_few_parts() {
+        let result = parse_bbox("-122.4,37.7,-122.3");
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Bounding box must have exactly 4 values: MIN_LON,MIN_LAT,MAX_LON,MAX_LAT"
+        );
+    }
+
+    #[test]
+    fn test_parse_bbox_too_many_parts() {
+        let result = parse_bbox("-122.4,37.7,-122.3,37.8,0.0");
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Bounding box must have exactly 4 values: MIN_LON,MIN_LAT,MAX_LON,MAX_LAT"
+        );
+    }
+
+    #[test]
+    fn test_parse_bbox_invalid_number() {
+        let result = parse_bbox("-122.4,37.7,abc,37.8");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Invalid bbox value: abc");
+    }
+
+    #[test]
+    fn test_parse_bbox_empty() {
+        let result = parse_bbox("");
+        assert!(result.is_err());
+    }
 }

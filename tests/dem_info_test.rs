@@ -1,7 +1,7 @@
 /// Integration test for the `dem_info` MCP tool and underlying `LocalDem::info()`.
 /// Uses the existing n45_w074_1arc_v3.tif (Montreal area, 1-arcsecond SRTM).
 
-#[cfg(test)]
+#[cfg(all(test, feature = "extract"))]
 mod dem_info_tests {
     use std::path::Path;
     use v2rmp::core::elevation::local::LocalDem;

@@ -1,23 +1,3 @@
-#![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(
-    dead_code,
-    unused_imports,
-    unused_variables,
-    unused_macros,
-    clippy::all
-)]
-#![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(
-    dead_code,
-    unused_imports,
-    unused_variables,
-    unused_macros,
-    clippy::all
-)]
 //! Geometric and routing utilities for VRP solvers.
 //!
 //! Provides distance-matrix construction, zone clustering,
@@ -33,28 +13,104 @@ pub fn haversine_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 
 /// Build a full O(n²) distance/time matrix using haversine.
 /// Time estimated at `avg_speed_kmh` (default 40 km/h).
+///
+/// Optimized with pre-calculated radians/cosines and matrix symmetry.
 pub fn build_haversine_matrix(locations: &[VRPSolverStop], avg_speed_kmh: f64) -> DistMatrix {
     let n = locations.len();
     let mut matrix = Vec::with_capacity(n);
-    for (i, _) in locations.iter().enumerate().take(n) {
+
+    // Pre-calculate radians and cosines for O(n) instead of O(n^2)
+    let locs_rad: Vec<(f64, f64, f64)> = locations
+        .iter()
+        .map(|l| {
+            let lat_r = l.lat.to_radians();
+            (lat_r, l.lon.to_radians(), lat_r.cos())
+        })
+        .collect();
+
+    const R_KM: f64 = 6371.0;
+
+    for i in 0..n {
         let mut row = Vec::with_capacity(n);
+        let (lat1, lon1, cos_lat1) = locs_rad[i];
+
         for j in 0..n {
-            let dist = haversine_km(
-                locations[i].lat,
-                locations[i].lon,
-                locations[j].lat,
-                locations[j].lon,
-            );
+            let (lat2, lon2, cos_lat2) = locs_rad[j];
+
+            let dlat = lat2 - lat1;
+            let dlon = lon2 - lon1;
+            let a = (dlat / 2.0).sin().powi(2) + cos_lat1 * cos_lat2 * (dlon / 2.0).sin().powi(2);
+            let dist = R_KM * 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+
             let time_sec = (dist / avg_speed_kmh) * 3600.0;
             row.push(DistCell {
                 distance: dist,
-                time: time_sec,
-            });
+                time,
+            };
+
+            matrix[i][j] = cell.clone();
+            matrix[j][i] = cell;
         }
-        matrix.push(row);
     }
+
     matrix
 }
+
+fn dijkstra(start: usize, adj: &[Vec<(usize, f64)>], n: usize) -> (Vec<f64>, Vec<Option<usize>>) {
+    use std::cmp::Ordering;
+    use std::collections::BinaryHeap;
+
+    #[derive(Copy, Clone, PartialEq)]
+    struct State {
+        cost: f64,
+        position: usize,
+    }
+    impl Eq for State {}
+    impl Ord for State {
+        fn cmp(&self, other: &Self) -> Ordering {
+            other
+                .cost
+                .partial_cmp(&self.cost)
+                .unwrap_or(Ordering::Equal)
+        }
+    }
+    impl PartialOrd for State {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    let mut dists = vec![f64::MAX; n];
+    let mut prev = vec![None; n];
+    let mut heap = BinaryHeap::new();
+
+    dists[start] = 0.0;
+    heap.push(State {
+        cost: 0.0,
+        position: start,
+    });
+
+    while let Some(State { cost, position }) = heap.pop() {
+        if cost > dists[position] {
+            continue;
+        }
+
+        for (next, weight) in &adj[position] {
+            let next_cost = cost + weight;
+            if next_cost < dists[*next] {
+                dists[*next] = next_cost;
+                prev[*next] = Some(position);
+                heap.push(State {
+                    cost: next_cost,
+                    position: *next,
+                });
+            }
+        }
+    }
+    (dists, prev)
+}
+
+use super::super::optimize::{RmpEdge, RmpNode};
 
 /// Fetch a real-road distance/time matrix from Valhalla.
 pub async fn get_valhalla_matrix(locations: &[VRPSolverStop]) -> Result<DistMatrix, String> {
@@ -71,13 +127,17 @@ pub async fn get_valhalla_matrix(locations: &[VRPSolverStop]) -> Result<DistMatr
         "directions_options": { "units": "kilometers" }
     });
 
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Valhalla request failed: {e}"))?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let resp = client.post(url).json(&body).send().await.map_err(|e| {
+        if e.is_timeout() {
+            "Valhalla request timed out after 15 seconds (network may be unavailable)".to_string()
+        } else {
+            format!("Valhalla request failed: {e}")
+        }
+    })?;
 
     if !resp.status().is_success() {
         return Err(format!("Valhalla HTTP {}", resp.status()));
@@ -112,6 +172,7 @@ pub async fn get_valhalla_matrix(locations: &[VRPSolverStop]) -> Result<DistMatr
             matrix_row.push(DistCell {
                 distance: dist,
                 time,
+                path: None,
             });
         }
         matrix.push(matrix_row);
@@ -235,7 +296,7 @@ pub fn nearest_neighbor_route(
 }
 
 /// 2-opt improvement: iteratively reverse segments to reduce total distance.
-pub fn two_opt_improve(matrix: &DistMatrix, route_indices: &[usize]) -> Vec<usize> {
+pub fn two_opt_improve(matrix: &DistMatrix, route_indices: &[usize], max_iter: u32) -> Vec<usize> {
     let n = route_indices.len();
     if n <= 3 {
         return route_indices.to_vec();
@@ -243,7 +304,6 @@ pub fn two_opt_improve(matrix: &DistMatrix, route_indices: &[usize]) -> Vec<usiz
     let mut route = route_indices.to_vec();
     let mut improved = true;
     let mut iterations = 0;
-    let max_iter = 300;
     while improved && iterations < max_iter {
         improved = false;
         iterations += 1;
@@ -285,6 +345,11 @@ pub fn matrix_get_time(matrix: &DistMatrix, i: usize, j: usize) -> f64 {
         .and_then(|row| row.get(j))
         .map(|c| c.time)
         .unwrap_or(0.0)
+}
+
+/// Generate an OsmAnd deep link that triggers the import of a GPX file from a URL.
+pub fn generate_osmand_import_url(gpx_url: &str) -> String {
+    format!("osmand://import?url={}", urlencoding::encode(gpx_url))
 }
 
 pub fn build_sweep_routes(
@@ -415,6 +480,22 @@ pub fn parse_csv_stops(
             .ok_or_else(|| format!("Missing lon at row {}", row_num + 2))?
             .parse()
             .map_err(|e| format!("Invalid lon at row {}: {}", row_num + 2, e))?;
+
+        // Validation
+        if !(-90.0..=90.0).contains(&lat) {
+            return Err(format!(
+                "Latitude {} out of bounds at row {}",
+                lat,
+                row_num + 2
+            ));
+        }
+        if !(-180.0..=180.0).contains(&lon) {
+            return Err(format!(
+                "Longitude {} out of bounds at row {}",
+                lon,
+                row_num + 2
+            ));
+        }
 
         let label = label_idx
             .and_then(|i| record.get(i))
@@ -688,7 +769,7 @@ mod tests {
         ];
         let m = build_haversine_matrix(&stops, 40.0);
         let route = vec![0, 1, 2, 3];
-        let improved = two_opt_improve(&m, &route);
+        let improved = two_opt_improve(&m, &route, 300);
         assert_eq!(improved.len(), 4);
     }
 
@@ -727,7 +808,7 @@ mod tests {
         ];
         let m = build_haversine_matrix(&stops, 40.0);
         let route = vec![0, 2, 1, 3]; // crossing
-        let improved = two_opt_improve(&m, &route);
+        let improved = two_opt_improve(&m, &route, 300);
         // Calculate total distance of improved route
         let improved_dist: f64 = (0..improved.len() - 1)
             .map(|i| m[improved[i]][improved[i + 1]].distance)
@@ -746,8 +827,9 @@ mod tests {
         let m: DistMatrix = vec![vec![DistCell {
             distance: 0.0,
             time: 0.0,
+            path: None,
         }]];
-        let improved = two_opt_improve(&m, &[0]);
+        let improved = two_opt_improve(&m, &[0], 300);
         assert_eq!(improved, vec![0]);
     }
 
@@ -758,24 +840,28 @@ mod tests {
                 DistCell {
                     distance: 0.0,
                     time: 0.0,
+                    path: None,
                 },
                 DistCell {
                     distance: 5.0,
                     time: 100.0,
+                    path: None,
                 },
             ],
             vec![
                 DistCell {
                     distance: 5.0,
                     time: 100.0,
+                    path: None,
                 },
                 DistCell {
                     distance: 0.0,
                     time: 0.0,
+                    path: None,
                 },
             ],
         ];
-        let improved = two_opt_improve(&m, &[0, 1]);
+        let improved = two_opt_improve(&m, &[0, 1], 300);
         assert_eq!(improved.len(), 2);
     }
 
@@ -868,6 +954,7 @@ mod tests {
         assert_eq!(route, vec![0]);
     }
 
+
     #[test]
     fn test_matrix_get_helpers() {
         let m: DistMatrix = vec![
@@ -875,20 +962,24 @@ mod tests {
                 DistCell {
                     distance: 0.0,
                     time: 0.0,
+                    path: None,
                 },
                 DistCell {
                     distance: 10.0,
                     time: 200.0,
+                    path: None,
                 },
             ],
             vec![
                 DistCell {
                     distance: 10.0,
                     time: 200.0,
+                    path: None,
                 },
                 DistCell {
                     distance: 0.0,
                     time: 0.0,
+                    path: None,
                 },
             ],
         ];

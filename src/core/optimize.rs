@@ -1,7 +1,12 @@
+#![allow(clippy::needless_range_loop)]
+use crate::core::geo_types::BBox;
 use crate::core::vrp::registry::solve_with;
-use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
+use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective, VRPSolverOutput};
+use geojson::{Feature, FeatureCollection, Geometry, Value as GeoJsonValue};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::io::Read;
+use std::process::Command;
 use std::time::Instant;
 
 /// Filter nodes and edges to only those within a bounding box.
@@ -11,17 +16,14 @@ use std::time::Instant;
 pub fn filter_bbox(
     nodes: &[RmpNode],
     edges: &[RmpEdge],
-    bbox: Option<(f64, f64, f64, f64)>, // (min_lat, max_lat, min_lon, max_lon)
+    bbox: Option<BBox>,
 ) -> (Vec<RmpNode>, Vec<RmpEdge>) {
-    let Some((min_lat, max_lat, min_lon, max_lon)) = bbox else {
+    let Some(bbox) = bbox else {
         return (nodes.to_vec(), edges.to_vec());
     };
 
     // Mark which old-node indices are inside the bbox
-    let inside: Vec<bool> = nodes
-        .iter()
-        .map(|n| n.lat >= min_lat && n.lat <= max_lat && n.lon >= min_lon && n.lon <= max_lon)
-        .collect();
+    let inside: Vec<bool> = nodes.iter().map(|n| bbox.contains(n.lon, n.lat)).collect();
 
     // Build old->new index map
     let mut old_to_new = vec![u32::MAX; nodes.len()];
@@ -79,6 +81,16 @@ pub enum SolverMode {
     Vrp,
 }
 
+/// Which C++ engine to use for edge-covering optimization.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+pub enum CppEngine {
+    /// Internal Rust implementation (default)
+    #[default]
+    Internal,
+    /// External rust-optimizer binary (must be installed via cargo install rust-optimizer)
+    ExternalRustOptimizer,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizeRequest {
     pub cache_file: String,
@@ -88,12 +100,17 @@ pub struct OptimizeRequest {
     pub oneway_mode: OnewayMode,
     /// Solver mode: Cpp (default, edge coverage) or Vrp (stop visits).
     pub mode: SolverMode,
+    /// C++ engine: Internal (default) or ExternalRustOptimizer.
+    #[serde(default)]
+    pub cpp_engine: CppEngine,
     /// VRP-only: number of vehicles.
     #[serde(default = "default_num_vehicles")]
     pub num_vehicles: usize,
     /// VRP-only: solver algorithm id (clarke_wright, sweep, two_opt, or_opt, default).
     #[serde(default = "default_solver_id")]
     pub solver_id: String,
+    /// VRP-only: path to CSV file containing stops.
+    pub coordinates: Option<String>,
 }
 
 fn default_num_vehicles() -> usize {
@@ -120,6 +137,11 @@ pub struct OptimizeResult {
     pub turns: TurnSummary,
     pub elapsed_ms: u64,
     pub num_routes: usize,
+    pub routes: Vec<Vec<VRPSolverStop>>,
+    #[serde(default)]
+    pub is_partial: bool,
+    #[serde(default)]
+    pub unreachable_edges: usize,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -174,14 +196,8 @@ trait NormalizeAngle {
 impl NormalizeAngle for f64 {
     fn normalize(self, lower: f64, upper: f64) -> f64 {
         let width = upper - lower;
-        let mut val = self;
-        while val < lower {
-            val += width;
-        }
-        while val >= upper {
-            val -= width;
-        }
-        val
+        let offset = self - lower;
+        lower + (offset.rem_euclid(width))
     }
 }
 
@@ -257,17 +273,41 @@ pub fn read_rmp_file(data: &[u8]) -> anyhow::Result<(Vec<RmpNode>, Vec<RmpEdge>)
 
 // ── Bearing calculation ──────────────────────────────────────────────
 
+#[derive(Debug, Clone, Copy)]
+struct NodeRad {
+    lat: f64,
+    lon: f64,
+    sin_lat: f64,
+    cos_lat: f64,
+}
+
 /// Calculate the initial bearing from point 1 to point 2 in degrees.
-fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+pub fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let dlon = (lon2 - lon1).to_radians();
     let lat1_r = lat1.to_radians();
     let lat2_r = lat2.to_radians();
 
-    let x = dlon.cos() * lat2_r.sin();
-    let y = lat1_r.cos() * lat2_r.sin() - lat1_r.sin() * lat2_r.cos() * dlon.cos();
+    let y = dlon.sin() * lat2_r.cos();
+    let x = lat1_r.cos() * lat2_r.sin() - lat1_r.sin() * lat2_r.cos() * dlon.cos();
 
     let bearing_rad = y.atan2(x);
-    (bearing_rad.to_degrees() + 360.0) % 360.0
+    (bearing_rad.to_degrees() + 360.0).rem_euclid(360.0)
+}
+
+fn bearing_rad(n1: &NodeRad, n2: &NodeRad) -> f64 {
+    let dlon = n2.lon - n1.lon;
+    let y = dlon.sin() * n2.cos_lat;
+    let x = n1.cos_lat * n2.sin_lat - n1.sin_lat * n2.cos_lat * dlon.cos();
+    let bearing_rad = y.atan2(x);
+    (bearing_rad.to_degrees() + 360.0).rem_euclid(360.0)
+}
+
+fn haversine_m_rad(n1: &NodeRad, n2: &NodeRad) -> f64 {
+    const R: f64 = 6_371_000.0;
+    let dlat = n2.lat - n1.lat;
+    let dlon = n2.lon - n1.lon;
+    let a = (dlat / 2.0).sin().powi(2) + n1.cos_lat * n2.cos_lat * (dlon / 2.0).sin().powi(2);
+    R * 2.0 * a.sqrt().atan2((1.0 - a).sqrt())
 }
 
 // ── CPP internals ────────────────────────────────────────────────────
@@ -276,7 +316,8 @@ fn bearing(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 struct AdjEntry {
     to: u32,
     weight_m: f64,
-    edge_idx: usize,
+    edge_idx: u32,
+    bearing: f64,
 }
 
 /// In-memory CPP result: both the summary stats and the ordered node-IDs of the Eulerian circuit.
@@ -317,6 +358,9 @@ pub fn solve_cpp(
                 },
                 elapsed_ms: 0,
                 num_routes: 1,
+                routes: Vec::new(),
+                is_partial: false,
+                unreachable_edges: 0,
             },
             circuit: Vec::new(),
         });
@@ -374,19 +418,15 @@ pub fn solve_cpp(
 
     // Find odd-degree vertices
     let mut degrees = vec![0usize; n];
-    for (i, adj_list) in adj.iter().enumerate() {
-        degrees[i] = adj_list.len();
-    }
-    let odd_vertices: Vec<usize> = (0..n).filter(|&i| !degrees[i].is_multiple_of(2)).collect();
-
-    // Minimum weight perfect matching (greedy nearest-neighbor using Dijkstra)
-    let mut duplicate_edges: Vec<(usize, usize, f64, usize)> = Vec::new();
-    let mut matched = vec![false; n];
-    for i in 0..n {
-        if degrees[i].is_multiple_of(2) {
-            matched[i] = true;
+    for adj_list in adj.iter() {
+        for edge in adj_list {
+            degrees[edge.to as usize] += 1;
         }
     }
+    let odd_vertices: Vec<usize> = (0..n).filter(|&i| !degrees[i].is_multiple_of(2)).collect();
+    let num_odd = odd_vertices.len();
+
+    let mut duplicate_edges: Vec<(usize, usize, f64, u32, f64)> = Vec::new();
 
     use std::cmp::Ordering;
     use std::collections::BinaryHeap;
@@ -404,10 +444,19 @@ pub fn solve_cpp(
                 .partial_cmp(&self.cost)
                 .unwrap_or(Ordering::Equal)
         }
-    }
-    impl PartialOrd for State {
-        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-            Some(self.cmp(other))
+        impl Eq for State {}
+        impl Ord for State {
+            fn cmp(&self, other: &Self) -> Ordering {
+                other
+                    .cost
+                    .partial_cmp(&self.cost)
+                    .unwrap_or(Ordering::Equal)
+            }
+        }
+        impl PartialOrd for State {
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                Some(self.cmp(other))
+            }
         }
     }
 
@@ -416,9 +465,10 @@ pub fn solve_cpp(
             continue;
         }
 
-        let mut dists = vec![f64::MAX; n];
-        let mut prev = vec![None; n];
-        let mut heap = BinaryHeap::new();
+        // 1. All-Pairs Shortest Paths between odd vertices
+        let mut dist_matrix = vec![vec![f64::MAX; num_odd]; num_odd];
+        // Store parent pointers to reconstruct paths only for matched pairs
+        let mut parent_pointers = vec![vec![None; n]; num_odd];
 
         dists[u] = 0.0;
         heap.push(State {
@@ -426,16 +476,29 @@ pub fn solve_cpp(
             position: u,
         });
 
-        let mut best_v = None;
+            dists[u] = 0.0;
+            heap.push(State {
+                cost: 0.0,
+                position: u,
+            });
 
         while let Some(State { cost, position }) = heap.pop() {
             if cost > dists[position] {
                 continue;
             }
 
-            if position != u && !matched[position] {
-                best_v = Some(position);
-                break;
+                for edge in &adj[position] {
+                    let next_cost = cost + edge.weight_m;
+                    if next_cost < dists[edge.to as usize] {
+                        dists[edge.to as usize] = next_cost;
+                        parent_pointers[i][edge.to as usize] =
+                            Some((position, edge.weight_m, edge.edge_idx));
+                        heap.push(State {
+                            cost: next_cost,
+                            position: edge.to as usize,
+                        });
+                    }
+                }
             }
 
             for edge in &adj[position] {
@@ -451,19 +514,108 @@ pub fn solve_cpp(
             }
         }
 
-        if let Some(v) = best_v {
-            matched[u] = true;
-            matched[v] = true;
+        // 2. Minimum Weight Perfect Matching
+        let mut pairs = Vec::new();
 
-            // Trace path back from v to u
-            let mut curr = v;
-            while let Some((p, weight, eidx)) = prev[curr] {
-                duplicate_edges.push((p, curr, weight, eidx));
-                curr = p;
+        if num_odd <= 24 {
+            // Exact DP (Bitmask DP)
+            let mut memo = vec![f64::MAX; 1 << num_odd];
+            let mut parent_mask = vec![usize::MAX; 1 << num_odd];
+            memo[0] = 0.0;
+
+            for mask in 0..(1 << num_odd) {
+                if memo[mask] == f64::MAX {
+                    continue;
+                }
+
+                // Find first unmatched vertex
+                let mut i = 0;
+                while i < num_odd {
+                    if (mask & (1 << i)) == 0 {
+                        break;
+                    }
+                    i += 1;
+                }
+                if i == num_odd {
+                    continue;
+                }
+
+                #[allow(clippy::needless_range_loop)]
+                for j in (i + 1)..num_odd {
+                    if (mask & (1 << j)) == 0 && dist_matrix[i][j] < f64::MAX {
+                        let next_mask = mask | (1 << i) | (1 << j);
+                        let new_cost = memo[mask] + dist_matrix[i][j];
+                        if new_cost < memo[next_mask] {
+                            memo[next_mask] = new_cost;
+                            parent_mask[next_mask] = mask;
+                        }
+                    }
+                }
+            }
+
+            // Backtrack
+            let mut curr_mask = (1 << num_odd) - 1;
+            while curr_mask > 0 {
+                let prev_mask = parent_mask[curr_mask];
+                if prev_mask == usize::MAX {
+                    break;
+                }
+                let diff = curr_mask ^ prev_mask;
+
+                let mut u = usize::MAX;
+                let mut v = usize::MAX;
+                for i in 0..num_odd {
+                    if (diff & (1 << i)) != 0 {
+                        if u == usize::MAX {
+                            u = i;
+                        } else {
+                            v = i;
+                        }
+                    }
+                }
+                pairs.push((u, v));
+                curr_mask = prev_mask;
             }
         } else {
-            // Fallback: If disconnected, just skip (graph must be disconnected)
-            matched[u] = true;
+            // Greedy fallback for very large odd-vertex counts
+            let mut matched = vec![false; num_odd];
+            for i in 0..num_odd {
+                if matched[i] {
+                    continue;
+                }
+                let mut best_j = None;
+                let mut best_dist = f64::MAX;
+                
+                #[allow(clippy::needless_range_loop)]
+                for j in (i + 1)..num_odd {
+                    if !matched[j] && dist_matrix[i][j] < best_dist {
+                        best_dist = dist_matrix[i][j];
+                        best_j = Some(j);
+                    }
+                }
+
+                if let Some(j) = best_j {
+                    matched[i] = true;
+                    matched[j] = true;
+                    pairs.push((i, j));
+                }
+            }
+        }
+
+        // Add the paths for all matched pairs into duplicate_edges
+        for (u_idx, v_idx) in pairs {
+            let target_v = odd_vertices[v_idx];
+            let mut curr = target_v;
+            while let Some((p, weight, eidx)) = parent_pointers[u_idx][curr] {
+                let b = bearing(
+                    nodes[p].lat,
+                    nodes[p].lon,
+                    nodes[curr].lat,
+                    nodes[curr].lon,
+                );
+                duplicate_edges.push((p, curr, weight, eidx, b));
+                curr = p;
+            }
         }
     }
 
@@ -481,6 +633,20 @@ pub fn solve_cpp(
             edge_idx: eidx,
         });
     }
+
+    // Pre-calculate radian coordinates and trig values for performance
+    let nodes_rad: Vec<NodeRad> = nodes
+        .iter()
+        .map(|n| {
+            let lat = n.lat.to_radians();
+            NodeRad {
+                lat,
+                lon: n.lon.to_radians(),
+                sin_lat: lat.sin(),
+                cos_lat: lat.cos(),
+            }
+        })
+        .collect();
 
     // Find Eulerian circuit using Hierholzer's algorithm
     let start_node = if let Some((dep_lat, dep_lon)) = depot {
@@ -520,6 +686,19 @@ pub fn solve_cpp(
     circuit_with_edges.reverse();
     let circuit: Vec<u32> = circuit_with_edges.iter().map(|(v, _)| *v).collect();
 
+    // Check for uncovered edges (disconnected components)
+    let mut unreachable_edges = 0;
+    for list in &adj {
+        unreachable_edges += list.len();
+    }
+    let is_partial = unreachable_edges > 0;
+    if is_partial {
+        tracing::warn!(
+            "CPP: Graph is disconnected. {} edges were not reached from start node. Resulting GPX will be partial.",
+            unreachable_edges
+        );
+    }
+
     // Compute total distance, deadhead distance, and turn summary
     let mut total_distance_m = 0.0;
     let mut deadhead_distance_m = 0.0;
@@ -536,11 +715,12 @@ pub fn solve_cpp(
         if let Some(e) = &entry.1 {
             total_distance_m += e.weight_m;
             total_segments += 1;
-            if e.edge_idx == deadhead_edge_idx {
+            let e_idx = e.edge_idx as usize;
+            if e_idx >= edges.len() {
                 deadhead_distance_m += e.weight_m;
             } else {
-                edge_traversal_count[e.edge_idx] += 1;
-                if edge_traversal_count[e.edge_idx] > 1 {
+                edge_traversal_count[e_idx] += 1;
+                if edge_traversal_count[e_idx] > 1 {
                     deadhead_distance_m += e.weight_m;
                 }
             }
@@ -549,6 +729,8 @@ pub fn solve_cpp(
 
     // Turn classification
     if circuit.len() > 2 {
+        let mut last_bearing: Option<f64> = None;
+
         for i in 1..circuit.len().saturating_sub(1) {
             let prev = circuit[i - 1] as usize;
             let curr = circuit[i] as usize;
@@ -589,6 +771,17 @@ pub fn solve_cpp(
 
     let elapsed_ms = start.elapsed().as_millis() as u64;
 
+    let route_points: Vec<VRPSolverStop> = circuit
+        .iter()
+        .map(|&idx| VRPSolverStop {
+            lat: nodes[idx as usize].lat,
+            lon: nodes[idx as usize].lon,
+            label: format!("Node {}", idx),
+            demand: None,
+            arrival_time: None,
+        })
+        .collect();
+
     Ok(CppOutput {
         summary: OptimizeResult {
             total_distance_km: total_distance_m / 1000.0,
@@ -598,8 +791,257 @@ pub fn solve_cpp(
             turns,
             elapsed_ms,
             num_routes: 1,
+            routes: vec![route_points],
+            is_partial,
+            unreachable_edges,
         },
         circuit,
+    })
+}
+
+/// Convert RmpNode and RmpEdge to GeoJSON FeatureCollection for external optimizer.
+fn rmp_to_geojson(nodes: &[RmpNode], edges: &[RmpEdge]) -> FeatureCollection {
+    use std::collections::HashMap;
+
+    let mut features = Vec::new();
+    let mut edge_map: HashMap<(u32, u32), &RmpEdge> = HashMap::new();
+
+    // Build edge lookup
+    for edge in edges {
+        edge_map.insert((edge.from, edge.to), edge);
+        if edge.oneway == 0 {
+            edge_map.insert((edge.to, edge.from), edge);
+        }
+    }
+
+    // Group edges by their line geometry
+    let mut edge_groups: HashMap<(u32, u32), Vec<&RmpEdge>> = HashMap::new();
+    for edge in edges {
+        let key = if edge.from < edge.to { (edge.from, edge.to) } else { (edge.to, edge.from) };
+        edge_groups.entry(key).or_default().push(edge);
+    }
+
+    // For each edge, create a LineString feature
+    for edge in edges {
+        let from_node = &nodes[edge.from as usize];
+        let to_node = &nodes[edge.to as usize];
+
+        let coords = vec![vec![from_node.lon, from_node.lat], vec![to_node.lon, to_node.lat]];
+
+        let mut properties = serde_json::Map::new();
+        properties.insert("oneway".to_string(), json!(edge.oneway != 0));
+        properties.insert("weight_m".to_string(), json!(edge.weight_m));
+        properties.insert("from".to_string(), json!(edge.from));
+        properties.insert("to".to_string(), json!(edge.to));
+
+        features.push(Feature {
+            bbox: None,
+            geometry: Some(Geometry::new(GeoJsonValue::LineString(coords))),
+            id: None,
+            properties: Some(properties),
+            foreign_members: None,
+        });
+    }
+
+    FeatureCollection {
+        bbox: None,
+        features,
+        foreign_members: None,
+    }
+}
+
+/// Run the external rust-optimizer binary for C++ optimization.
+fn run_external_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
+    let start = Instant::now();
+
+    // 1. Read .rmp file
+    let mut file_data = Vec::new();
+    {
+        let mut file = std::fs::File::open(&req.cache_file)
+            .map_err(|e| anyhow::anyhow!("Failed to open .rmp file '{}': {}", req.cache_file, e))?;
+        file.read_to_end(&mut file_data)?;
+    }
+    let (nodes, edges) = read_rmp_file(&file_data)?;
+
+    if nodes.is_empty() || edges.is_empty() {
+        return Ok(OptimizeResult {
+            total_distance_km: 0.0,
+            total_segments: 0,
+            deadhead_distance_km: 0.0,
+            efficiency_pct: 100.0,
+            turns: TurnSummary {
+                left: 0,
+                right: 0,
+                u_turn: 0,
+                straight: 0,
+            },
+            elapsed_ms: 0,
+            num_routes: 1,
+            routes: Vec::new(),
+            is_partial: false,
+            unreachable_edges: 0,
+        });
+    }
+
+    // 2. Convert to GeoJSON
+    let geojson = rmp_to_geojson(&nodes, &edges);
+
+    // 3. Build request for external optimizer
+    let oneway_mode_str = match req.oneway_mode {
+        OnewayMode::Ignore => "ignore",
+        OnewayMode::Respect => "respect",
+        OnewayMode::Reverse => "reverse",
+    };
+
+    let request_json = json!({
+        "geojson": geojson,
+        "start_lat": req.depot.map(|(lat, _)| lat),
+        "start_lon": req.depot.map(|(_, lon)| lon),
+        "oneway_mode": oneway_mode_str,
+        "service_both_sides": false,
+        "turn_penalties": {
+            "left_turn": req.turn_penalties.left,
+            "right_turn": req.turn_penalties.right,
+            "u_turn": req.turn_penalties.u_turn,
+        },
+    });
+
+    // 4. Call external rust-optimizer binary
+    let mut child = Command::new("rust-optimizer")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to spawn rust-optimizer. Ensure it's installed: cargo install rust-optimizer. Error: {}",
+                e
+            )
+        })?;
+
+    // Write input JSON to stdin
+    use std::io::Write;
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin.write_all(request_json.to_string().as_bytes())?;
+    }
+
+    let output = child.wait_with_output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!(
+            "rust-optimizer failed with exit code {:?}: {}",
+            output.status.code(),
+            stderr
+        );
+    }
+
+    // 5. Parse response
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+
+    // Extract values from response
+    let total_distance_km = response["total_distance_km"]
+        .as_f64()
+        .unwrap_or(0.0);
+    let stats = &response["stats"];
+    let deadhead_distance_km = stats["deadhead_distance_km"]
+        .as_f64()
+        .unwrap_or(0.0);
+    let efficiency = stats["efficiency"].as_f64().unwrap_or(100.0);
+
+    // Build route from response
+    let route_points: Vec<VRPSolverStop> = response["route"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|pt| {
+                    let lat = pt["latitude"].as_f64()?;
+                    let lon = pt["longitude"].as_f64()?;
+                    Some(VRPSolverStop {
+                        lat,
+                        lon,
+                        label: pt["node_id"]
+                            .as_str()
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| format!("Node {:.6},{:.6}", lat, lon)),
+                        demand: None,
+                        arrival_time: None,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // 6. Write GPX if requested
+    if let Some(ref route_path) = req.route_file {
+        if route_path.ends_with(".json") {
+            std::fs::write(route_path, serde_json::to_string_pretty(&response)?)?;
+        } else {
+            // Write as GPX
+            use std::io::{BufWriter, Write};
+            let file = std::fs::File::create(route_path)?;
+            let mut writer = BufWriter::new(file);
+
+            writeln!(writer, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>")?;
+            writeln!(
+                writer,
+                "<gpx version=\"1.1\" creator=\"rmpca-rust-optimizer\" xmlns=\"http://www.topografix.com/GPX/1/1\">"
+            )?;
+            writeln!(writer, "  <trk>")?;
+            writeln!(writer, "    <name>External Rust-Optimizer Route</name>")?;
+            writeln!(writer, "    <trkseg>")?;
+            for stop in &route_points {
+                writeln!(
+                    writer,
+                    "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"></trkpt>",
+                    stop.lat, stop.lon
+                )?;
+            }
+            writeln!(writer, "    </trkseg>")?;
+            writeln!(writer, "  </trk>")?;
+            writeln!(writer, "</gpx>")?;
+            writer.flush()?;
+        }
+    }
+
+    // Count turns based on route points
+    let mut turns = TurnSummary {
+        left: 0,
+        right: 0,
+        u_turn: 0,
+        straight: 0,
+    };
+
+    if route_points.len() > 2 {
+        let mut b_in = bearing(route_points[0].lat, route_points[0].lon, route_points[1].lat, route_points[1].lon);
+        for i in 1..route_points.len().saturating_sub(1) {
+            let curr = &route_points[i];
+            let next = &route_points[i + 1];
+            let b_out = bearing(curr.lat, curr.lon, next.lat, next.lon);
+            let delta = b_out - b_in;
+            match classify_turn(delta) {
+                "left" => turns.left += 1,
+                "right" => turns.right += 1,
+                "u_turn" => turns.u_turn += 1,
+                _ => turns.straight += 1,
+            }
+            b_in = b_out;
+        }
+    }
+
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+
+    Ok(OptimizeResult {
+        total_distance_km,
+        total_segments: route_points.len(),
+        deadhead_distance_km,
+        efficiency_pct: efficiency,
+        turns,
+        elapsed_ms,
+        num_routes: 1,
+        routes: vec![route_points],
+        is_partial: false,
+        unreachable_edges: 0,
     })
 }
 
@@ -615,7 +1057,13 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     }
     let (nodes, edges) = read_rmp_file(&file_data)?;
 
-    let output = solve_cpp(&nodes, &edges, req.oneway_mode, req.depot)?;
+    let output = solve_cpp(
+        &nodes,
+        &edges,
+        req.oneway_mode,
+        req.depot,
+        req.turn_penalties,
+    )?;
 
     if let Some(ref route_path) = req.route_file {
         if route_path.ends_with(".json") {
@@ -646,41 +1094,67 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
     // 1. Read .rmp
     let mut file_data = Vec::new();
     std::fs::File::open(&req.cache_file)?.read_to_end(&mut file_data)?;
-    let (nodes, _edges) = read_rmp_file(&file_data)?;
+    let (nodes, edges) = read_rmp_file(&file_data)?;
 
     if nodes.is_empty() {
         anyhow::bail!("No nodes found in .rmp file");
     }
 
+    // ── Graph Embeddings ─────────────────────────────────────────────
+    #[cfg(feature = "ml")]
+    let embeddings = {
+        let embs = crate::core::ml::graph_embed::embed_network(&nodes, &edges, None);
+        if !embs.is_empty() {
+            Some(embs)
+        } else {
+            None
+        }
+    };
+    #[cfg(not(feature = "ml"))]
+    let _embeddings: Option<std::collections::HashMap<usize, Vec<f32>>> = None;
+
     // 2. Build VRP Stops
-    let mut stops: Vec<VRPSolverStop> = nodes
-        .iter()
-        .enumerate()
-        .map(|(i, n)| VRPSolverStop {
-            lat: n.lat,
-            lon: n.lon,
-            label: format!("Node {}", i),
-            demand: Some(1.0),
-            arrival_time: None,
-        })
-        .collect();
+    let mut stops: Vec<VRPSolverStop> = Vec::new();
 
     // Add depot at start if specified
     if let Some((dlat, dlon)) = req.depot {
-        stops.insert(
-            0,
-            VRPSolverStop {
-                lat: dlat,
-                lon: dlon,
-                label: "Depot".into(),
-                demand: Some(0.0),
-                arrival_time: None,
-            },
-        );
+        stops.push(VRPSolverStop {
+            lat: dlat,
+            lon: dlon,
+            label: "Depot".into(),
+            demand: Some(0.0),
+            arrival_time: None,
+        });
     }
 
-    // 3. Build Distance Matrix (Haversine for now)
-    let matrix = super::vrp::utils::build_haversine_matrix(&stops, 40.0);
+    if let Some(csv_path) = &req.coordinates {
+        let (csv_stops, _) = super::vrp::utils::parse_csv_stops(csv_path)
+            .map_err(|e| anyhow::anyhow!("CSV parse error: {}", e))?;
+        stops.extend(csv_stops);
+    } else {
+        anyhow::bail!("VRP mode requires --coordinates (a CSV file) to define delivery stops.");
+    }
+
+    // 3. Build Distance Matrix
+    // Use graph-based shortest paths if we have edges, otherwise fallback to haversine.
+    let matrix = if !edges.is_empty() {
+        #[cfg(feature = "ml")]
+        {
+            super::vrp::utils::build_graph_matrix(
+                &stops,
+                &nodes,
+                &edges,
+                embeddings.as_deref(),
+                40.0,
+            )
+        }
+        #[cfg(not(feature = "ml"))]
+        {
+            super::vrp::utils::build_graph_matrix(&stops, &nodes, &edges, None, 40.0)
+        }
+    } else {
+        super::vrp::utils::build_haversine_matrix(&stops, 40.0)
+    };
 
     // 4. Solve
     let vrp_input = VRPSolverInput {
@@ -693,11 +1167,33 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         use_time_windows: false,
         window_open: None,
         window_close: None,
+        hyperparams: None,
     };
 
-    let output = solve_with(&req.solver_id, &vrp_input)
+    let mut output = solve_with(&req.solver_id, &vrp_input)
         .await
         .map_err(|e| anyhow::anyhow!("VRP Solver error: {}", e))?;
+
+    let _elapsed_ms = start.elapsed().as_millis() as u64;
+    let total_dist_km: f64 = output.total_distance_km.parse().unwrap_or(0.0);
+
+    // ── Online Learning Feedback ─────────────────────────────────────
+    #[cfg(feature = "ml")]
+    {
+        use crate::core::ml::feedback::{log_solve, SolveLogEntry};
+        let features = crate::core::ml::features::InstanceFeatures::from_input(&vrp_input);
+        let entry = SolveLogEntry {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            instance_features: features.to_vector(),
+            solver_id: req.solver_id.clone(),
+            total_distance_km: total_dist_km,
+            elapsed_ms,
+            gap_to_bks: None, // We don't know the BKS for general instances
+        };
+        if let Err(e) = log_solve(entry, None) {
+            tracing::warn!("Failed to log solve for feedback: {}", e);
+        }
+    }
 
     // 5. Compute Stats
     let mut turns = TurnSummary {
@@ -710,32 +1206,46 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
     if let Some(ref routes) = output.routes {
         for route in routes {
             if route.len() > 2 {
+                // Pre-calculate NodeRad for all stops in this route
+                let route_rad: Vec<NodeRad> = route
+                    .iter()
+                    .map(|s| {
+                        let lat = s.lat.to_radians();
+                        NodeRad {
+                            lat,
+                            lon: s.lon.to_radians(),
+                            sin_lat: lat.sin(),
+                            cos_lat: lat.cos(),
+                        }
+                    })
+                    .collect();
+
+                let mut last_bearing: Option<f64> = None;
                 for i in 1..route.len() - 1 {
-                    let prev = &route[i - 1];
-                    let curr = &route[i];
-                    let next = &route[i + 1];
-                    let b_in = bearing(prev.lat, prev.lon, curr.lat, curr.lon);
-                    let b_out = bearing(curr.lat, curr.lon, next.lat, next.lon);
-                    let b_in_rev = (b_in + 180.0) % 360.0;
-                    let delta = b_out - b_in_rev;
+                    let b_in = match last_bearing {
+                        Some(b) => b,
+                        None => bearing_rad(&route_rad[i - 1], &route_rad[i]),
+                    };
+
+                    let b_out = bearing_rad(&route_rad[i], &route_rad[i + 1]);
+                    last_bearing = Some(b_out);
+
+                    let delta = b_out - b_in;
                     match classify_turn(delta) {
                         "left" => turns.left += 1,
                         "right" => turns.right += 1,
                         "u_turn" => turns.u_turn += 1,
                         _ => turns.straight += 1,
                     }
+                    b_in = b_out;
                 }
             }
         }
     }
 
-    let total_dist_km: f64 = output.total_distance_km.parse().unwrap_or(0.0);
-
     // 6. Write GPX
     if let Some(ref path) = req.route_file {
-        if let Some(ref routes) = output.routes {
-            write_gpx_multi(path, routes)?;
-        }
+        write_gpx_enriched(path, &output)?;
     }
 
     Ok(OptimizeResult {
@@ -746,33 +1256,92 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         turns,
         elapsed_ms: start.elapsed().as_millis() as u64,
         num_routes: output.routes.as_ref().map(|r| r.len()).unwrap_or(1),
+        routes: output.routes.unwrap_or_default(),
+        is_partial: false,
+        unreachable_edges: 0,
     })
 }
 
-pub(crate) fn write_gpx_multi(path: &str, routes: &[Vec<VRPSolverStop>]) -> anyhow::Result<()> {
-    use std::io::Write;
-    let mut file = std::fs::File::create(path)?;
+pub fn write_gpx_enriched(path: &str, output: &VRPSolverOutput) -> anyhow::Result<()> {
+    use std::io::{BufWriter, Write};
+    let file = std::fs::File::create(path)?;
+    let mut writer = BufWriter::new(file);
 
-    writeln!(file, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>")?;
+    writeln!(writer, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>")?;
     writeln!(
-        file,
+        writer,
+        "<gpx version=\"1.1\" creator=\"rmpca\" xmlns=\"http://www.topografix.com/GPX/1/1\">"
+    )?;
+
+    if let Some(ref geom) = output.geometry {
+        for (i, route_geom) in geom.iter().enumerate() {
+            writeln!(writer, "  <trk>")?;
+            writeln!(
+                writer,
+                "    <name>Optimized Route {} (High Fidelity)</name>",
+                i + 1
+            )?;
+            writeln!(writer, "    <trkseg>")?;
+            for pt in route_geom {
+                writeln!(
+                    writer,
+                    "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"></trkpt>",
+                    pt[0], pt[1]
+                )?;
+            }
+            writeln!(writer, "    </trkseg>")?;
+            writeln!(writer, "  </trk>")?;
+        }
+    } else if let Some(ref routes) = output.routes {
+        // Fallback to stop-to-stop if no geometry is available
+        for (i, route) in routes.iter().enumerate() {
+            writeln!(writer, "  <trk>")?;
+            writeln!(writer, "    <name>Optimized Route {} (Stop-to-Stop)</name>", i + 1)?;
+            writeln!(writer, "    <trkseg>")?;
+            for stop in route {
+                writeln!(
+                    writer,
+                    "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"></trkpt>",
+                    stop.lat, stop.lon
+                )?;
+            }
+            writeln!(writer, "    </trkseg>")?;
+            writeln!(writer, "  </trk>")?;
+        }
+    }
+
+    writeln!(writer, "</gpx>")?;
+    writer.flush()?;
+
+    Ok(())
+}
+
+pub fn write_gpx_multi(path: &str, routes: &[Vec<VRPSolverStop>]) -> anyhow::Result<()> {
+    use std::io::{BufWriter, Write};
+    let file = std::fs::File::create(path)?;
+    let mut writer = BufWriter::new(file);
+
+    writeln!(writer, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>")?;
+    writeln!(
+        writer,
         "<gpx version=\"1.1\" creator=\"rmpca\" xmlns=\"http://www.topografix.com/GPX/1/1\">"
     )?;
     for (i, route) in routes.iter().enumerate() {
-        writeln!(file, "  <trk>")?;
-        writeln!(file, "    <name>Optimized Route {}</name>", i + 1)?;
-        writeln!(file, "    <trkseg>")?;
+        writeln!(writer, "  <trk>")?;
+        writeln!(writer, "    <name>Optimized Route {}</name>", i + 1)?;
+        writeln!(writer, "    <trkseg>")?;
         for stop in route {
             writeln!(
-                file,
+                writer,
                 "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"></trkpt>",
                 stop.lat, stop.lon
             )?;
         }
-        writeln!(file, "    </trkseg>")?;
-        writeln!(file, "  </trk>")?;
+        writeln!(writer, "    </trkseg>")?;
+        writeln!(writer, "  </trk>")?;
     }
-    writeln!(file, "</gpx>")?;
+    writeln!(writer, "</gpx>")?;
+    writer.flush()?;
 
     Ok(())
 }
@@ -799,9 +1368,11 @@ pub fn write_gpx_cpp(path: &str, nodes: &[RmpNode], circuit: &[u32]) -> anyhow::
             )?;
         }
     }
-    writeln!(file, "    </trkseg>")?;
-    writeln!(file, "  </trk>")?;
-    writeln!(file, "</gpx>")?;
+    writeln!(writer, "    </trkseg>")?;
+    writeln!(writer, "  </trk>")?;
+    writeln!(writer, "</gpx>")?;
+    writer.flush()?;
+
     Ok(())
 }
 
@@ -810,7 +1381,12 @@ pub fn write_gpx_cpp(path: &str, nodes: &[RmpNode], circuit: &[u32]) -> anyhow::
 /// Run route optimization, dispatching to CPP or VRP based on `req.mode`.
 pub async fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     match req.mode {
-        SolverMode::Cpp => run_cpp_optimize(req),
+        SolverMode::Cpp => {
+            match req.cpp_engine {
+                CppEngine::Internal => run_cpp_optimize(req),
+                CppEngine::ExternalRustOptimizer => run_external_cpp_optimize(req),
+            }
+        }
         SolverMode::Vrp => run_vrp_optimize(req).await,
     }
 }
@@ -882,8 +1458,10 @@ mod tests {
             depot: None,
             oneway_mode: OnewayMode::Ignore,
             mode: SolverMode::Cpp,
+            cpp_engine: CppEngine::Internal,
             num_vehicles: 1,
             solver_id: "default".to_string(),
+            coordinates: None,
         };
         let _result = run_optimize(&req);
         // run_optimize is async but CPP is sync, so we need to use tokio

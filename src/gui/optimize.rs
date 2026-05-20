@@ -294,7 +294,13 @@ fn run_optimize(app: &mut GuiApp) {
     }
 
     // Solve CPP on the (possibly filtered) graph
-    match crate::core::optimize::solve_cpp(&nodes, &edges, app.oneway_mode, depot) {
+    match crate::core::optimize::solve_cpp(
+        &nodes,
+        &edges,
+        app.oneway_mode,
+        depot,
+        app.turn_penalties,
+    ) {
         Ok(cpp) => {
             app.optimize_status = Status::Done(format!(
                 "{:.2} km, {} segments, {:.1}% efficiency",

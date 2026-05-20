@@ -1,5 +1,6 @@
 pub mod clean;
 pub mod compile;
+pub mod drone;
 #[cfg(feature = "extract")]
 pub mod elevation;
 #[cfg(feature = "ml")]
@@ -8,7 +9,17 @@ pub mod embed;
 pub mod extract;
 pub mod geo_types;
 pub mod optimize;
-#[cfg(feature = "extract")]
+#[cfg(feature = "ml")]
+pub mod ml;
+#[cfg(feature = "ml")]
+pub mod ml_legacy;
+#[cfg(feature = "ml")]
+pub mod nlp;
+pub mod optimize;
+pub mod partition;
+pub mod pmtiles_extract;
+pub mod postgis_cpp;
+pub mod r2;
 pub mod osm;
 #[cfg(feature = "extract")]
 pub mod overture;

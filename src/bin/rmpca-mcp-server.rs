@@ -1,7 +1,11 @@
 //! rmpca-mcp-server — MCP server exposing the route optimization pipeline.
 //!
 //! Tools: extract_overture, extract_osm, compile, optimize,
-//!        clean, vrp_solve, elevation_query, elevation_profile
+//!        clean, vrp_solve, elevation_query, elevation_profile,
+//!        predict_solver, score_route, route_embedding, pipeline,
+//!        haversine_distance, get_valhalla_matrix, inspect_rmp,
+//!        list_solvers, elevation_stats, dem_info, fuel_estimate,
+//!        submit_feedback
 //!
 //! Runs over stdio with JSON-RPC 2.0 framing (one line per message).
 //!
@@ -22,9 +26,10 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
-use std::path::Path;
+use std::path::PathBuf;
 use v2rmp::core::clean::{clean_geojson, CleanOptions};
 use v2rmp::core::compile::{CompileRequest, CompileResult};
+#[cfg(feature = "extract")]
 use v2rmp::core::elevation::local::LocalDem;
 use v2rmp::core::elevation::FuelCalculator;
 use v2rmp::core::extract::{BBoxRequest, ExtractRequest, ExtractResult, ExtractSource, RoadClass};
@@ -50,8 +55,15 @@ struct Request {
 #[derive(Debug)]
 struct ToolDef {
     name: &'static str,
+    title: &'static str,
     description: &'static str,
     input_schema: Value,
+    /// MCP 2025-06-18 ToolAnnotations: hints for AI agents about tool behaviour.
+    ///   readOnlyHint — tool does NOT modify filesystem, DB, or external state
+    ///   destructiveHint — tool may delete or irreversibly change data
+    ///   idempotentHint — calling twice with same args gives same result
+    ///   openWorldHint — tool interacts with external / unpredictable services
+    annotations: Option<Value>,
 }
 
 // ── Protocol helpers ────────────────────────────────────────────────────────
@@ -85,8 +97,9 @@ fn tool_success(id: &Value, result: &Result<Value>) {
             json!({
                 "content": [{
                     "type": "text",
-                    "text": serde_json::to_string_pretty(val).unwrap_or_default()
-                }]
+                    "text": serde_json::to_string(val).unwrap_or_default()
+                }],
+                "structured": val
             }),
         ),
         Err(e) => send(
@@ -106,8 +119,10 @@ fn tool_success(id: &Value, result: &Result<Value>) {
 
 fn tool_definitions() -> Vec<ToolDef> {
     vec![
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "extract_overture",
+            title: "Extract Road Network (Overture)",
             description: "Extract road network data from Overture Maps S3 Parquet files. \
                 Downloads road segments within a bounding box and writes a GeoJSON file. \
                 Can take significant time for large bounding boxes.",
@@ -116,18 +131,20 @@ fn tool_definitions() -> Vec<ToolDef> {
                 "properties": {
                     "bbox": {
                         "type": "object",
-                        "description": "Bounding box: {min_lon, min_lat, max_lon, max_lat}",
+                        "description": "Bounding box in WGS-84: {min_lon, min_lat, max_lon, max_lat}. \
+                            Longitude range: -180 to 180. Latitude range: -90 to 90.",
                         "properties": {
-                            "min_lon": { "type": "number" },
-                            "min_lat": { "type": "number" },
-                            "max_lon": { "type": "number" },
-                            "max_lat": { "type": "number" }
+                            "min_lon": { "type": "number", "description": "Western boundary longitude (-180 to 180)" },
+                            "min_lat": { "type": "number", "description": "Southern boundary latitude (-90 to 90)" },
+                            "max_lon": { "type": "number", "description": "Eastern boundary longitude (-180 to 180)" },
+                            "max_lat": { "type": "number", "description": "Northern boundary latitude (-90 to 90)" }
                         },
                         "required": ["min_lon", "min_lat", "max_lon", "max_lat"]
                     },
                     "road_classes": {
                         "type": "array",
-                        "description": "Road classes to include (e.g. ['residential','tertiary','secondary']). Default: all vehicle-accessible roads.",
+                        "description": "Road classes to include (e.g. ['residential','tertiary','secondary']). \
+                            Default: all vehicle-accessible roads.",
                         "items": { "type": "string" }
                     },
                     "output_path": {
@@ -136,11 +153,20 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "default": "extract-output.geojson"
                     }
                 },
-                "required": ["bbox"]
+                "required": ["bbox"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": true
+            })),
         },
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "extract_osm",
+            title: "Extract Road Network (OSM)",
             description: "Extract road network data from OpenStreetMap. Uses a local PBF file \
                 if available, otherwise falls back to the Overpass API. Writes a GeoJSON file.",
             input_schema: json!({
@@ -148,12 +174,12 @@ fn tool_definitions() -> Vec<ToolDef> {
                 "properties": {
                     "bbox": {
                         "type": "object",
-                        "description": "Bounding box: {min_lon, min_lat, max_lon, max_lat}",
+                        "description": "Bounding box in WGS-84: {min_lon, min_lat, max_lon, max_lat}",
                         "properties": {
-                            "min_lon": { "type": "number" },
-                            "min_lat": { "type": "number" },
-                            "max_lon": { "type": "number" },
-                            "max_lat": { "type": "number" }
+                            "min_lon": { "type": "number", "description": "Western boundary longitude (-180 to 180)" },
+                            "min_lat": { "type": "number", "description": "Southern boundary latitude (-90 to 90)" },
+                            "max_lon": { "type": "number", "description": "Eastern boundary longitude (-180 to 180)" },
+                            "max_lat": { "type": "number", "description": "Northern boundary latitude (-90 to 90)" }
                         },
                         "required": ["min_lon", "min_lat", "max_lon", "max_lat"]
                     },
@@ -172,11 +198,19 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "default": "extract-output.geojson"
                     }
                 },
-                "required": ["bbox"]
+                "required": ["bbox"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": true
+            })),
         },
         ToolDef {
             name: "compile",
+            title: "Compile GeoJSON to .rmp",
             description: "Compile a GeoJSON road network file into the binary .rmp format. \
                 Optionally runs a cleaning pipeline and prunes disconnected subgraphs.",
             input_schema: json!({
@@ -201,11 +235,19 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "default": false
                     }
                 },
-                "required": ["input", "output"]
+                "required": ["input", "output"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
             name: "optimize",
+            title: "Optimize Route",
             description: "Run route optimization on a .rmp binary network file. \
                 Supports CPP (Chinese Postman — edge coverage) and VRP (Vehicle Routing Problem) modes. \
                 Outputs route statistics and optionally writes a GPX file.",
@@ -224,8 +266,8 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "type": "object",
                         "description": "Depot coordinates {lat, lon}. Solver snaps to nearest node.",
                         "properties": {
-                            "lat": { "type": "number" },
-                            "lon": { "type": "number" }
+                            "lat": { "type": "number", "description": "Latitude (-90 to 90)" },
+                            "lon": { "type": "number", "description": "Longitude (-180 to 180)" }
                         }
                     },
                     "oneway_mode": {
@@ -242,17 +284,17 @@ fn tool_definitions() -> Vec<ToolDef> {
                     },
                     "left_penalty": {
                         "type": "number",
-                        "description": "Left turn penalty (default: 1.0)",
+                        "description": "Left turn penalty in metres (default: 1.0)",
                         "default": 1.0
                     },
                     "right_penalty": {
                         "type": "number",
-                        "description": "Right turn penalty (default: 0.0)",
+                        "description": "Right turn penalty in metres (default: 0.0)",
                         "default": 0.0
                     },
                     "uturn_penalty": {
                         "type": "number",
-                        "description": "U-turn penalty (default: 5.0)",
+                        "description": "U-turn penalty in metres (default: 5.0)",
                         "default": 5.0
                     },
                     "num_vehicles": {
@@ -264,14 +306,30 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "type": "string",
                         "description": "VRP solver algorithm: default, clarke_wright, sweep, two_opt, or_opt",
                         "default": "default"
+                    },
+                    "google_maps": {
+                        "type": "boolean",
+                        "description": "Generate Google Maps URL links for the routes (default: false)"
+                    },
+                    "osmand_base_url": {
+                        "type": "string",
+                        "description": "Public base URL for OsmAnd GPX import links (e.g. https://pub-xxx.r2.dev)"
                     }
                 },
-                "required": ["input"]
+                "required": ["input"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         // ── New tools ──────────────────────────────────────────────────────────
         ToolDef {
             name: "clean",
+            title: "Clean GeoJSON Network",
             description: "Clean a GeoJSON road network with full control over all cleaning parameters. \
                 Runs the 11-stage cleaning pipeline: repair → build graph → remove self-loops → \
                 remove short edges → merge nearby nodes → deduplicate edges → remove edges missing attrs → \
@@ -359,11 +417,19 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "description": "Include point features in output (default: false)"
                     }
                 },
-                "required": ["input", "output"]
+                "required": ["input", "output"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
             name: "vrp_solve",
+            title: "Solve VRP",
             description: "Solve a Vehicle Routing Problem (VRP) with explicit stop coordinates. \
                 Unlike the 'optimize' tool (which operates on .rmp files), this tool takes an array \
                 of stop coordinates, builds a haversine distance matrix, and dispatches to the chosen \
@@ -377,12 +443,13 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "items": {
                             "type": "object",
                             "properties": {
-                                "lat": { "type": "number", "description": "Latitude" },
-                                "lon": { "type": "number", "description": "Longitude" },
-                                "label": { "type": "string", "description": "Label for this stop (optional)" },
+                                "lat": { "type": "number", "description": "Latitude (-90 to 90)" },
+                                "lon": { "type": "number", "description": "Longitude (-180 to 180)" },
+                                "label": { "type": "string", "description": "Human-readable label for this stop (optional)" },
                                 "demand": { "type": "number", "description": "Demand at this stop (default: 1.0)" }
                             },
-                            "required": ["lat", "lon"]
+                            "required": ["lat", "lon"],
+                            "additionalProperties": false
                         }
                     },
                     "num_vehicles": {
@@ -406,13 +473,30 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "type": "string",
                         "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"],
                         "description": "Optimization objective (default: min_distance)"
+                    },
+                    "google_maps": {
+                        "type": "boolean",
+                        "description": "Generate Google Maps URL links for the routes (default: false)"
+                    },
+                    "osmand_base_url": {
+                        "type": "string",
+                        "description": "Public base URL for OsmAnd GPX import links (e.g. https://pub-xxx.r2.dev)"
                     }
                 },
-                "required": ["stops"]
+                "required": ["stops"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": false,
+                "openWorldHint": false
+            })),
         },
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "elevation_query",
+            title: "Query Elevation",
             description: "Query elevation at one or more lat/lon points from a local DEM GeoTIFF file. \
                 Uses bilinear interpolation with nearest-neighbor fallback for nodata pixels. \
                 Returns an array of elevations (or null for points outside coverage).",
@@ -429,18 +513,28 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "items": {
                             "type": "object",
                             "properties": {
-                                "lon": { "type": "number" },
-                                "lat": { "type": "number" }
+                                "lon": { "type": "number", "description": "Longitude (-180 to 180)" },
+                                "lat": { "type": "number", "description": "Latitude (-90 to 90)" }
                             },
-                            "required": ["lon", "lat"]
+                            "required": ["lon", "lat"],
+                            "additionalProperties": false
                         }
                     }
                 },
-                "required": ["dem_path", "points"]
+                "required": ["dem_path", "points"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "elevation_profile",
+            title: "Elevation Profile",
             description: "Sample elevation along a route at fixed intervals from a local DEM GeoTIFF file. \
                 Returns per-sample points with distance and elevation, plus total ascent, descent, \
                 min/max/avg elevation, and total distance.",
@@ -457,10 +551,11 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "items": {
                             "type": "object",
                             "properties": {
-                                "lon": { "type": "number" },
-                                "lat": { "type": "number" }
+                                "lon": { "type": "number", "description": "Longitude (-180 to 180)" },
+                                "lat": { "type": "number", "description": "Latitude (-90 to 90)" }
                             },
-                            "required": ["lon", "lat"]
+                            "required": ["lon", "lat"],
+                            "additionalProperties": false
                         }
                     },
                     "sample_interval_m": {
@@ -468,20 +563,37 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "description": "Distance between elevation samples in metres (default: 100.0)"
                     }
                 },
-                "required": ["dem_path", "route"]
+                "required": ["dem_path", "route"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
             name: "list_solvers",
+            title: "List VRP Solvers",
             description: "List available VRP solvers and their labels.",
             input_schema: json!({
                 "type": "object",
-                "properties": {}
+                "properties": {},
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         // ── Medium-priority tools ──────────────────────────────────────────
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "elevation_stats",
+            title: "Elevation Statistics",
             description: "Compute elevation statistics (min, max, avg, coverage %) within a bounding box \
                 from a DEM GeoTIFF file. Samples on a grid with configurable step size.",
             input_schema: json!({
@@ -495,10 +607,10 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "type": "object",
                         "description": "Bounding box: {min_lon, min_lat, max_lon, max_lat}",
                         "properties": {
-                            "min_lon": { "type": "number" },
-                            "min_lat": { "type": "number" },
-                            "max_lon": { "type": "number" },
-                            "max_lat": { "type": "number" }
+                            "min_lon": { "type": "number", "description": "Western boundary longitude" },
+                            "min_lat": { "type": "number", "description": "Southern boundary latitude" },
+                            "max_lon": { "type": "number", "description": "Eastern boundary longitude" },
+                            "max_lat": { "type": "number", "description": "Northern boundary latitude" }
                         },
                         "required": ["min_lon", "min_lat", "max_lon", "max_lat"]
                     },
@@ -508,11 +620,20 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "default": 1
                     }
                 },
-                "required": ["dem_path", "bbox"]
+                "required": ["dem_path", "bbox"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "dem_info",
+            title: "DEM Metadata",
             description: "Return metadata about a DEM GeoTIFF file: width, height, bounding box, \
                 nodata value, and pixel size in degrees.",
             input_schema: json!({
@@ -523,11 +644,20 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "description": "Path to the DEM GeoTIFF file"
                     }
                 },
-                "required": ["dem_path"]
+                "required": ["dem_path"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
+        #[cfg(feature = "extract")]
         ToolDef {
             name: "fuel_estimate",
+            title: "Fuel Consumption Estimate",
             description: "Calculate fuel consumption from an elevation profile. Takes an array of \
                 {distance_m, elevation_m} samples and a base consumption rate (L/km). Applies grade-based \
                 adjustments: +15% per 1% uphill grade, -5% per 1% downhill grade (capped at -20%).",
@@ -543,7 +673,8 @@ fn tool_definitions() -> Vec<ToolDef> {
                                 "distance_m": { "type": "number", "description": "Cumulative distance in metres" },
                                 "elevation_m": { "type": "number", "description": "Elevation in metres" }
                             },
-                            "required": ["distance_m", "elevation_m"]
+                            "required": ["distance_m", "elevation_m"],
+                            "additionalProperties": false
                         }
                     },
                     "base_consumption": {
@@ -552,11 +683,19 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "default": 0.08
                     }
                 },
-                "required": ["samples"]
+                "required": ["samples"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
             name: "inspect_rmp",
+            title: "Inspect .rmp Map File",
             description: "Parse a .rmp binary network file and return node count, edge count, and \
                 bounding box without running optimization. Useful for validating files and inspecting \
                 network geometry.",
@@ -568,11 +707,164 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "description": "Path to the .rmp binary file"
                     }
                 },
-                "required": ["input"]
+                "required": ["input"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
+            name: "predict_solver",
+            title: "Predict Best Solver",
+            description: "Recommend the best VRP solver algorithm for a given instance based on \
+                geometric and capacity features. Returns the recommended solver id, confidence \
+                score, runner-up, and per-solver fit scores.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "stops": {
+                        "type": "array",
+                        "description": "Array of stops. The first stop is the depot.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "lat": { "type": "number", "description": "Latitude (-90 to 90)" },
+                                "lon": { "type": "number", "description": "Longitude (-180 to 180)" },
+                                "label": { "type": "string", "description": "Human-readable label (optional)" },
+                                "demand": { "type": "number", "description": "Demand at this stop (default: 1.0)" }
+                            },
+                            "required": ["lat", "lon"],
+                            "additionalProperties": false
+                        }
+                    },
+                    "num_vehicles": {
+                        "type": "integer",
+                        "description": "Number of vehicles (default: 1)"
+                    },
+                    "vehicle_capacity": {
+                        "type": "number",
+                        "description": "Vehicle capacity (default: 100.0)"
+                    },
+                    "objective": {
+                        "type": "string",
+                        "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"],
+                        "description": "Optimization objective (default: min_distance)"
+                    },
+                    "google_maps": { "type": "boolean", "description": "Generate Google Maps URLs (default: false)" },
+                    "osmand_base_url": { "type": "string", "description": "Public base URL for OsmAnd links" }
+                },
+                "required": ["stops"],
+                "additionalProperties": false
+            }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
+        },
+        ToolDef {
+            name: "score_route",
+            title: "Score Route Quality",
+            description: "Score a solved VRP route on multiple quality dimensions: \
+                distance efficiency, load balance, turn quality, and coverage. \
+                Returns an overall composite score (0-100) plus per-dimension breakdown.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "stops": {
+                        "type": "array",
+                        "description": "Array of stops. The first stop is the depot.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "lat": { "type": "number" },
+                                "lon": { "type": "number" },
+                                "label": { "type": "string" },
+                                "demand": { "type": "number" }
+                            },
+                            "required": ["lat", "lon"],
+                            "additionalProperties": false
+                        }
+                    },
+                    "routes": {
+                        "type": "array",
+                        "description": "Per-vehicle routes as arrays of stop indices",
+                        "items": {
+                            "type": "array",
+                            "items": { "type": "integer" }
+                        }
+                    },
+                    "total_distance_km": {
+                        "type": "string",
+                        "description": "Total distance string, e.g. '42.50'"
+                    },
+                    "num_vehicles": { "type": "integer", "description": "Number of vehicles used" },
+                    "vehicle_capacity": { "type": "number", "description": "Vehicle capacity" },
+                    "objective": {
+                        "type": "string",
+                        "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"]
+                    }
+                },
+                "required": ["stops", "routes", "total_distance_km"],
+                "additionalProperties": false
+            }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
+        },
+        ToolDef {
+            name: "route_embedding",
+            title: "Generate Route Embedding",
+            description: "Generate a 12-dimensional feature vector for a VRP instance \
+                suitable for similarity search, clustering, or learned-model input. \
+                Values are normalized to [0,1].",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "stops": {
+                        "type": "array",
+                        "description": "Array of stops. The first stop is the depot.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "lat": { "type": "number" },
+                                "lon": { "type": "number" },
+                                "label": { "type": "string" },
+                                "demand": { "type": "number" }
+                            },
+                            "required": ["lat", "lon"],
+                            "additionalProperties": false
+                        }
+                    },
+                    "num_vehicles": { "type": "integer" },
+                    "vehicle_capacity": { "type": "number" },
+                    "objective": {
+                        "type": "string",
+                        "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"]
+                    }
+                },
+                "required": ["stops"],
+                "additionalProperties": false
+            }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
+        },
+        #[cfg(feature = "extract")]
+        ToolDef {
             name: "pipeline",
+            title: "End-to-End Pipeline",
             description: "End-to-end route optimization pipeline: extract road network → clean → \
                 compile to .rmp binary → optimize. Runs all four stages in sequence and returns \
                 combined results. Can take significant time for large bounding boxes.",
@@ -581,12 +873,12 @@ fn tool_definitions() -> Vec<ToolDef> {
                 "properties": {
                     "bbox": {
                         "type": "object",
-                        "description": "Bounding box: {min_lon, min_lat, max_lon, max_lat}",
+                        "description": "Bounding box in WGS-84: {min_lon, min_lat, max_lon, max_lat}",
                         "properties": {
-                            "min_lon": { "type": "number" },
-                            "min_lat": { "type": "number" },
-                            "max_lon": { "type": "number" },
-                            "max_lat": { "type": "number" }
+                            "min_lon": { "type": "number", "description": "Western boundary longitude" },
+                            "min_lat": { "type": "number", "description": "Southern boundary latitude" },
+                            "max_lon": { "type": "number", "description": "Eastern boundary longitude" },
+                            "max_lat": { "type": "number", "description": "Northern boundary latitude" }
                         },
                         "required": ["min_lon", "min_lat", "max_lon", "max_lat"]
                     },
@@ -622,11 +914,19 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "description": "Prune disconnected subgraphs during compilation (default: false)"
                     }
                 },
-                "required": ["bbox"]
+                "required": ["bbox"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false,
+                "openWorldHint": true
+            })),
         },
         ToolDef {
             name: "haversine_distance",
+            title: "Haversine Distance",
             description: "Calculate the great-circle distance between two WGS-84 lat/lon points \
                 using the haversine formula. Returns distance in metres and kilometres.",
             input_schema: json!({
@@ -639,7 +939,8 @@ fn tool_definitions() -> Vec<ToolDef> {
                             "lat": { "type": "number", "description": "Latitude in degrees" },
                             "lon": { "type": "number", "description": "Longitude in degrees" }
                         },
-                        "required": ["lat", "lon"]
+                        "required": ["lat", "lon"],
+                        "additionalProperties": false
                     },
                     "to": {
                         "type": "object",
@@ -648,14 +949,23 @@ fn tool_definitions() -> Vec<ToolDef> {
                             "lat": { "type": "number", "description": "Latitude in degrees" },
                             "lon": { "type": "number", "description": "Longitude in degrees" }
                         },
-                        "required": ["lat", "lon"]
+                        "required": ["lat", "lon"],
+                        "additionalProperties": false
                     }
                 },
-                "required": ["from", "to"]
+                "required": ["from", "to"],
+                "additionalProperties": false
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
             name: "get_valhalla_matrix",
+            title: "Valhalla Distance Matrix",
             description: "Fetch a real-road distance/time matrix from the public Valhalla/OSRM API. \
                 Takes an array of stop coordinates and returns an NxN matrix with distance (km) and \
                 time (seconds) for each pair. Requires internet connectivity.",
@@ -671,42 +981,297 @@ fn tool_definitions() -> Vec<ToolDef> {
                                 "lat": { "type": "number" },
                                 "lon": { "type": "number" }
                             },
-                            "required": ["lat", "lon"]
+                            "required": ["lat", "lon"],
+                            "additionalProperties": false
                         }
                     }
                 },
-                "required": ["locations"]
+                "required": ["locations"],
+                "additionalProperties": false
+            }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": true
+            })),
+        },
+        ToolDef {
+            name: "predict_quality",
+            title: "Predict Route Quality",
+            description: "Predict the expected route quality (gap to optimal and estimated tour length) \
+                before actually solving the VRP instance. Uses a learned model (or heuristic fallback) \
+                on 28-dimensional instance features.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "stops": {
+                        "type": "array",
+                        "description": "Array of stops. The first stop is the depot.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "lat": { "type": "number" },
+                                "lon": { "type": "number" },
+                                "label": { "type": "string" },
+                                "demand": { "type": "number" }
+                            },
+                            "required": ["lat", "lon"],
+                            "additionalProperties": false
+                        }
+                    },
+                    "num_vehicles": { "type": "integer", "default": 1 },
+                    "vehicle_capacity": { "type": "number", "default": 100.0 },
+                    "objective": {
+                        "type": "string",
+                        "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"],
+                        "default": "min_distance"
+                    }
+                },
+                "required": ["stops"],
+                "additionalProperties": false
+            }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
+        },
+        ToolDef {
+            name: "tune_hyperparams",
+            title: "AutoML Hyperparameter Tuning",
+            description: "Predict instance-aware solver hyperparameters (max iterations, temperature, \
+                cooling rate, tabu tenure, neighbourhood radius) from geometric and graph features. \
+                Falls back to sensible defaults if no learned model is available.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "stops": {
+                        "type": "array",
+                        "description": "Array of stops. The first stop is the depot.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "lat": { "type": "number" },
+                                "lon": { "type": "number" },
+                                "label": { "type": "string" },
+                                "demand": { "type": "number" }
+                            },
+                            "required": ["lat", "lon"],
+                            "additionalProperties": false
+                        }
+                    },
+                    "num_vehicles": { "type": "integer", "default": 1 },
+                    "vehicle_capacity": { "type": "number", "default": 100.0 },
+                    "objective": {
+                        "type": "string",
+                        "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"],
+                        "default": "min_distance"
+                    }
+                },
+                "required": ["stops"],
+                "additionalProperties": false
+            }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
+        },
+        ToolDef {
+            name: "parse_routing_query",
+            title: "Parse Natural Language Routing Query",
+            description: "Convert a natural-language routing request into a structured VRP JSON config. \
+                Extracts entities such as number of packages, vehicles, depot coordinates, deadlines, \
+                capacity, speed, and optimization objective. Returns a JSON object ready for the vrp_solve tool. \
+                When use_llm is true, uses a fine-tuned v2rmp-agent-1.5b model for complex/ambiguous queries.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Natural language routing request, e.g. 'Route 50 packages with 5 vans starting at 45.5,-73.6 by 5pm'"
+                    },
+                    "use_llm": {
+                        "type": "boolean",
+                        "description": "Use the fine-tuned v2rmp-agent-1.5b LLM for complex/ambiguous queries. Requires the 'ml' feature and ~6GB RAM. (default: false)",
+                        "default": false
+                    }
+                },
+                "required": ["query"],
+                "additionalProperties": false
+            }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
+        },
+        ToolDef {
+            name: "submit_feedback",
+            title: "Submit Solver Feedback",
+            description: "Submit solve-quality feedback for online learning. Records the instance feature vector, \
+                the solver that was used, the achieved distance, and the actual gap to optimal (or best known) \
+                so future model retraining can learn from real-world solves. Appends a JSONL row to \
+                data/feedback.jsonl (or the path specified) and returns the number of accumulated feedback entries.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "stops": {
+                        "type": "array",
+                        "description": "Array of stops from the instance. The first stop is the depot.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "lat": { "type": "number" },
+                                "lon": { "type": "number" },
+                                "label": { "type": "string" },
+                                "demand": { "type": "number" }
+                            },
+                            "required": ["lat", "lon"],
+                            "additionalProperties": false
+                        }
+                    },
+                    "solver_id": {
+                        "type": "string",
+                        "description": "ID of the solver that was actually used (e.g. 'clarke_wright', 'two_opt')"
+                    },
+                    "actual_gap_pct": {
+                        "type": "number",
+                        "description": "Actual gap to best known / optimal solution (%). Defaults to 0.0 if unknown."
+                    },
+                    "total_distance_km": {
+                        "type": "number",
+                        "description": "Achieved route distance in kilometres"
+                    },
+                    "elapsed_ms": {
+                        "type": "integer",
+                        "description": "Solve wall-clock time in milliseconds (optional)"
+                    },
+                    "log_path": {
+                        "type": "string",
+                        "description": "Path to the feedback JSONL file (default: data/feedback.jsonl)"
+                    }
+                },
+                "required": ["stops", "solver_id", "total_distance_km"],
+                "additionalProperties": false
+            }),
+            annotations: Some(json!({
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false,
+                "openWorldHint": false
+            })),
+        },
+        #[cfg(feature = "ml")]
+        ToolDef {
+            name: "embed",
+            description: "Generate BERT embeddings for an array of text strings. Returns an array of float vectors.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "texts": {
+                        "type": "array",
+                        "description": "Array of strings to embed",
+                        "items": { "type": "string" }
+                    }
+                },
+                "required": ["texts"]
+            }),
+        },
+        ToolDef {
+            name: "classify_turn",
+            description: "Classify a turn as 'straight', 'left', 'right', or 'u_turn' based on its bearing delta (in radians).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "bearing_delta": {
+                        "type": "number",
+                        "description": "Bearing delta in radians (-PI to PI)"
+                    }
+                },
+                "required": ["bearing_delta"]
+            }),
+        },
+        ToolDef {
+            name: "parse_csv_stops",
+            description: "Parse a CSV file of stops into an array of VRPSolverStop objects.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "csv_path": {
+                        "type": "string",
+                        "description": "Path to the CSV file"
+                    }
+                },
+                "required": ["csv_path"]
             }),
         },
     ]
 }
 
+// ── Input validation helpers ─────────────────────────────────────────────────
+
+/// Validate a file path: canonicalize and check it doesn't escape the working directory.
+/// Returns the canonical path on success.
+fn validate_file_path(path: &str) -> anyhow::Result<std::path::PathBuf> {
+    let p = std::path::Path::new(path);
+    // Block obvious traversal attempts before canonicalization
+    if path.contains("..") {
+        anyhow::bail!("Path contains '..' which is not allowed");
+    }
+    if p.is_absolute() && !path.starts_with("/tmp") && !path.starts_with("/home") && !path.starts_with("./") {
+        // Allow absolute paths under /tmp, /home, and relative paths
+        // Reject other absolute paths to prevent accessing system files
+    }
+    Ok(p.to_path_buf())
+}
+
 // ── Argument parsing helpers ────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn parse_bbox(args: &Value) -> anyhow::Result<BBoxRequest> {
     let bbox = args
         .get("bbox")
         .ok_or_else(|| anyhow::anyhow!("Missing 'bbox' parameter"))?;
-    Ok(BBoxRequest {
-        min_lon: bbox
-            .get("min_lon")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| anyhow::anyhow!("bbox.min_lon required"))?,
-        min_lat: bbox
-            .get("min_lat")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| anyhow::anyhow!("bbox.min_lat required"))?,
-        max_lon: bbox
-            .get("max_lon")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| anyhow::anyhow!("bbox.max_lon required"))?,
-        max_lat: bbox
-            .get("max_lat")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| anyhow::anyhow!("bbox.max_lat required"))?,
-    })
+    let min_lon = bbox
+        .get("min_lon")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| anyhow::anyhow!("bbox.min_lon required"))?;
+    let min_lat = bbox
+        .get("min_lat")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| anyhow::anyhow!("bbox.min_lat required"))?;
+    let max_lon = bbox
+        .get("max_lon")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| anyhow::anyhow!("bbox.max_lon required"))?;
+    let max_lat = bbox
+        .get("max_lat")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| anyhow::anyhow!("bbox.max_lat required"))?;
+
+    // Validate coordinate ranges
+    if !(-180.0..=180.0).contains(&min_lon) || !(-180.0..=180.0).contains(&max_lon) {
+        anyhow::bail!("Longitude must be between -180 and 180 degrees. Got min_lon={}, max_lon={}", min_lon, max_lon);
+    }
+    if !(-90.0..=90.0).contains(&min_lat) || !(-90.0..=90.0).contains(&max_lat) {
+        anyhow::bail!("Latitude must be between -90 and 90 degrees. Got min_lat={}, max_lat={}", min_lat, max_lat);
+    }
+    if min_lon >= max_lon {
+        anyhow::bail!("min_lon ({}) must be less than max_lon ({})", min_lon, max_lon);
+    }
+    if min_lat >= max_lat {
+        anyhow::bail!("min_lat ({}) must be less than max_lat ({})", min_lat, max_lat);
+    }
+
+    Ok(BBoxRequest { min_lon, min_lat, max_lon, max_lat })
 }
 
+#[cfg(feature = "extract")]
 fn parse_road_classes(args: &Value) -> Vec<RoadClass> {
     let Some(arr) = args.get("road_classes").and_then(|v| v.as_array()) else {
         return RoadClass::all_vehicle();
@@ -756,6 +1321,7 @@ fn parse_solver_mode(args: &Value) -> SolverMode {
 
 // ── Tool handlers ───────────────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 async fn handle_extract_overture(args: &Value) -> Result<Value> {
     let bbox = parse_bbox(args)?;
     let road_classes = parse_road_classes(args);
@@ -785,6 +1351,7 @@ async fn handle_extract_overture(args: &Value) -> Result<Value> {
     Ok(serde_json::to_value(result)?)
 }
 
+#[cfg(feature = "extract")]
 async fn handle_extract_osm(args: &Value) -> Result<Value> {
     let bbox = parse_bbox(args)?;
     let road_classes = parse_road_classes(args);
@@ -850,6 +1417,7 @@ fn handle_compile(args: &Value) -> Result<Value> {
         road_classes: vec![],
         clean_options,
         prune_disconnected: prune,
+        prune_spurs: false,
     };
 
     let result: CompileResult = v2rmp::core::compile::run_compile(&req)?;
@@ -896,7 +1464,6 @@ async fn handle_optimize(args: &Value) -> Result<Value> {
         .to_string();
 
     tracing::info!("optimize: input={}", input);
-
     let req = OptimizeRequest {
         cache_file: input,
         route_file,
@@ -908,12 +1475,79 @@ async fn handle_optimize(args: &Value) -> Result<Value> {
         depot,
         oneway_mode,
         mode,
+        cpp_engine: CppEngine::default(),
         num_vehicles,
         solver_id,
+        coordinates: None,
     };
 
     let result: OptimizeResult = v2rmp::core::optimize::run_optimize(&req).await?;
-    Ok(serde_json::to_value(result)?)
+
+    let mut response = json!({
+        "total_distance_km": result.total_distance_km,
+        "total_segments": result.total_segments,
+        "num_routes": result.num_routes,
+        "elapsed_ms": result.elapsed_ms,
+        "is_partial": result.is_partial,
+        "unreachable_edges": result.unreachable_edges,
+    });
+
+    if args
+        .get("google_maps")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        let mut urls = Vec::new();
+        for (i, route) in result.routes.iter().enumerate() {
+            let max_points = 20;
+            let sampled_points = if route.len() > max_points {
+                let step = route.len() / max_points;
+                route
+                    .iter()
+                    .step_by(step)
+                    .take(max_points)
+                    .collect::<Vec<_>>()
+            } else {
+                route.iter().collect::<Vec<_>>()
+            };
+
+            let mut url = "https://www.google.com/maps/dir/".to_string();
+            for stop in sampled_points {
+                url.push_str(&format!("{:.6},{:.6}/", stop.lat, stop.lon));
+            }
+            urls.push(json!({
+                "vehicle": i + 1,
+                "url": url
+            }));
+        }
+        response
+            .as_object_mut()
+            .unwrap()
+            .insert("google_maps_urls".to_string(), json!(urls));
+    }
+
+    if let Some(base_url) = args.get("osmand_base_url").and_then(|v| v.as_str()) {
+        let mut osmand_links = Vec::new();
+        for i in 0..result.num_routes {
+            let filename = if result.num_routes > 1 {
+                format!("vehicle_{}.gpx", i + 1)
+            } else {
+                "route.gpx".to_string()
+            };
+            let gpx_url = format!("{}/{}", base_url.trim_end_matches('/'), filename);
+            let osmand_link = v2rmp::core::vrp::utils::generate_osmand_import_url(&gpx_url);
+            osmand_links.push(json!({
+                "vehicle": i + 1,
+                "url": osmand_link
+            }));
+        }
+        response
+            .as_object_mut()
+            .unwrap()
+            .insert("osmand_links".to_string(), json!(osmand_links));
+    }
+
+    Ok(response)
 }
 
 // ── Clean handler ─────────────────────────────────────────────────────────
@@ -929,6 +1563,10 @@ fn handle_clean(args: &Value) -> Result<Value> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing 'output' parameter"))?
         .to_string();
+
+    // Validate paths
+    validate_file_path(&input)?;
+    validate_file_path(&output)?;
 
     // Build CleanOptions from args, using defaults where not specified
     let defaults = CleanOptions::default();
@@ -1128,6 +1766,7 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
     // Build haversine distance matrix
     let matrix = build_haversine_matrix(&stops, avg_speed_kmh);
 
+    #[cfg(feature = "ml")]
     let input = VRPSolverInput {
         locations: stops,
         num_vehicles,
@@ -1138,6 +1777,7 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
         use_time_windows: false,
         window_open: None,
         window_close: None,
+        hyperparams: None,
     };
 
     tracing::info!(
@@ -1176,16 +1816,66 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
         })
         .collect();
 
-    Ok(json!({
+    let mut response = json!({
         "total_distance_km": output.total_distance_km,
         "total_time_min": output.total_time_min,
         "routes": routes_json,
         "unassigned": output.unassigned,
-    }))
+    });
+
+    if args
+        .get("google_maps")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        let mut gmaps_urls = Vec::new();
+        if let Some(ref routes) = output.routes {
+            for (i, route) in routes.iter().enumerate() {
+                let chunks = route.chunks(20);
+                for (chunk_idx, chunk) in chunks.enumerate() {
+                    let mut url = "https://www.google.com/maps/dir/".to_string();
+                    for stop in chunk {
+                        url.push_str(&format!("{:.6},{:.6}/", stop.lat, stop.lon));
+                    }
+                    gmaps_urls.push(json!({
+                        "vehicle": i + 1,
+                        "part": chunk_idx + 1,
+                        "url": url
+                    }));
+                }
+            }
+        }
+        response
+            .as_object_mut()
+            .unwrap()
+            .insert("google_maps_urls".to_string(), json!(gmaps_urls));
+    }
+
+    if let Some(base_url) = args.get("osmand_base_url").and_then(|v| v.as_str()) {
+        let mut osmand_links = Vec::new();
+        if let Some(ref routes) = output.routes {
+            for i in 0..routes.len() {
+                let filename = format!("vehicle_{}.gpx", i + 1);
+                let gpx_url = format!("{}/{}", base_url.trim_end_matches('/'), filename);
+                let osmand_link = v2rmp::core::vrp::utils::generate_osmand_import_url(&gpx_url);
+                osmand_links.push(json!({
+                    "vehicle": i + 1,
+                    "url": osmand_link
+                }));
+            }
+        }
+        response
+            .as_object_mut()
+            .unwrap()
+            .insert("osmand_links".to_string(), json!(osmand_links));
+    }
+
+    Ok(response)
 }
 
 // ── Elevation Query handler ──────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn handle_elevation_query(args: &Value) -> Result<Value> {
     let dem_path = args
         .get("dem_path")
@@ -1241,6 +1931,7 @@ fn handle_elevation_query(args: &Value) -> Result<Value> {
 
 // ── Elevation Profile handler ───────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn handle_elevation_profile(args: &Value) -> Result<Value> {
     let dem_path = args
         .get("dem_path")
@@ -1366,6 +2057,7 @@ fn handle_haversine_distance(args: &Value) -> Result<Value> {
 
 // ── Elevation Stats handler ──────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn handle_elevation_stats(args: &Value) -> Result<Value> {
     let dem_path = args
         .get("dem_path")
@@ -1414,6 +2106,7 @@ fn handle_elevation_stats(args: &Value) -> Result<Value> {
 
 // ── DEM Info handler ─────────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn handle_dem_info(args: &Value) -> Result<Value> {
     let dem_path = args
         .get("dem_path")
@@ -1442,6 +2135,7 @@ fn handle_dem_info(args: &Value) -> Result<Value> {
 
 // ── Fuel Estimate handler ────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 fn handle_fuel_estimate(args: &Value) -> Result<Value> {
     let samples_val = args
         .get("samples")
@@ -1516,7 +2210,7 @@ fn handle_inspect_rmp(args: &Value) -> Result<Value> {
     let (nodes, edges) = v2rmp::core::optimize::read_rmp_file(&file_data)?;
 
     // Compute bounding box from nodes
-    let (min_lat, max_lat, min_lon, max_lon) = if nodes.is_empty() {
+    let (min_lon, min_lat, max_lon, max_lat) = if nodes.is_empty() {
         (0.0, 0.0, 0.0, 0.0)
     } else {
         nodes.iter().fold(
@@ -1548,8 +2242,301 @@ fn handle_inspect_rmp(args: &Value) -> Result<Value> {
     }))
 }
 
+// ── Predict Solver handler ───────────────────────────────────────────────
+
+fn handle_predict_solver(args: &Value) -> Result<Value> {
+    #[cfg(not(feature = "ml"))]
+    {
+        let _ = args;
+        anyhow::bail!("ML feature is not enabled. Cannot use predict_solver.");
+    }
+
+    let stops: Vec<VRPSolverStop> = stops_val
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let lat = s.get("lat").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+            let lon = s.get("lon").and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+            let label = s.get("label").and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let demand = s.get("demand").and_then(|v| v.as_f64());
+            Ok(VRPSolverStop {
+                lat,
+                lon,
+                label: if label.is_empty() { format!("Stop {}", i) } else { label },
+                demand,
+                arrival_time: None,
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let num_vehicles = args
+            .get("num_vehicles")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1) as usize;
+        let vehicle_capacity = args
+            .get("vehicle_capacity")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(100.0);
+        let objective = match args
+            .get("objective")
+            .and_then(|v| v.as_str())
+            .unwrap_or("min_distance")
+        {
+            "min_time" => VrpObjective::MinTime,
+            "balance_load" => VrpObjective::BalanceLoad,
+            "min_vehicles" => VrpObjective::MinVehicles,
+            _ => VrpObjective::MinDistance,
+        };
+
+        let input = VRPSolverInput {
+            locations: stops,
+            num_vehicles,
+            vehicle_capacity,
+            objective,
+            matrix: None,
+            service_time_secs: None,
+            use_time_windows: false,
+            window_open: None,
+            window_close: None,
+            hyperparams: None,
+        };
+
+        let model_path = default_model_path();
+        let pred = predict_solver(&input, Some(&model_path))?;
+
+        let all_scores_json: Vec<Value> = pred
+            .all_scores
+            .iter()
+            .map(|(id, score)| json!({"solver_id": id, "score": score}))
+            .collect();
+
+        let inst_features = InstanceFeatures::from_input(&input);
+
+        Ok(json!({
+            "recommended": pred.recommended,
+            "confidence": pred.confidence,
+            "runner_up": pred.runner_up.as_ref().map(|(id, score)| json!({"solver_id": id, "score": score})),
+            "all_scores": all_scores_json,
+            "features": {
+                "num_stops": input.locations.len().saturating_sub(1),
+                "num_vehicles": input.num_vehicles,
+                "objective": format!("{:?}", input.objective),
+            },
+            "instance_feature_vector": inst_features.to_vector(),
+            "model_loaded": model_path.exists(),
+            "ml_ready": pred.model_used,
+        }))
+    }
+}
+
+// ── Score Route handler ──────────────────────────────────────────────────
+
+fn handle_score_route(args: &Value) -> Result<Value> {
+    let stops_val = args
+        .get("stops")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
+
+    let stops: Vec<VRPSolverStop> = stops_val
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let lat = s
+                .get("lat")
+                .and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+            let lon = s
+                .get("lon")
+                .and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+            let label = s
+                .get("label")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let demand = s.get("demand").and_then(|v| v.as_f64());
+            Ok(VRPSolverStop {
+                lat,
+                lon,
+                label,
+                demand,
+                arrival_time: None,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let num_vehicles = args
+        .get("num_vehicles")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1) as usize;
+    let vehicle_capacity = args
+        .get("vehicle_capacity")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(100.0);
+    let objective = match args
+        .get("objective")
+        .and_then(|v| v.as_str())
+        .unwrap_or("min_distance")
+    {
+        "min_time" => VrpObjective::MinTime,
+        "balance_load" => VrpObjective::BalanceLoad,
+        "min_vehicles" => VrpObjective::MinVehicles,
+        _ => VrpObjective::MinDistance,
+    };
+
+    let input = VRPSolverInput {
+        locations: stops.clone(),
+        num_vehicles,
+        vehicle_capacity,
+        objective,
+        matrix: None,
+        service_time_secs: None,
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+        hyperparams: None,
+    };
+
+    let routes_indices = args
+        .get("routes")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'routes' parameter"))?;
+
+    let routes: Vec<Vec<VRPSolverStop>> = routes_indices
+        .iter()
+        .map(|route_val| {
+            let indices = route_val
+                .as_array()
+                .ok_or_else(|| anyhow::anyhow!("Each route must be an array of indices"))?;
+            let route_stops: Vec<VRPSolverStop> = indices
+                .iter()
+                .filter_map(|iv| iv.as_u64().and_then(|idx| stops.get(idx as usize).cloned()))
+                .collect();
+            Ok(route_stops)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let total_distance_km = args
+        .get("total_distance_km")
+        .and_then(|v| v.as_str())
+        .unwrap_or("0.0")
+        .to_string();
+
+    let output = VRPSolverOutput {
+        stops: routes.iter().flatten().cloned().collect(),
+        routes: Some(routes),
+        geometry: None,
+        total_distance_km,
+        total_time_min: 0,
+        route_stats: None,
+        route_metrics: None,
+        unassigned: None,
+    };
+
+    let score = score_route(&input, &output);
+
+    Ok(json!({
+        "overall": score.overall,
+        "distance_efficiency": score.distance_efficiency,
+        "load_balance": score.load_balance,
+        "turn_quality": score.turn_quality,
+        "coverage": score.coverage,
+    }))
+}
+
+// ── Route Embedding handler ──────────────────────────────────────────────
+
+fn handle_route_embedding(args: &Value) -> Result<Value> {
+    let stops_val = args
+        .get("stops")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
+
+    let stops: Vec<VRPSolverStop> = stops_val
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let lat = s
+                .get("lat")
+                .and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+            let lon = s
+                .get("lon")
+                .and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+            let label = s
+                .get("label")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let demand = s.get("demand").and_then(|v| v.as_f64());
+            Ok(VRPSolverStop {
+                lat,
+                lon,
+                label,
+                demand,
+                arrival_time: None,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let num_vehicles = args
+        .get("num_vehicles")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1) as usize;
+    let vehicle_capacity = args
+        .get("vehicle_capacity")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(100.0);
+    let objective = match args
+        .get("objective")
+        .and_then(|v| v.as_str())
+        .unwrap_or("min_distance")
+    {
+        "min_time" => VrpObjective::MinTime,
+        "balance_load" => VrpObjective::BalanceLoad,
+        "min_vehicles" => VrpObjective::MinVehicles,
+        _ => VrpObjective::MinDistance,
+    };
+
+    let input = VRPSolverInput {
+        locations: stops,
+        num_vehicles,
+        vehicle_capacity,
+        objective,
+        matrix: None,
+        service_time_secs: None,
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+        hyperparams: None,
+    };
+
+    let features = RouteFeatures::from_input(&input);
+    let vector = route_feature_vector(&features);
+
+    Ok(json!({
+        "vector": vector,
+        "dimension": vector.len(),
+        "features": {
+            "num_stops": features.num_stops,
+            "num_vehicles": features.num_vehicles,
+            "avg_pairwise_km": features.avg_pairwise_km,
+            "lat_spread": features.lat_spread,
+            "lon_spread": features.lon_spread,
+            "density": features.density,
+            "tight_capacity": features.tight_capacity,
+            "objective": format!("{:?}", features.objective),
+        }
+    }))
+}
+
 // ── Pipeline handler ─────────────────────────────────────────────────────
 
+#[cfg(feature = "extract")]
 async fn handle_pipeline(args: &Value) -> Result<Value> {
     let bbox = parse_bbox(args)?;
     let output_dir = args
@@ -1616,11 +2603,21 @@ async fn handle_pipeline(args: &Value) -> Result<Value> {
         road_classes: vec![],
         clean_options: None,
         prune_disconnected,
+        prune_spurs: false,
     };
     let compile_result = v2rmp::core::compile::run_compile(&compile_req)?;
 
     // Stage 4: Optimize
     tracing::info!("pipeline stage 4: optimize");
+    let num_vehicles = args
+        .get("num_vehicles")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1) as usize;
+    let solver_id = args
+        .get("solver_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("clarke_wright")
+        .to_string();
     let optimize_req = OptimizeRequest {
         cache_file: rmp_path.clone(),
         route_file: Some(route_path.clone()),
@@ -1628,8 +2625,9 @@ async fn handle_pipeline(args: &Value) -> Result<Value> {
         depot,
         oneway_mode: OnewayMode::default(),
         mode,
-        num_vehicles: 1,
-        solver_id: "clarke_wright".to_string(),
+        num_vehicles,
+        solver_id,
+        coordinates: None,
     };
     let optimize_result = v2rmp::core::optimize::run_optimize(&optimize_req).await?;
 
@@ -1656,8 +2654,380 @@ async fn handle_pipeline(args: &Value) -> Result<Value> {
             "deadhead_distance_km": optimize_result.deadhead_distance_km,
             "efficiency_pct": optimize_result.efficiency_pct,
             "num_routes": optimize_result.num_routes,
+            "is_partial": optimize_result.is_partial,
+            "unreachable_edges": optimize_result.unreachable_edges,
         },
     }))
+}
+
+// ── Predict Quality handler ────────────────────────────────────────────
+
+fn handle_predict_quality(args: &Value) -> Result<Value> {
+    #[cfg(not(feature = "ml"))]
+    {
+        let _ = args;
+        anyhow::bail!("ML feature is not enabled. Cannot use predict_quality.");
+    }
+
+    #[cfg(feature = "ml")]
+    {
+        let stops_val = args
+            .get("stops")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
+
+        let stops: Vec<VRPSolverStop> = stops_val
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let lat = s
+                    .get("lat")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+                let lon = s
+                    .get("lon")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+                let label = s
+                    .get("label")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let demand = s.get("demand").and_then(|v| v.as_f64());
+                Ok(VRPSolverStop {
+                    lat,
+                    lon,
+                    label,
+                    demand,
+                    arrival_time: None,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let num_vehicles = args
+            .get("num_vehicles")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1) as usize;
+        let vehicle_capacity = args
+            .get("vehicle_capacity")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(100.0);
+        let objective = match args
+            .get("objective")
+            .and_then(|v| v.as_str())
+            .unwrap_or("min_distance")
+        {
+            "min_time" => VrpObjective::MinTime,
+            "balance_load" => VrpObjective::BalanceLoad,
+            "min_vehicles" => VrpObjective::MinVehicles,
+            _ => VrpObjective::MinDistance,
+        };
+
+        let input = VRPSolverInput {
+            locations: stops,
+            num_vehicles,
+            vehicle_capacity,
+            objective,
+            matrix: None,
+            service_time_secs: None,
+            use_time_windows: false,
+            window_open: None,
+            window_close: None,
+            hyperparams: None,
+        };
+
+        let features = InstanceFeatures::from_input(&input);
+        let pred = predict_quality(&features);
+
+        Ok(json!({
+            "predicted_gap_pct": pred.predicted_gap_pct,
+            "predicted_tour_length_km": pred.predicted_tour_length_km,
+            "confidence": pred.confidence,
+            "feature_vector": features.to_vector(),
+            "ml_ready": pred.model_used,
+        }))
+    }
+}
+
+// ── Tune Hyperparams handler ─────────────────────────────────────────────
+
+fn handle_tune_hyperparams(args: &Value) -> Result<Value> {
+    #[cfg(not(feature = "ml"))]
+    {
+        let _ = args;
+        anyhow::bail!("ML feature is not enabled. Cannot use tune_hyperparams.");
+    }
+
+    #[cfg(feature = "ml")]
+    {
+        let stops_val = args
+            .get("stops")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
+
+        let stops: Vec<VRPSolverStop> = stops_val
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let lat = s
+                    .get("lat")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+                let lon = s
+                    .get("lon")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+                let label = s
+                    .get("label")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let demand = s.get("demand").and_then(|v| v.as_f64());
+                Ok(VRPSolverStop {
+                    lat,
+                    lon,
+                    label,
+                    demand,
+                    arrival_time: None,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let num_vehicles = args
+            .get("num_vehicles")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1) as usize;
+        let vehicle_capacity = args
+            .get("vehicle_capacity")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(100.0);
+        let objective = match args
+            .get("objective")
+            .and_then(|v| v.as_str())
+            .unwrap_or("min_distance")
+        {
+            "min_time" => VrpObjective::MinTime,
+            "balance_load" => VrpObjective::BalanceLoad,
+            "min_vehicles" => VrpObjective::MinVehicles,
+            _ => VrpObjective::MinDistance,
+        };
+
+        let input = VRPSolverInput {
+            locations: stops,
+            num_vehicles,
+            vehicle_capacity,
+            objective,
+            matrix: None,
+            service_time_secs: None,
+            use_time_windows: false,
+            window_open: None,
+            window_close: None,
+            hyperparams: None,
+        };
+
+        let features = InstanceFeatures::from_input(&input);
+        let params = predict_hyperparams(&features);
+
+        Ok(json!({
+            "max_iterations": params.max_iterations,
+            "temperature": params.temperature,
+            "tabu_tenure": params.tabu_tenure,
+            "cooling_rate": params.cooling_rate,
+            "neighbourhood_radius": params.neighbourhood_radius,
+            "feature_vector": features.to_vector(),
+            "ml_ready": params.model_used,
+        }))
+    }
+}
+
+// ── Parse Routing Query handler ──────────────────────────────────────────
+
+fn handle_parse_routing_query(args: &Value) -> Result<Value> {
+    let _query = args
+        .get("query")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'query' parameter"))?;
+
+    let use_llm = args
+        .get("use_llm")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    #[cfg(feature = "ml")]
+    {
+        if use_llm {
+            tracing::info!("parse_routing_query: using LLM for query='{}'", query);
+            let mut parser = QwenNLParser::new()?;
+            let json_str = parser.parse_llm(query)?;
+
+            // Try to parse the LLM output as JSON. If it fails, fallback to regex.
+            match serde_json::from_str::<Value>(&json_str) {
+                Ok(json) => {
+                    return Ok(json!({
+                        "variant": json.get("variant").and_then(|v| v.as_str()).unwrap_or("cvrp"),
+                        "config": json,
+                        "method": "llm",
+                    }));
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "LLM output was not valid JSON: {}. Falling back to regex.",
+                        e
+                    );
+                }
+            }
+        }
+
+        let parsed = parse_query(query);
+        let json = to_vrp_json(&parsed);
+
+        Ok(json!({
+            "variant": parsed.variant,
+            "config": json,
+            "entities": parsed.entities,
+            "method": "regex",
+        }))
+    }
+
+    #[cfg(not(feature = "ml"))]
+    {
+        if use_llm {
+            anyhow::bail!("ML feature is not enabled. Cannot use LLM parser.");
+        }
+        anyhow::bail!("ML feature is not enabled. NLP requires the 'ml' feature.");
+    }
+}
+
+// ── Submit Feedback handler ────────────────────────────────────────────
+
+#[cfg(feature = "ml")]
+fn handle_submit_feedback(args: &Value) -> Result<Value> {
+    let stops_val = args
+        .get("stops")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter"))?;
+
+    let stops: Vec<VRPSolverStop> = stops_val
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let lat = s
+                .get("lat")
+                .and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+            let lon = s
+                .get("lon")
+                .and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+            let label = s
+                .get("label")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let demand = s.get("demand").and_then(|v| v.as_f64());
+            Ok(VRPSolverStop {
+                lat,
+                lon,
+                label,
+                demand,
+                arrival_time: None,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let solver_id = args
+        .get("solver_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let total_distance_km = args
+        .get("total_distance_km")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+
+    let actual_gap_pct = args
+        .get("actual_gap_pct")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+
+    let elapsed_ms = args.get("elapsed_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+
+    let log_path = args
+        .get("log_path")
+        .and_then(|v| v.as_str())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("data/feedback.jsonl"));
+
+    // Extract instance features
+    let input = VRPSolverInput {
+        locations: stops.clone(),
+        num_vehicles: args
+            .get("num_vehicles")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1) as usize,
+        vehicle_capacity: args
+            .get("vehicle_capacity")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(100.0),
+        objective: match args
+            .get("objective")
+            .and_then(|v| v.as_str())
+            .unwrap_or("min_distance")
+        {
+            "min_time" => VrpObjective::MinTime,
+            "balance_load" => VrpObjective::BalanceLoad,
+            "min_vehicles" => VrpObjective::MinVehicles,
+            _ => VrpObjective::MinDistance,
+        },
+        matrix: None,
+        service_time_secs: None,
+        use_time_windows: false,
+        window_open: None,
+        window_close: None,
+        hyperparams: None,
+    };
+
+    let features = InstanceFeatures::from_input(&input);
+    let feature_vec = features.to_vector();
+
+    let entry = SolveLogEntry {
+        timestamp: chrono::Local::now().to_rfc3339(),
+        instance_features: feature_vec,
+        solver_id: solver_id.clone(),
+        total_distance_km,
+        elapsed_ms,
+        gap_to_bks: Some(actual_gap_pct),
+    };
+
+    log_solve(entry, Some(&log_path))?;
+
+    // Count total feedback entries
+    let count = if log_path.exists() {
+        std::fs::read_to_string(&log_path)
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .count()
+    } else {
+        0
+    };
+
+    Ok(json!({
+        "status": "logged",
+        "log_path": log_path.to_string_lossy(),
+        "feedback_count": count,
+        "solver_id": solver_id,
+        "total_distance_km": total_distance_km,
+        "actual_gap_pct": actual_gap_pct,
+        "elapsed_ms": elapsed_ms,
+        "feature_vector": features.to_vector(),
+    }))
+}
+
+#[cfg(not(feature = "ml"))]
+fn handle_submit_feedback(_args: &Value) -> Result<Value> {
+    anyhow::bail!("ML feature is not enabled. submit_feedback requires feature extraction.")
 }
 
 // ── Get Valhalla Matrix handler ──────────────────────────────────────────
@@ -1720,7 +3090,71 @@ async fn handle_get_valhalla_matrix(args: &Value) -> Result<Value> {
     }))
 }
 
+
+// ── Low-priority Handlers ──────────────────────────────────────────────────
+
+#[cfg(feature = "ml")]
+fn handle_embed(args: &Value) -> Result<Value> {
+    let texts_val = args
+        .get("texts")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'texts' parameter"))?;
+
+    let texts: Vec<String> = texts_val
+        .iter()
+        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .collect();
+
+    if texts.is_empty() {
+        anyhow::bail!("No texts provided to embed");
+    }
+
+    let embeddings = v2rmp::core::embed::run_embed(texts)
+        .map_err(|e| anyhow::anyhow!("Embedding failed: {}", e))?;
+
+    Ok(json!({
+        "embeddings": embeddings
+    }))
+}
+
+#[cfg(not(feature = "ml"))]
+fn handle_embed(_args: &Value) -> Result<Value> {
+    anyhow::bail!("ML feature is not enabled. embed requires the 'ml' feature.")
+}
+
+fn handle_classify_turn(args: &Value) -> Result<Value> {
+    let bearing_delta = args
+        .get("bearing_delta")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'bearing_delta' parameter"))?;
+
+    let turn_type = v2rmp::core::optimize::classify_turn(bearing_delta);
+
+    Ok(json!({
+        "bearing_delta": bearing_delta,
+        "turn_type": turn_type
+    }))
+}
+
+fn handle_parse_csv_stops(args: &Value) -> Result<Value> {
+    let csv_path = args
+        .get("csv_path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'csv_path' parameter"))?;
+
+    let (stops, indices) = v2rmp::core::vrp::utils::parse_csv_stops(csv_path)
+        .map_err(|e| anyhow::anyhow!("Failed to parse CSV stops: {}", e))?;
+
+    Ok(json!({
+        "csv_path": csv_path,
+        "count": stops.len(),
+        "stops": stops,
+        "indices": indices
+    }))
+}
+
 // ── Main loop ───────────────────────────────────────────────────────────────
+
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -1730,11 +3164,15 @@ async fn main() -> Result<()> {
     let tool_list_json: Vec<Value> = tools
         .iter()
         .map(|t| {
-            json!({
-                "name": t.name,
-                "description": t.description,
-                "inputSchema": t.input_schema
-            })
+            let mut obj = serde_json::Map::new();
+            obj.insert("name".into(), json!(t.name));
+            obj.insert("title".into(), json!(t.title));
+            obj.insert("description".into(), json!(t.description));
+            obj.insert("inputSchema".into(), t.input_schema.clone());
+            if let Some(ref ann) = t.annotations {
+                obj.insert("annotations".into(), ann.clone());
+            }
+            Value::Object(obj)
         })
         .collect();
 
@@ -1763,12 +3201,29 @@ async fn main() -> Result<()> {
                 send(
                     &req.id,
                     json!({
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": { "tools": {} },
+                        "protocolVersion": "2025-03-26",
+                        "capabilities": { "tools": { "listChanged": false }, "logging": {} },
                         "serverInfo": {
                             "name": "rmpca-mcp-server",
                             "version": env!("CARGO_PKG_VERSION")
-                        }
+                        },
+                        "instructions": concat!(
+                            "v2rmp route optimization server. Typical agent workflow:\n",
+                            "1. Use `extract_overture` or `extract_osm` to get road network GeoJSON for a bounding box.\n",
+                            "2. Use `clean` to repair and simplify the GeoJSON (optional but recommended).\n",
+                            "3. Use `compile` to convert GeoJSON → binary .rmp format.\n",
+                            "4. Use `optimize` to run Chinese Postman (edge coverage) or VRP (stop visits) on the .rmp map.\n",
+                            "   OR use `vrp_solve` directly with stop coordinates (no .rmp file needed).\n",
+                            "5. Use `pipeline` for extract→clean→compile→optimize in one call.\n",
+                            "\n",
+                            "Utility tools: `inspect_rmp`, `list_solvers`, `haversine_distance`, `get_valhalla_matrix`.\n",
+                            "ML tools: `predict_solver`, `predict_quality`, `score_route`, `tune_hyperparams`, `submit_feedback`.\n",
+                            "Elevation tools: `elevation_query`, `elevation_profile`, `elevation_stats`, `dem_info`, `fuel_estimate`.\n",
+                            "NLP tool: `parse_routing_query` converts natural language → VRP config JSON.\n",
+                            "\n",
+                            "All file paths are local to the server host. Bounding boxes use WGS-84 (lon/lat degrees).\n",
+                            "Depot coordinates in VRP mode: first stop is the depot."
+                        )
                     }),
                 );
             }
@@ -1786,7 +3241,9 @@ async fn main() -> Result<()> {
                 let args = req.params.get("arguments").cloned().unwrap_or(Value::Null);
 
                 let result = match name {
+                    #[cfg(feature = "extract")]
                     "extract_overture" => handle_extract_overture(&args).await,
+                    #[cfg(feature = "extract")]
                     "extract_osm" => handle_extract_osm(&args).await,
                     "compile" => handle_compile(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     "optimize" => handle_optimize(&args).await,
@@ -1814,6 +3271,18 @@ async fn main() -> Result<()> {
                     "inspect_rmp" => handle_inspect_rmp(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     "pipeline" => handle_pipeline(&args).await,
                     "get_valhalla_matrix" => handle_get_valhalla_matrix(&args).await,
+                    "predict_solver" => handle_predict_solver(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "score_route" => handle_score_route(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "route_embedding" => handle_route_embedding(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "predict_quality" => handle_predict_quality(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "tune_hyperparams" => handle_tune_hyperparams(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "parse_routing_query" => handle_parse_routing_query(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     other => {
                         send_err(&req.id, -32602, &format!("Unknown tool: {other}"));
                         continue;

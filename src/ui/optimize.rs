@@ -44,7 +44,7 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let status_text = format!("Status: {}", app.optimize_status);
     let status_color = app.optimize_status.color();
 
-    let lines = vec![
+    let mut lines = vec![
         ratatui::text::Line::from(ratatui::text::Span::styled(
             "Optimize Route",
             ratatui::style::Style::default()
@@ -90,21 +90,38 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             ratatui::text::Span::raw("Depot Coordinates:  "),
             depot_display,
         ]),
-        ratatui::text::Line::from(vec![
-            ratatui::text::Span::raw("Number of Vehicles: "),
-            ratatui::text::Span::styled(
-                app.num_vehicles.to_string(),
-                ratatui::style::Style::default().fg(yellow),
-            ),
-        ]),
-        ratatui::text::Line::from(vec![
-            ratatui::text::Span::raw("Solver Algorithm:   "),
-            ratatui::text::Span::styled(
-                app.solver_id.clone(),
-                ratatui::style::Style::default().fg(yellow),
-            ),
-        ]),
         ratatui::text::Line::from(""),
+    ];
+
+    if !app.google_maps_urls.is_empty() {
+        lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+            "Google Maps Links (Sampled):",
+            ratatui::style::Style::default().fg(cyan),
+        )));
+        for url in &app.google_maps_urls {
+            lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+                url.clone(),
+                ratatui::style::Style::default().fg(green),
+            )));
+        }
+        lines.push(ratatui::text::Line::from(""));
+    }
+
+    if !app.osmand_links.is_empty() {
+        lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+            "OsmAnd Import Links:",
+            ratatui::style::Style::default().fg(cyan),
+        )));
+        for url in &app.osmand_links {
+            lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+                url.clone(),
+                ratatui::style::Style::default().fg(green),
+            )));
+        }
+        lines.push(ratatui::text::Line::from(""));
+    }
+
+    lines.extend(vec![
         ratatui::text::Line::from(ratatui::text::Span::raw(
             "────────────────────────────────────",
         )),
@@ -115,15 +132,13 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         )),
         ratatui::text::Line::from("  [C]  Set cached map file"),
         ratatui::text::Line::from("  [r]  Set route input file"),
-        ratatui::text::Line::from("  [V]  Set number of vehicles"),
-        ratatui::text::Line::from("  [S]  Set solver ID"),
         ratatui::text::Line::from("  [L]  Set left turn penalty"),
         ratatui::text::Line::from("  [R]  Set right turn penalty"),
         ratatui::text::Line::from("  [U]  Set U-turn penalty"),
         ratatui::text::Line::from("  [D]  Set depot coordinates"),
         ratatui::text::Line::from("  [Enter] Start optimization"),
         ratatui::text::Line::from("  [Esc] Return to home"),
-    ];
+    ]);
 
     let paragraph = ratatui::widgets::Paragraph::new(lines);
     f.render_widget(paragraph, inner);
