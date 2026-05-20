@@ -292,6 +292,7 @@ struct AdjEntry {
     to: u32,
     weight_m: f64,
     edge_idx: u32,
+    bearing: f64,
 }
 
 /// In-memory CPP result: both the summary stats and the ordered node-IDs of the Eulerian circuit.
@@ -350,12 +351,13 @@ pub fn solve_cpp(
         let to = edge.to as usize;
 
         let b_fwd = bearing(nodes[from].lat, nodes[from].lon, nodes[to].lat, nodes[to].lon);
-        let _b_rev = (b_fwd + 180.0) % 360.0;
+        let b_rev = (b_fwd + 180.0) % 360.0;
 
         adj[from].push(AdjEntry {
             to: edge.to,
             weight_m: edge.weight_m,
             edge_idx: idx as u32,
+            bearing: b_fwd,
         });
 
         match oneway {
@@ -364,6 +366,7 @@ pub fn solve_cpp(
                     to: edge.from,
                     weight_m: edge.weight_m,
                     edge_idx: idx as u32,
+                    bearing: b_rev,
                 });
             }
             OnewayMode::Respect => {
@@ -372,6 +375,7 @@ pub fn solve_cpp(
                         to: edge.from,
                         weight_m: edge.weight_m,
                         edge_idx: idx as u32,
+                        bearing: b_rev,
                     });
                 }
             }
@@ -381,6 +385,7 @@ pub fn solve_cpp(
                         to: edge.from,
                         weight_m: edge.weight_m,
                         edge_idx: idx as u32,
+                        bearing: b_rev,
                     });
                     adj[from].retain(|e| e.edge_idx != idx as u32);
                 } else {
@@ -388,6 +393,7 @@ pub fn solve_cpp(
                         to: edge.from,
                         weight_m: edge.weight_m,
                         edge_idx: idx as u32,
+                        bearing: b_rev,
                     });
                 }
             }
@@ -401,7 +407,7 @@ pub fn solve_cpp(
             degrees[edge.to as usize] += 1;
         }
     }
-    let odd_vertices: Vec<usize> = (0..n).filter(|&i| degrees[i] % 2 != 0).collect();
+    let odd_vertices: Vec<usize> = (0..n).filter(|&i| !degrees[i].is_multiple_of(2)).collect();
     let num_odd = odd_vertices.len();
 
     let mut duplicate_edges: Vec<(usize, usize, f64, u32, f64)> = Vec::new();
@@ -567,7 +573,7 @@ pub fn solve_cpp(
                     nodes[curr].lat,
                     nodes[curr].lon,
                 );
-                duplicate_edges.push((p, curr, weight, eidx as u32, b));
+                duplicate_edges.push((p, curr, weight, eidx, b));
                 curr = p;
             }
         }
@@ -575,16 +581,18 @@ pub fn solve_cpp(
 
     // Add duplicate edges
     for &(u, v, weight, eidx, b) in &duplicate_edges {
-        let _ = b; // bearing unused here
+        let b_rev = (b + 180.0) % 360.0;
         adj[u].push(AdjEntry {
             to: v as u32,
             weight_m: weight,
             edge_idx: eidx,
+            bearing: b,
         });
         adj[v].push(AdjEntry {
             to: u as u32,
             weight_m: weight,
             edge_idx: eidx,
+            bearing: b_rev,
         });
     }
 
@@ -667,33 +675,20 @@ pub fn solve_cpp(
         }
     }
 
-    // Turn classification
-    if circuit.len() > 2 {
-        for i in 1..circuit.len().saturating_sub(1) {
-            let prev = circuit[i - 1] as usize;
-            let curr = circuit[i] as usize;
-            let next = circuit[i + 1] as usize;
-            if prev == curr || curr == next {
-                continue;
-            }
-            let b_in = bearing(
-                nodes[prev].lat,
-                nodes[prev].lon,
-                nodes[curr].lat,
-                nodes[curr].lon,
-            );
-            let b_out = bearing(
-                nodes[curr].lat,
-                nodes[curr].lon,
-                nodes[next].lat,
-                nodes[next].lon,
-            );
-            let delta = b_out - b_in;
-            match classify_turn(delta) {
-                "left" => turns.left += 1,
-                "right" => turns.right += 1,
-                "u_turn" => turns.u_turn += 1,
-                _ => turns.straight += 1,
+    // Turn classification - optimized to use pre-calculated bearings from circuit_with_edges
+    if circuit_with_edges.len() > 2 {
+        for i in 1..circuit_with_edges.len().saturating_sub(1) {
+            let e_in = &circuit_with_edges[i].1;
+            let e_out = &circuit_with_edges[i + 1].1;
+
+            if let (Some(b_in_edge), Some(b_out_edge)) = (e_in, e_out) {
+                let delta = b_out_edge.bearing - b_in_edge.bearing;
+                match classify_turn(delta) {
+                    "left" => turns.left += 1,
+                    "right" => turns.right += 1,
+                    "u_turn" => turns.u_turn += 1,
+                    _ => turns.straight += 1,
+                }
             }
         }
     }
@@ -950,11 +945,10 @@ fn run_external_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeRe
     };
 
     if route_points.len() > 2 {
+        let mut b_in = bearing(route_points[0].lat, route_points[0].lon, route_points[1].lat, route_points[1].lon);
         for i in 1..route_points.len().saturating_sub(1) {
-            let prev = &route_points[i - 1];
             let curr = &route_points[i];
             let next = &route_points[i + 1];
-            let b_in = bearing(prev.lat, prev.lon, curr.lat, curr.lon);
             let b_out = bearing(curr.lat, curr.lon, next.lat, next.lon);
             let delta = b_out - b_in;
             match classify_turn(delta) {
@@ -963,6 +957,7 @@ fn run_external_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeRe
                 "u_turn" => turns.u_turn += 1,
                 _ => turns.straight += 1,
             }
+            b_in = b_out;
         }
     }
 
@@ -1129,7 +1124,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
                         .position(|l| l.label == window[1].label)
                         .unwrap_or(0);
 
-                    if let Some(ref cell) = matrix.get(from_idx).and_then(|row| row.get(to_idx)) {
+                    if let Some(cell) = matrix.get(from_idx).and_then(|row| row.get(to_idx)) {
                         if let Some(ref node_indices) = cell.path {
                             for &node_idx in node_indices {
                                 if (node_idx as usize) < nodes.len() {
@@ -1185,11 +1180,10 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
     if let Some(ref routes) = output.routes {
         for route in routes {
             if route.len() > 2 {
+                let mut b_in = bearing(route[0].lat, route[0].lon, route[1].lat, route[1].lon);
                 for i in 1..route.len() - 1 {
-                    let prev = &route[i - 1];
                     let curr = &route[i];
                     let next = &route[i + 1];
-                    let b_in = bearing(prev.lat, prev.lon, curr.lat, curr.lon);
                     let b_out = bearing(curr.lat, curr.lon, next.lat, next.lon);
                     let delta = b_out - b_in;
                     match classify_turn(delta) {
@@ -1198,6 +1192,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
                         "u_turn" => turns.u_turn += 1,
                         _ => turns.straight += 1,
                     }
+                    b_in = b_out;
                 }
             }
         }
@@ -1420,6 +1415,7 @@ mod tests {
             depot: None,
             oneway_mode: OnewayMode::Ignore,
             mode: SolverMode::Cpp,
+            cpp_engine: CppEngine::Internal,
             num_vehicles: 1,
             solver_id: "default".to_string(),
             coordinates: None,
