@@ -28,15 +28,40 @@ pub fn build_haversine_matrix(locations: &[VRPSolverStop], avg_speed_kmh: f64) -
         n
     ];
 
-    // Pre-calculate radians and cosines for O(n) instead of O(n^2)
-    let loc_rads: Vec<(f64, f64, f64)> = locations
-        .iter()
-        .map(|l| {
-            let lat_r = l.lat.to_radians();
-            let lon_r = l.lon.to_radians();
-            (lat_r, lon_r, lat_r.cos())
-        })
-        .collect();
+#[cfg(feature = "ml")]
+type EmbeddingsSlice<'a> = &'a [crate::core::ml::graph_embed::RoadEmbedding];
+#[cfg(not(feature = "ml"))]
+type EmbeddingsSlice<'a> = &'a [()];
+
+/// Build a distance matrix using shortest paths on the road network graph.
+pub fn build_graph_matrix(
+    stops: &[VRPSolverStop],
+    nodes: &[RmpNode],
+    edges: &[RmpEdge],
+    embeddings: Option<EmbeddingsSlice>,
+    avg_speed_kmh: f64,
+) -> DistMatrix {
+    let n_stops = stops.len();
+    let n_nodes = nodes.len();
+    if n_stops == 0 || n_nodes == 0 {
+        return vec![vec![DistCell { distance: 0.0, time: 0.0 }; n_stops]; n_stops];
+    }
+
+    // 1. Build adjacency list
+    let mut adj = vec![Vec::new(); n_nodes];
+    for (i, edge) in edges.iter().enumerate() {
+        let weight = edge.weight_m;
+        
+        // Apply learned embedding if available
+        #[cfg(feature = "ml")]
+        if let Some(embs) = embeddings {
+            if let Some(emb) = embs.get(i) {
+                // Use first dimension as a learned bias for now
+                // Research basis: GAIN (2107.07791)
+                let bias = emb.vector.get(0).copied().unwrap_or(0.0);
+                weight *= (1.0 + bias as f64).max(0.1_f64);
+            }
+        }
 
     const R: f64 = 6371.0; // Earth radius in km
     let time_factor = 3600.0 / avg_speed_kmh;

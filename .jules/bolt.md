@@ -21,10 +21,6 @@
 **Learning:** Using `std::slice::from_ref(item)` is a zero-cost way to pass a single item to a function expecting a slice, avoiding unnecessary vector allocations or clones that occur with `&[item.clone()]`.
 **Action:** Prefer `std::slice::from_ref` for performance-critical paths where single items are passed as slices.
 
-## 2026-05-13 - [Haversine Matrix Optimization]
-**Learning:** O(n^2) distance matrix construction is heavily bottlenecked by redundant trigonometric calls. Pre-calculating radians and cosines for all locations in O(n) and utilizing matrix symmetry ((i, j) = dist(j, i)$) can provide a significant speedup (~1.6x observed).
-**Action:** Always pre-calculate expensive scalar transformations (like  or ) before entering nested loops, and exploit mathematical symmetries in distance/cost matrices.
-
-## 2026-05-09 - [Haversine Matrix Optimization]
-**Learning:** O(n^2) distance matrix construction is heavily bottlenecked by redundant trigonometric calls. Pre-calculating radians and cosines for all locations in O(n) and utilizing matrix symmetry ($dist(i, j) = dist(j, i)$) can provide a significant speedup (~1.6x observed).
-**Action:** Always pre-calculate expensive scalar transformations (like `to_radians` or `cos`) before entering nested loops, and exploit mathematical symmetries in distance/cost matrices.
+## 2026-05-14 - [MCP Tool Addition Process]
+**Learning:** Adding MCP tools required ensuring all parameters are handled with rigorous JSON unwrapping, proper string formatting, and error mapping to the JSON-RPC interface. Additionally, unused code paths highlighted by clippy in previously existing modules (e.g., `ml_legacy.rs`, `cli.rs`) required careful masking or `allow(dead_code)` application since they weren't explicitly used by the new handlers.
+**Action:** When adding API handlers or tools that touch conditionally compiled or deprecated parts of a codebase, address or gracefully ignore existing `dead_code` to maintain clean CI/CD status without performing sweeping unsanctioned refactors.

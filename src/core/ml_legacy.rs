@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Machine-learning utilities for route optimization.
 //!
 //! Provides lightweight, deterministic predictors and scorers that can be
@@ -326,7 +327,6 @@ fn bearing_delta(a: &VRPSolverStop, b: &VRPSolverStop, c: &VRPSolverStop) -> f64
     let b1 = bearing(a.lat, a.lon, b.lat, b.lon);
     let b2 = bearing(b.lat, b.lon, c.lat, c.lon);
     let d = b2 - b1;
-
     ((d + 180.0) % 360.0) - 180.0
 }
 

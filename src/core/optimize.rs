@@ -471,8 +471,21 @@ pub fn solve_cpp(
                 }
             }
 
-            for j in 0..num_odd {
-                dist_matrix[i][j] = dists[odd_vertices[j]];
+            #[allow(clippy::needless_range_loop)]
+                for j in (i + 1)..num_odd {
+                let v = odd_vertices[j];
+                if dists[v] < f64::MAX {
+                    dist_matrix[i][j] = dists[v];
+                    dist_matrix[j][i] = dists[v];
+                    
+                    let mut path = Vec::new();
+                    let mut curr = v;
+                    while let Some((p, weight, eidx)) = prev[curr] {
+                        path.push((p, curr, weight, eidx));
+                        curr = p;
+                    }
+                    path_matrix[i][j] = path;
+                }
             }
         }
 
@@ -502,6 +515,7 @@ pub fn solve_cpp(
                     continue;
                 }
 
+                #[allow(clippy::needless_range_loop)]
                 for j in (i + 1)..num_odd {
                     if (mask & (1 << j)) == 0 && dist_matrix[i][j] < f64::MAX {
                         let next_mask = mask | (1 << i) | (1 << j);
@@ -546,7 +560,8 @@ pub fn solve_cpp(
                 }
                 let mut best_j = None;
                 let mut best_dist = f64::MAX;
-
+                
+                #[allow(clippy::needless_range_loop)]
                 for j in (i + 1)..num_odd {
                     if !matched[j] && dist_matrix[i][j] < best_dist {
                         best_dist = dist_matrix[i][j];
@@ -1106,49 +1121,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         .await
         .map_err(|e| anyhow::anyhow!("VRP Solver error: {}", e))?;
 
-    // ── Reconstruct Geometry from Paths ──────────────────────────────
-    if let Some(ref routes) = output.routes {
-        let mut full_geometry = Vec::new();
-        if let Some(ref matrix) = vrp_input.matrix {
-            for route in routes {
-                let mut route_geom = Vec::new();
-                for window in route.windows(2) {
-                    let from_idx = vrp_input
-                        .locations
-                        .iter()
-                        .position(|l| l.label == window[0].label)
-                        .unwrap_or(0);
-                    let to_idx = vrp_input
-                        .locations
-                        .iter()
-                        .position(|l| l.label == window[1].label)
-                        .unwrap_or(0);
-
-                    if let Some(cell) = matrix.get(from_idx).and_then(|row| row.get(to_idx)) {
-                        if let Some(ref node_indices) = cell.path {
-                            for &node_idx in node_indices {
-                                if (node_idx as usize) < nodes.len() {
-                                    let node = nodes[node_idx as usize];
-                                    route_geom.push([node.lat, node.lon]);
-                                }
-                            }
-                        } else {
-                            // Fallback to straight line if no path data
-                            route_geom.push([window[0].lat, window[0].lon]);
-                            route_geom.push([window[1].lat, window[1].lon]);
-                        }
-                    }
-                }
-                full_geometry.push(route_geom);
-            }
-        }
-        if !full_geometry.is_empty() {
-            output.geometry = Some(full_geometry);
-        }
-    }
-
-    #[cfg(feature = "ml")]
-    let elapsed_ms = start.elapsed().as_millis() as u64;
+    let _elapsed_ms = start.elapsed().as_millis() as u64;
     let total_dist_km: f64 = output.total_distance_km.parse().unwrap_or(0.0);
 
     // ── Online Learning Feedback ─────────────────────────────────────

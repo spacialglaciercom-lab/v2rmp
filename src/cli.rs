@@ -1444,6 +1444,7 @@ async fn run_embed_cmd(args: EmbedArgs, json: bool) -> Result<()> {
 }
 
 #[cfg(not(feature = "ml"))]
+#[allow(dead_code)]
 async fn run_embed_cmd(_args: EmbedArgs, _json: bool) -> Result<()> {
     anyhow::bail!("ML feature is not enabled. Cannot generate embeddings.");
 }

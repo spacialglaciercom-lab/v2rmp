@@ -50,12 +50,8 @@ use v2rmp::core::ml_legacy::{route_feature_vector, score_route, RouteFeatures};
 use v2rmp::core::nlp::QwenNLParser;
 #[cfg(feature = "ml")]
 use v2rmp::core::nlp::{parse_query, to_vrp_json};
-use v2rmp::core::optimize::{
-    CppEngine, OnewayMode, OptimizeRequest, OptimizeResult, SolverMode, TurnPenalties,
-};
-use v2rmp::core::vrp::registry::solve_with;
-use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverOutput, VRPSolverStop, VrpObjective};
-use v2rmp::core::vrp::utils::{build_haversine_matrix, get_valhalla_matrix};
+#[cfg(feature = "ml")]
+use v2rmp::core::nlp::QwenNLParser;
 
 // ── JSON-RPC / MCP types ───────────────────────────────────────────────────
 
@@ -1183,6 +1179,50 @@ fn tool_definitions() -> Vec<ToolDef> {
                 "openWorldHint": false
             })),
         },
+        #[cfg(feature = "ml")]
+        ToolDef {
+            name: "embed",
+            description: "Generate BERT embeddings for an array of text strings. Returns an array of float vectors.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "texts": {
+                        "type": "array",
+                        "description": "Array of strings to embed",
+                        "items": { "type": "string" }
+                    }
+                },
+                "required": ["texts"]
+            }),
+        },
+        ToolDef {
+            name: "classify_turn",
+            description: "Classify a turn as 'straight', 'left', 'right', or 'u_turn' based on its bearing delta (in radians).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "bearing_delta": {
+                        "type": "number",
+                        "description": "Bearing delta in radians (-PI to PI)"
+                    }
+                },
+                "required": ["bearing_delta"]
+            }),
+        },
+        ToolDef {
+            name: "parse_csv_stops",
+            description: "Parse a CSV file of stops into an array of VRPSolverStop objects.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "csv_path": {
+                        "type": "string",
+                        "description": "Path to the CSV file"
+                    }
+                },
+                "required": ["csv_path"]
+            }),
+        },
     ]
 }
 
@@ -1688,9 +1728,7 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
                 .get("lon")
                 .and_then(|v| v.as_f64())
                 .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
-            let label = s
-                .get("label")
-                .and_then(|v| v.as_str())
+            let label = s.get("label").and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
             let demand = s.get("demand").and_then(|v| v.as_f64());
@@ -2243,10 +2281,8 @@ fn handle_predict_solver(args: &Value) -> Result<Value> {
                     .get("lon")
                     .and_then(|v| v.as_f64())
                     .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
-                let label = s
-                    .get("label")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_else(|| "")
+                let label = s.get("label").and_then(|v| v.as_str())
+                    .unwrap_or("")
                     .to_string();
                 let demand = s.get("demand").and_then(|v| v.as_f64());
                 Ok(VRPSolverStop {
@@ -2834,7 +2870,7 @@ fn handle_tune_hyperparams(args: &Value) -> Result<Value> {
 // ── Parse Routing Query handler ──────────────────────────────────────────
 
 fn handle_parse_routing_query(args: &Value) -> Result<Value> {
-    let query = args
+    let _query = args
         .get("query")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing 'query' parameter"))?;
@@ -3081,7 +3117,71 @@ async fn handle_get_valhalla_matrix(args: &Value) -> Result<Value> {
     }))
 }
 
+
+// ── Low-priority Handlers ──────────────────────────────────────────────────
+
+#[cfg(feature = "ml")]
+fn handle_embed(args: &Value) -> Result<Value> {
+    let texts_val = args
+        .get("texts")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'texts' parameter"))?;
+
+    let texts: Vec<String> = texts_val
+        .iter()
+        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .collect();
+
+    if texts.is_empty() {
+        anyhow::bail!("No texts provided to embed");
+    }
+
+    let embeddings = v2rmp::core::embed::run_embed(texts)
+        .map_err(|e| anyhow::anyhow!("Embedding failed: {}", e))?;
+
+    Ok(json!({
+        "embeddings": embeddings
+    }))
+}
+
+#[cfg(not(feature = "ml"))]
+fn handle_embed(_args: &Value) -> Result<Value> {
+    anyhow::bail!("ML feature is not enabled. embed requires the 'ml' feature.")
+}
+
+fn handle_classify_turn(args: &Value) -> Result<Value> {
+    let bearing_delta = args
+        .get("bearing_delta")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'bearing_delta' parameter"))?;
+
+    let turn_type = v2rmp::core::optimize::classify_turn(bearing_delta);
+
+    Ok(json!({
+        "bearing_delta": bearing_delta,
+        "turn_type": turn_type
+    }))
+}
+
+fn handle_parse_csv_stops(args: &Value) -> Result<Value> {
+    let csv_path = args
+        .get("csv_path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Missing 'csv_path' parameter"))?;
+
+    let (stops, indices) = v2rmp::core::vrp::utils::parse_csv_stops(csv_path)
+        .map_err(|e| anyhow::anyhow!("Failed to parse CSV stops: {}", e))?;
+
+    Ok(json!({
+        "csv_path": csv_path,
+        "count": stops.len(),
+        "stops": stops,
+        "indices": indices
+    }))
+}
+
 // ── Main loop ───────────────────────────────────────────────────────────────
+
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -3172,13 +3272,42 @@ async fn main() -> Result<()> {
                     "extract_overture" => handle_extract_overture(&args).await,
                     #[cfg(feature = "extract")]
                     "extract_osm" => handle_extract_osm(&args).await,
-                    "compile" => handle_compile(&args).map_err(|e| anyhow::anyhow!("{e}")),
+                    "compile" => handle_compile(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "optimize" => handle_optimize(&args).await,
-                    "clean" => handle_clean(&args).map_err(|e| anyhow::anyhow!("{e}")),
+                    "clean" => handle_clean(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     "vrp_solve" => handle_vrp_solve(&args).await,
-                    #[cfg(feature = "extract")]
-                    "elevation_query" => {
-                        handle_elevation_query(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    "elevation_query" => handle_elevation_query(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "elevation_profile" => handle_elevation_profile(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "list_solvers" => handle_list_solvers(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "haversine_distance" => handle_haversine_distance(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "elevation_stats" => handle_elevation_stats(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "dem_info" => handle_dem_info(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "fuel_estimate" => handle_fuel_estimate(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "inspect_rmp" => handle_inspect_rmp(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "pipeline" => {
+                        match tokio::time::timeout(
+                            std::time::Duration::from_secs(30),
+                            handle_pipeline(&args)
+                        ).await {
+                            Ok(Ok(v)) => Ok(v),
+                            Ok(Err(e)) => Err(anyhow::anyhow!("{e}")),
+                            Err(_elapsed) => Ok(json!({
+                                "error": "timeout",
+                                "stage": "pipeline",
+                                "retryable": true,
+                                "hint": "Overture S3 extraction or pipeline stage exceeded 30-second timeout. Use extract_overture directly with a smaller bbox, or run offline."
+                            })),
+                        }
                     }
                     #[cfg(feature = "extract")]
                     "elevation_profile" => {
@@ -3220,9 +3349,27 @@ async fn main() -> Result<()> {
                     "parse_routing_query" => {
                         handle_parse_routing_query(&args).map_err(|e| anyhow::anyhow!("{e}"))
                     }
-                    #[cfg(feature = "extract")]
-                    "pipeline" => handle_pipeline(&args).await,
-                    "get_valhalla_matrix" => handle_get_valhalla_matrix(&args).await,
+                    "predict_solver" => handle_predict_solver(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "score_route" => handle_score_route(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "route_embedding" => handle_route_embedding(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "predict_quality" => handle_predict_quality(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "tune_hyperparams" => handle_tune_hyperparams(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "parse_routing_query" => handle_parse_routing_query(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+
+                    "submit_feedback" => handle_submit_feedback(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "embed" => handle_embed(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "classify_turn" => handle_classify_turn(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "parse_csv_stops" => handle_parse_csv_stops(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}")),
                     other => {
                         send_err(&req.id, -32602, &format!("Unknown tool: {other}"));
                         continue;
