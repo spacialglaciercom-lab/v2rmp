@@ -34,7 +34,10 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
                     ];
                     for (i, (icon, label)) in MENU_ITEMS.iter().enumerate() {
                         let is_selected = app.current_view == views[i];
-                        if ui.selectable_label(is_selected, format!("{} {}", icon, label)).clicked() {
+                        if ui
+                            .selectable_label(is_selected, format!("{} {}", icon, label))
+                            .clicked()
+                        {
                             app.current_view = views[i].clone();
                             if views[i] == super::View::BrowseMaps {
                                 app.refresh_cached_maps();
@@ -69,12 +72,23 @@ pub fn draw(ui: &mut egui::Ui, app: &mut GuiApp) {
                             for entry in app.log_entries.iter().rev().take(50) {
                                 ui.horizontal(|ui| {
                                     let level_color = match entry.level {
-                                        super::LogLevel::Info => egui::Color32::from_rgb(80, 180, 220),
-                                        super::LogLevel::Success => egui::Color32::from_rgb(80, 220, 80),
-                                        super::LogLevel::Warn => egui::Color32::from_rgb(220, 200, 60),
-                                        super::LogLevel::Error => egui::Color32::from_rgb(220, 80, 80),
+                                        super::LogLevel::Info => {
+                                            egui::Color32::from_rgb(80, 180, 220)
+                                        }
+                                        super::LogLevel::Success => {
+                                            egui::Color32::from_rgb(80, 220, 80)
+                                        }
+                                        super::LogLevel::Warn => {
+                                            egui::Color32::from_rgb(220, 200, 60)
+                                        }
+                                        super::LogLevel::Error => {
+                                            egui::Color32::from_rgb(220, 80, 80)
+                                        }
                                     };
-                                    ui.colored_label(egui::Color32::from_rgb(100, 100, 100), &entry.timestamp);
+                                    ui.colored_label(
+                                        egui::Color32::from_rgb(100, 100, 100),
+                                        &entry.timestamp,
+                                    );
                                     ui.colored_label(level_color, format!("[{}]", entry.level));
                                     ui.label(&entry.message);
                                 });
