@@ -22,7 +22,6 @@ from shapely.strtree import STRtree
 from .geojson_ops import (
     GeoJSONFeature,
     GeoJSONFeatureCollection,
-    _haversine_km,
     _haversine_km_vectorized,
 )
 
@@ -49,6 +48,7 @@ async def limit_geojson_clean_body_size(request: Request) -> None:
                 )
         except ValueError:
             pass
+
 
 def _round_key(lon: float, lat: float, decimals: int = 6) -> tuple[float, float]:
     return (round(lon, decimals), round(lat, decimals))
