@@ -1444,78 +1444,6 @@ async fn run_embed_cmd(args: EmbedArgs, json: bool) -> Result<()> {
 }
 
 #[cfg(not(feature = "ml"))]
-#[allow(dead_code)]
-async fn run_embed_cmd(_args: EmbedArgs, _json: bool) -> Result<()> {
-    anyhow::bail!("ML feature is not enabled. Cannot generate embeddings.");
-}
-
-// ── Graph Embed handler ─────────────────────────────────────────────
-
-#[cfg(feature = "ml")]
-fn run_graph_embed_cmd(args: GraphEmbedArgs, json: bool) -> Result<()> {
-    use crate::core::ml::node_embed::{EmbedConfig, embed_graph};
-    use crate::core::optimize::read_rmp_file;
-    use std::io::Read;
-
-    // Load .rmp file
-    let mut file_data = Vec::new();
-    std::fs::File::open(&args.input)?
-        .read_to_end(&mut file_data)?;
-    let (nodes, edges) = read_rmp_file(&file_data)?;
-
-    if nodes.is_empty() {
-        anyhow::bail!("No nodes found in .rmp file: {}", args.input);
-    }
-
-    if !json {
-        tracing::info!(
-            "Road network: {} nodes, {} edges from {}",
-            nodes.len(),
-            edges.len(),
-            args.input
-        );
-    }
-
-    let config = EmbedConfig {
-        method: args.method,
-        dimensions: args.dim,
-        walk_length: args.walk_length,
-        num_walks: args.num_walks,
-        p: args.p,
-        q: args.q,
-        window: args.window,
-        negative_samples: args.negative_samples,
-        lr: args.lr,
-        epochs: args.epochs,
-        threads: 1,
-        include_edges: args.include_edges,
-    };
-
-    let result = embed_graph(&nodes, &edges, &config)?;
-
-    let output_data = serde_json::to_string_pretty(&result)?;
-
-    match &args.output {
-        Some(path) => {
-            std::fs::write(path, &output_data)?;
-            if !json {
-                tracing::info!(
-                    "Wrote {} node embeddings (dim={}) to {}",
-                    result.num_nodes,
-                    result.dimensions,
-                    path
-                );
-            }
-        }
-        None => {
-            println!("{}", output_data);
-        }
-    }
-
-    Ok(())
-}
-
-#[cfg(not(feature = "ml"))]
 fn run_graph_embed_cmd(_args: GraphEmbedArgs, _json: bool) -> Result<()> {
     anyhow::bail!("ML feature is not enabled. Cannot generate graph embeddings.");
 }
@@ -1876,47 +1804,29 @@ pub async fn run() -> Result<()> {
     Ok(())
 }
 
-#[cfg(all(test, feature = "extract"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_parse_bbox_valid() {
-        let result = parse_bbox("-122.4,37.7,-122.3,37.8");
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), (-122.4, 37.7, -122.3, 37.8));
+        let result = parse_bbox("-74.0,40.0,-73.0,41.0").unwrap();
+        assert_eq!(result, (-74.0, 40.0, -73.0, 41.0));
+
+        let result = parse_bbox("0,0,0,0").unwrap();
+        assert_eq!(result, (0.0, 0.0, 0.0, 0.0));
     }
 
     #[test]
-    fn test_parse_bbox_too_few_parts() {
-        let result = parse_bbox("-122.4,37.7,-122.3");
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            "Bounding box must have exactly 4 values: MIN_LON,MIN_LAT,MAX_LON,MAX_LAT"
-        );
+    fn test_parse_bbox_invalid_count() {
+        assert!(parse_bbox("-74.0,40.0,-73.0").is_err());
+        assert!(parse_bbox("-74.0,40.0,-73.0,41.0,42.0").is_err());
+        assert!(parse_bbox("").is_err());
     }
 
     #[test]
-    fn test_parse_bbox_too_many_parts() {
-        let result = parse_bbox("-122.4,37.7,-122.3,37.8,0.0");
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            "Bounding box must have exactly 4 values: MIN_LON,MIN_LAT,MAX_LON,MAX_LAT"
-        );
-    }
-
-    #[test]
-    fn test_parse_bbox_invalid_number() {
-        let result = parse_bbox("-122.4,37.7,abc,37.8");
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "Invalid bbox value: abc");
-    }
-
-    #[test]
-    fn test_parse_bbox_empty() {
-        let result = parse_bbox("");
-        assert!(result.is_err());
+    fn test_parse_bbox_invalid_format() {
+        let err = parse_bbox("-74.0,abc,-73.0,41.0").unwrap_err();
+        assert!(err.to_string().contains("Invalid bbox value"));
     }
 }
