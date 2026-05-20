@@ -30,6 +30,7 @@ pub(crate) mod test_utils {
             use_time_windows: false,
             window_open: None,
             window_close: None,
+            hyperparams: None,
         }
     }
 }

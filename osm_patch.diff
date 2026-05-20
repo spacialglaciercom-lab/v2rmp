@@ -1,0 +1,144 @@
+<<<<<<< SEARCH
+                // Check if it's a road
+                let mut highway: Option<String> = None;
+                let mut name: Option<String> = None;
+                let mut oneway: Option<String> = None;
+                let mut surface: Option<String> = None;
+
+                for (key, value) in way.tags() {
+                    match key {
+                        "highway" => highway = Some(value.to_string()),
+                        "name" => name = Some(value.to_string()),
+                        "oneway" => oneway = Some(value.to_string()),
+                        "surface" => surface = Some(value.to_string()),
+                        _ => {}
+                    }
+                }
+
+                // Filter by highway tag
+                if let Some(ref hw) = highway {
+                    if !road_classes.is_empty() && !road_classes.contains(hw) {
+                        return;
+                    }
+
+                    // Build geometry from node refs
+                    let mut geometry: Vec<(f64, f64)> = Vec::new();
+                    for node_id in way.refs() {
+                        if let Some(&coords) = nodes.get(&node_id) {
+                            geometry.push(coords);
+                        }
+                    }
+
+                    // Only include ways with at least 2 nodes in bbox
+                    if geometry.len() >= 2 {
+                        segments.push(OsmSegment {
+                            id: way.id(),
+                            name,
+                            highway: hw.clone(),
+                            oneway,
+                            surface,
+                            geometry,
+                        });
+                    }
+                }
+=======
+                // Check if it's a road
+                let mut highway_val: Option<&str> = None;
+                let mut name_val: Option<&str> = None;
+                let mut oneway_val: Option<&str> = None;
+                let mut surface_val: Option<&str> = None;
+
+                for (key, value) in way.tags() {
+                    match key {
+                        "highway" => highway_val = Some(value),
+                        "name" => name_val = Some(value),
+                        "oneway" => oneway_val = Some(value),
+                        "surface" => surface_val = Some(value),
+                        _ => {}
+                    }
+                }
+
+                // Filter by highway tag
+                if let Some(hw) = highway_val {
+                    if !road_classes.is_empty() && !road_classes.iter().any(|rc| rc == hw) {
+                        return;
+                    }
+
+                    // Build geometry from node refs
+                    let mut geometry: Vec<(f64, f64)> = Vec::new();
+                    for node_id in way.refs() {
+                        if let Some(&coords) = nodes.get(&node_id) {
+                            geometry.push(coords);
+                        }
+                    }
+
+                    // Only include ways with at least 2 nodes in bbox
+                    if geometry.len() >= 2 {
+                        segments.push(OsmSegment {
+                            id: way.id(),
+                            name: name_val.map(|s| s.to_string()),
+                            highway: hw.to_string(),
+                            oneway: oneway_val.map(|s| s.to_string()),
+                            surface: surface_val.map(|s| s.to_string()),
+                            geometry,
+                        });
+                    }
+                }
+>>>>>>> REPLACE
+<<<<<<< SEARCH
+/// Convert OSM segment to GeoJSON Feature
+pub fn segment_to_feature(seg: OsmSegment) -> Feature {
+    let coordinates: Vec<Vec<f64>> = seg
+        .geometry
+        .iter()
+        .map(|(lon, lat)| vec![*lon, *lat])
+        .collect();
+
+    let geometry = GeoJsonGeometry {
+        bbox: None,
+        value: GeoJsonValue::LineString(coordinates),
+        foreign_members: None,
+    };
+
+    let mut props = serde_json::Map::new();
+    props.insert("id".to_string(), serde_json::Value::Number(seg.id.into()));
+    props.insert("class".to_string(), serde_json::Value::String(seg.highway.clone()));
+
+    if let Some(ref name) = seg.name {
+        props.insert("name".to_string(), serde_json::Value::String(name.clone()));
+    }
+    if let Some(ref oneway) = seg.oneway {
+        props.insert("oneway".to_string(), serde_json::Value::String(oneway.clone()));
+    }
+    if let Some(ref surface) = seg.surface {
+        props.insert("surface".to_string(), serde_json::Value::String(surface.clone()));
+    }
+=======
+/// Convert OSM segment to GeoJSON Feature
+pub fn segment_to_feature(seg: OsmSegment) -> Feature {
+    let coordinates: Vec<Vec<f64>> = seg
+        .geometry
+        .into_iter()
+        .map(|(lon, lat)| vec![lon, lat])
+        .collect();
+
+    let geometry = GeoJsonGeometry {
+        bbox: None,
+        value: GeoJsonValue::LineString(coordinates),
+        foreign_members: None,
+    };
+
+    let mut props = serde_json::Map::new();
+    props.insert("id".to_string(), serde_json::Value::Number(seg.id.into()));
+    props.insert("class".to_string(), serde_json::Value::String(seg.highway));
+
+    if let Some(name) = seg.name {
+        props.insert("name".to_string(), serde_json::Value::String(name));
+    }
+    if let Some(oneway) = seg.oneway {
+        props.insert("oneway".to_string(), serde_json::Value::String(oneway));
+    }
+    if let Some(surface) = seg.surface {
+        props.insert("surface".to_string(), serde_json::Value::String(surface));
+    }
+>>>>>>> REPLACE
