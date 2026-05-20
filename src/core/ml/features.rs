@@ -8,7 +8,6 @@
 
 use crate::core::haversine_m;
 use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
-use std::collections::HashMap;
 
 /// 28-dimensional normalized instance feature vector.
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -91,7 +90,8 @@ impl InstanceFeatures {
         // Centroid of stops
         let centroid_lat = lats.iter().sum::<f64>() / lats.len() as f64;
         let centroid_lon = lons.iter().sum::<f64>() / lons.len() as f64;
-        let depot_centroid_dist = haversine_m(depot.lat, depot.lon, centroid_lat, centroid_lon) / 1000.0;
+        let depot_centroid_dist =
+            haversine_m(depot.lat, depot.lon, centroid_lat, centroid_lon) / 1000.0;
 
         // ── Demand features ───────────────────────────────────────────
         let demands: Vec<f64> = others.iter().filter_map(|s| s.demand).collect();
@@ -287,7 +287,7 @@ fn knn_graph_features(stops: &[&VRPSolverStop], k: usize) -> KnnFeatures {
 
     // Diameter & avg shortest path (Floyd-Warshall for small n)
     let (diameter, avg_sp) = if n <= 200 {
-        let (sp, diam, avg) = all_pairs_shortest_paths(&dists);
+        let (_sp, diam, avg) = all_pairs_shortest_paths(&dists);
         (diam, avg)
     } else {
         // For large n, approximate with sampled pairs
@@ -298,9 +298,13 @@ fn knn_graph_features(stops: &[&VRPSolverStop], k: usize) -> KnnFeatures {
         for _ in 0..sample {
             let i = (rand_u32() as usize) % n;
             let j = (rand_u32() as usize) % n;
-            if i == j { continue; }
+            if i == j {
+                continue;
+            }
             let d = dists[i][j];
-            if d > max_d { max_d = d; }
+            if d > max_d {
+                max_d = d;
+            }
             sum_d += d;
             count += 1;
         }
@@ -319,7 +323,9 @@ fn knn_graph_features(stops: &[&VRPSolverStop], k: usize) -> KnnFeatures {
     let mut edge_count = 0;
     for i in 0..n {
         for &j in &adj[i] {
-            if i >= j { continue; }
+            if i >= j {
+                continue;
+            }
             let di = degrees[i] as f64;
             let dj = degrees[j] as f64;
             sum_xy += di * dj;
@@ -404,13 +410,13 @@ fn all_pairs_shortest_paths(dists: &[Vec<f64>]) -> (Vec<Vec<f64>>, f64, f64) {
     let mut max_d = 0.0;
     let mut sum_d = 0.0;
     let mut count = 0;
-    for i in 0..n {
-        for j in (i + 1)..n {
-            if sp[i][j] < f64::MAX / 2.0 {
-                if sp[i][j] > max_d {
-                    max_d = sp[i][j];
+    for (i, row) in sp.iter().enumerate().take(n) {
+        for val in row.iter().take(n).skip(i + 1) {
+            if *val < f64::MAX / 2.0 {
+                if *val > max_d {
+                    max_d = *val;
                 }
-                sum_d += sp[i][j];
+                sum_d += *val;
                 count += 1;
             }
         }

@@ -9,8 +9,8 @@
 //! If the model file is missing, falls back to the rule-based selector.
 
 use crate::core::ml::features::InstanceFeatures;
-use crate::core::ml_legacy::{predict_solver as rule_predict_solver, SolverPrediction};
-use crate::core::vrp::types::{VRPSolverInput, VrpObjective};
+use crate::core::ml_legacy::predict_solver as rule_predict_solver;
+use crate::core::vrp::types::VRPSolverInput;
 use anyhow::{Context, Result};
 #[cfg(feature = "ml")]
 use candle_core::{Device, Tensor, DType};
@@ -22,14 +22,15 @@ use std::path::Path;
 const NUM_FEATURES: usize = 28;
 const HIDDEN1: usize = 128;
 const HIDDEN2: usize = 64;
-const NUM_SOLVERS: usize = 5;
+const NUM_SOLVERS: usize = 6;
 
 const SOLVER_IDS: [&str; NUM_SOLVERS] = [
     "default",
     "clarke_wright",
     "sweep",
-    "two_opt",
     "or_opt",
+    "two_opt",
+    "neural_guided",
 ];
 
 /// Learned MLP solver selector.
@@ -45,38 +46,45 @@ pub struct NeuralSelector {
 impl NeuralSelector {
     /// Load from a safetensors file.
     pub fn from_file(path: &Path) -> Result<Self> {
-        let device = Device::Cpu;
+        let device = crate::core::ml::best_device()?;
         let tensors = candle_core::safetensors::load(path, &device)
             .with_context(|| format!("Failed to load safetensors from {}", path.display()))?;
         let vb = VarBuilder::from_tensors(tensors, DType::F32, &device);
         let lin1 = linear(NUM_FEATURES, HIDDEN1, vb.pp("lin1"))?;
         let lin2 = linear(HIDDEN1, HIDDEN2, vb.pp("lin2"))?;
         let lin3 = linear(HIDDEN2, NUM_SOLVERS, vb.pp("lin3"))?;
-        Ok(Self { lin1, lin2, lin3, device })
+        Ok(Self {
+            lin1,
+            lin2,
+            lin3,
+            device,
+        })
     }
 
-    /// Predict solver probabilities from instance features.
-    pub fn predict(&self,
-        features: &InstanceFeatures,
-    ) -> Result<NeuralPrediction> {
+    /// Predict best solver using classification (argmax probability).
+    pub fn predict(&self, features: &InstanceFeatures) -> Result<NeuralPrediction> {
         let x = features.to_vector();
         let input = Tensor::from_vec(x, (1, NUM_FEATURES), &self.device)?;
         let h1 = self.lin1.forward(&input)?.relu()?;
         let h2 = self.lin2.forward(&h1)?.relu()?;
         let logits = self.lin3.forward(&h2)?;
         let probs = candle_nn::ops::softmax(&logits, 1)?;
-        let probs_vec: Vec<f32> = probs.to_vec1()?;
+        let vals: Vec<f32> = probs.squeeze(0)?.to_vec1()?;
 
-        let mut indexed: Vec<(usize, f32)> = probs_vec.iter().enumerate().map(|(i, &p)| (i, p)).collect();
+        let mut indexed: Vec<(usize, f32)> =
+            vals.iter().enumerate().map(|(i, &v)| (i, v)).collect();
+        // Sort by probability DESCENDING (higher is better)
         indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let best_idx = indexed[0].0;
         let best_prob = indexed[0].1;
-        let runner_up = indexed.get(1).map(|(i, p)| (SOLVER_IDS[*i].to_string(), *p));
+        let runner_up = indexed
+            .get(1)
+            .map(|(i, v)| (SOLVER_IDS[*i].to_string(), *v));
 
         let all_scores: Vec<(String, f64)> = indexed
             .iter()
-            .map(|(i, p)| (SOLVER_IDS[*i].to_string(), *p as f64))
+            .map(|(i, v)| (SOLVER_IDS[*i].to_string(), *v as f64))
             .collect();
 
         Ok(NeuralPrediction {
@@ -84,6 +92,7 @@ impl NeuralSelector {
             confidence: best_prob as f64,
             runner_up,
             all_scores,
+            model_used: true,
         })
     }
 }
@@ -95,6 +104,8 @@ pub struct NeuralPrediction {
     pub confidence: f64,
     pub runner_up: Option<(String, f32)>,
     pub all_scores: Vec<(String, f64)>,
+    /// Whether the learned neural model was used (true) or rule-based heuristic (false).
+    pub model_used: bool,
 }
 
 /// High-level API: predict the best solver for a VRP instance.
@@ -129,8 +140,7 @@ pub fn predict_solver(
     }
 
     // Fallback: rule-based
-    let legacy = rule_predict_solver(&crate::core::ml_legacy::RouteFeatures::from_input(input)
-    );
+    let legacy = rule_predict_solver(&crate::core::ml_legacy::RouteFeatures::from_input(input));
     let all_scores: Vec<(String, f64)> = legacy.all_scores;
     let runner_up = legacy.runner_up.map(|(id, score)| (id, score as f32));
     Ok(NeuralPrediction {
@@ -138,11 +148,29 @@ pub fn predict_solver(
         confidence: legacy.confidence,
         runner_up,
         all_scores,
+        model_used: false,
     })
 }
 
 /// Default model path relative to the executable.
 pub fn default_model_path() -> std::path::PathBuf {
+    // 1. Try relative to current executable
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            let p = exe_dir.join("models").join("solver_selector.safetensors");
+            if p.exists() {
+                return p;
+            }
+        }
+    }
+
+    // 2. Try relative to current working directory
+    let p = std::path::PathBuf::from("models/solver_selector.safetensors");
+    if p.exists() {
+        return p;
+    }
+
+    // Fallback
     std::env::current_exe()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .parent()
@@ -177,8 +205,8 @@ mod tests {
             make_stop(2.0, 0.0, "b"),
         ];
         let input = make_input(stops, 1);
-        let pred = predict_solver(&input, Some(Path::new("/nonexistent/model.safetensors"))
-        ).unwrap();
+        let pred =
+            predict_solver(&input, Some(Path::new("/nonexistent/model.safetensors"))).unwrap();
         assert!(!pred.recommended.is_empty());
         assert!(pred.confidence > 0.0);
     }
