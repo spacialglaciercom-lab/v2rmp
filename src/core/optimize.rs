@@ -1420,6 +1420,7 @@ mod tests {
             depot: None,
             oneway_mode: OnewayMode::Ignore,
             mode: SolverMode::Cpp,
+            cpp_engine: CppEngine::Internal,
             num_vehicles: 1,
             solver_id: "default".to_string(),
             coordinates: None,
