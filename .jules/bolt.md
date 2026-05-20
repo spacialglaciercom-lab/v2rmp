@@ -21,6 +21,10 @@
 **Learning:** Using `std::slice::from_ref(item)` is a zero-cost way to pass a single item to a function expecting a slice, avoiding unnecessary vector allocations or clones that occur with `&[item.clone()]`.
 **Action:** Prefer `std::slice::from_ref` for performance-critical paths where single items are passed as slices.
 
-## 2026-05-14 - [MCP Tool Addition Process]
-**Learning:** Adding MCP tools required ensuring all parameters are handled with rigorous JSON unwrapping, proper string formatting, and error mapping to the JSON-RPC interface. Additionally, unused code paths highlighted by clippy in previously existing modules (e.g., `ml_legacy.rs`, `cli.rs`) required careful masking or `allow(dead_code)` application since they weren't explicitly used by the new handlers.
-**Action:** When adding API handlers or tools that touch conditionally compiled or deprecated parts of a codebase, address or gracefully ignore existing `dead_code` to maintain clean CI/CD status without performing sweeping unsanctioned refactors.
+## 2026-05-10 - [Geometric Computation & Matrix Optimization]
+**Learning:** Reducing trigonometric complexity from (n^2)$ to (n)$ in distance matrix construction by pre-calculating radians and cosines significantly improves VRP performance. In path-based metrics (like turn classification), reusing bearings between segments reduces  and trig calls by 50%. Using  for angle normalization is more robust and performant than  loops or the  operator in Rust.
+**Action:** Always pre-calculate trig values before (n^2)$ loops and reuse intermediate geometric results in contiguous path iterations. Use  for all circular value normalization.
+
+## 2026-05-10 - [Geometric Computation & Matrix Optimization]
+**Learning:** Reducing trigonometric complexity from $O(n^2)$ to $O(n)$ in distance matrix construction by pre-calculating radians and cosines significantly improves VRP performance. In path-based metrics (like turn classification), reusing bearings between segments reduces `atan2` and trig calls by 50%. Using `rem_euclid` for angle normalization is more robust and performant than `while` loops or the `%` operator in Rust.
+**Action:** Always pre-calculate trig values before $O(n^2)$ loops and reuse intermediate geometric results in contiguous path iterations. Use `rem_euclid` for all circular value normalization.

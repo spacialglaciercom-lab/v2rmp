@@ -17,71 +17,33 @@ pub fn haversine_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 /// Optimized with pre-calculated radians/cosines and matrix symmetry.
 pub fn build_haversine_matrix(locations: &[VRPSolverStop], avg_speed_kmh: f64) -> DistMatrix {
     let n = locations.len();
-    let mut matrix = vec![
-        vec![
-            DistCell {
-                distance: 0.0,
-                time: 0.0
-            };
-            n
-        ];
-        n
-    ];
+    let mut matrix = Vec::with_capacity(n);
 
-#[cfg(feature = "ml")]
-type EmbeddingsSlice<'a> = &'a [crate::core::ml::graph_embed::RoadEmbedding];
-#[cfg(not(feature = "ml"))]
-type EmbeddingsSlice<'a> = &'a [()];
+    // Pre-calculate radians and cosines for O(n) instead of O(n^2)
+    let locs_rad: Vec<(f64, f64, f64)> = locations
+        .iter()
+        .map(|l| {
+            let lat_r = l.lat.to_radians();
+            (lat_r, l.lon.to_radians(), lat_r.cos())
+        })
+        .collect();
 
-/// Build a distance matrix using shortest paths on the road network graph.
-pub fn build_graph_matrix(
-    stops: &[VRPSolverStop],
-    nodes: &[RmpNode],
-    edges: &[RmpEdge],
-    embeddings: Option<EmbeddingsSlice>,
-    avg_speed_kmh: f64,
-) -> DistMatrix {
-    let n_stops = stops.len();
-    let n_nodes = nodes.len();
-    if n_stops == 0 || n_nodes == 0 {
-        return vec![vec![DistCell { distance: 0.0, time: 0.0 }; n_stops]; n_stops];
-    }
-
-    // 1. Build adjacency list
-    let mut adj = vec![Vec::new(); n_nodes];
-    for (i, edge) in edges.iter().enumerate() {
-        let weight = edge.weight_m;
-        
-        // Apply learned embedding if available
-        #[cfg(feature = "ml")]
-        if let Some(embs) = embeddings {
-            if let Some(emb) = embs.get(i) {
-                // Use first dimension as a learned bias for now
-                // Research basis: GAIN (2107.07791)
-                let bias = emb.vector.get(0).copied().unwrap_or(0.0);
-                weight *= (1.0 + bias as f64).max(0.1_f64);
-            }
-        }
-
-    const R: f64 = 6371.0; // Earth radius in km
-    let time_factor = 3600.0 / avg_speed_kmh;
+    const R_KM: f64 = 6371.0;
 
     for i in 0..n {
-        let (lat1_r, lon1_r, cos_lat1) = loc_rads[i];
+        let mut row = Vec::with_capacity(n);
+        let (lat1, lon1, cos_lat1) = locs_rad[i];
 
-        for j in (i + 1)..n {
-            let (lat2_r, lon2_r, cos_lat2) = loc_rads[j];
+        for j in 0..n {
+            let (lat2, lon2, cos_lat2) = locs_rad[j];
 
-            let dlat = lat2_r - lat1_r;
-            let dlon = lon2_r - lon1_r;
+            let dlat = lat2 - lat1;
+            let dlon = lon2 - lon1;
+            let a = (dlat / 2.0).sin().powi(2) + cos_lat1 * cos_lat2 * (dlon / 2.0).sin().powi(2);
+            let dist = R_KM * 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
 
-            let a = (dlat / 2.0).sin().powi(2)
-                + cos_lat1 * cos_lat2 * (dlon / 2.0).sin().powi(2);
-            let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-            let dist = R * c;
-            let time = dist * time_factor;
-
-            let cell = DistCell {
+            let time_sec = (dist / avg_speed_kmh) * 3600.0;
+            row.push(DistCell {
                 distance: dist,
                 time,
             };

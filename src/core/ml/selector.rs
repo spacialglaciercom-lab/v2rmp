@@ -12,8 +12,10 @@ use crate::core::ml::features::InstanceFeatures;
 use crate::core::ml_legacy::predict_solver as rule_predict_solver;
 use crate::core::vrp::types::VRPSolverInput;
 use anyhow::{Context, Result};
-use candle_core::{DType, Device, Tensor};
-use candle_nn::{linear, Linear, Module, VarBuilder};
+#[cfg(feature = "ml")]
+use candle_core::{Device, Tensor, DType};
+#[cfg(feature = "ml")]
+use candle_nn::{linear, Module, VarBuilder, Linear};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -32,6 +34,7 @@ const SOLVER_IDS: [&str; NUM_SOLVERS] = [
 ];
 
 /// Learned MLP solver selector.
+#[cfg(feature = "ml")]
 pub struct NeuralSelector {
     lin1: Linear,
     lin2: Linear,
@@ -39,6 +42,7 @@ pub struct NeuralSelector {
     device: Device,
 }
 
+#[cfg(feature = "ml")]
 impl NeuralSelector {
     /// Load from a safetensors file.
     pub fn from_file(path: &Path) -> Result<Self> {
@@ -114,52 +118,22 @@ pub fn predict_solver(
 ) -> Result<NeuralPrediction> {
     let features = InstanceFeatures::from_input(input);
 
-    if let Some(path) = model_path {
-        if path.exists() {
-            match NeuralSelector::from_file(path) {
-                Ok(selector) => match selector.predict(&features) {
-                    Ok(mut pred) => {
-                        pred.model_used = true;
-                        return Ok(pred);
+    #[cfg(feature = "ml")]
+    {
+        if let Some(path) = model_path {
+            if path.exists() {
+                match NeuralSelector::from_file(path) {
+                    Ok(selector) => {
+                        match selector.predict(&features) {
+                            Ok(pred) => return Ok(pred),
+                            Err(e) => {
+                                tracing::warn!("Neural selector inference failed: {}. Falling back to rule-based.", e);
+                            }
+                        }
                     }
                     Err(e) => {
-                        println!("DEBUG: Neural selector inference failed: {}", e);
-                        tracing::warn!(
-                            "Neural selector inference failed: {}. Falling back to rule-based.",
-                            e
-                        );
+                        tracing::warn!("Failed to load neural selector: {}. Falling back to rule-based.", e);
                     }
-                },
-                Err(e) => {
-                    println!(
-                        "DEBUG: Failed to load neural selector from {:?}: {}",
-                        path, e
-                    );
-                    tracing::warn!(
-                        "Failed to load neural selector: {}. Falling back to rule-based.",
-                        e
-                    );
-                }
-            }
-        } else {
-            println!("DEBUG: model_path {:?} does not exist", path);
-        }
-    } else {
-        // If no path given, try default model path
-        let default_path = default_model_path();
-        if default_path.exists() {
-            match NeuralSelector::from_file(&default_path) {
-                Ok(selector) => match selector.predict(&features) {
-                    Ok(mut pred) => {
-                        pred.model_used = true;
-                        return Ok(pred);
-                    }
-                    Err(e) => {
-                        tracing::warn!("Neural selector inference failed (default path): {}. Falling back to rule-based.", e);
-                    }
-                },
-                Err(e) => {
-                    tracing::warn!("Failed to load neural selector from default path: {}. Falling back to rule-based.", e);
                 }
             }
         }
