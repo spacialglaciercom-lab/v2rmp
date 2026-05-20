@@ -82,6 +82,7 @@ pub struct DroneVrpInstance {
 pub struct DroneVrpResult {
     pub routes: Vec<Vec<usize>>,
     pub energy_used_wh: f64,
+    pub algorithm: String,
     pub violations: Vec<String>,
 }
 

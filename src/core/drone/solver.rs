@@ -96,6 +96,7 @@ impl DroneSolver {
         Ok(DroneVrpResult {
             routes,
             energy_used_wh: total_energy,
+            algorithm: "Greedy Nearest Neighbor (Energy Constrained)".to_string(),
             violations,
         })
     }
