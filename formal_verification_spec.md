@@ -50,7 +50,10 @@ The algorithm mutates state primarily in four ways during the execution of Hierh
 
 Let $V$ be the number of vertices and $E$ be the total number of edges (original + duplicated).
 
-*   **Odd Vertices & Matching:** Finding odd vertices is $\mathcal{O}(V)$. The greedy minimum-weight perfect matching involves sorting odd vertices $\mathcal{O}(V_{\text{odd}} \log V_{\text{odd}})$ and a linear search bounded by $\mathcal{O}(V_{\text{odd}}^2)$.
+*   **Odd Vertices & Matching:** Finding odd vertices is $\mathcal{O}(V)$. The minimum-weight perfect matching involves:
+    *   **All-Pairs Shortest Paths (APSP):** Running Dijkstra's algorithm from each odd vertex, taking $\mathcal{O}(V_{\text{odd}} \times (E \log V))$ time.
+    *   **Exact Matching (Bitmask DP):** For $V_{\text{odd}} \le 24$, an exact Dynamic Programming approach is used, taking $\mathcal{O}(V_{\text{odd}}^2 \times 2^{V_{\text{odd}}})$ time and $\mathcal{O}(2^{V_{\text{odd}}})$ space.
+    *   **Greedy Fallback:** For $V_{\text{odd}} > 24$, a greedy approach is used, bounding the search to $\mathcal{O}(V_{\text{odd}}^2)$.
 *   **Hierholzer's Algorithm Loop:**
     *   The `while` loop runs exactly $2E + 1$ times.
     *   Finding the reverse edge in `adj` requires an $\mathcal{O}(\text{degree}(v))$ search.
