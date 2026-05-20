@@ -1,18 +1,29 @@
 pub mod clean;
 pub mod compile;
+pub mod drone;
 #[cfg(feature = "extract")]
 pub mod elevation;
+#[cfg(feature = "ml")]
+pub mod embed;
 #[cfg(feature = "extract")]
 pub mod extract;
 pub mod geo_types;
 pub mod optimize;
-#[cfg(feature = "extract")]
+#[cfg(feature = "ml")]
+pub mod ml;
+#[cfg(feature = "ml")]
+pub mod ml_legacy;
+#[cfg(feature = "ml")]
+pub mod nlp;
+pub mod optimize;
+pub mod partition;
+pub mod pmtiles_extract;
+pub mod postgis_cpp;
+pub mod r2;
 pub mod osm;
 #[cfg(feature = "extract")]
 pub mod overture;
 pub mod vrp;
-#[cfg(feature = "ml")]
-pub mod embed;
 
 /// Haversine distance in meters between two WGS-84 points (lat, lon order).
 pub fn haversine_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {

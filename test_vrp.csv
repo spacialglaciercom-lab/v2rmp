@@ -1,0 +1,5 @@
+lat,lon,label,demand,type
+45.5017,-73.5673,Depot,0,depot
+45.5088,-73.5540,Stop1,1,stop
+45.5036,-73.5697,Stop2,1,stop
+45.4948,-73.5779,Stop3,1,stop

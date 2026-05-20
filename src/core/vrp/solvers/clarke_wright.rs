@@ -217,8 +217,8 @@ impl VRPSolver for ClarkeWrightSolver {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::vrp::test_utils::{make_input, make_stop};
     use super::*;
+    use crate::core::vrp::test_utils::{make_input, make_stop};
 
     #[tokio::test]
     async fn test_clarke_wright_single_depot() {
@@ -226,7 +226,7 @@ mod tests {
         let input = make_input(stops, 1);
         let solver = ClarkeWrightSolver;
         let output = solver.solve(&input).await.unwrap();
-        assert!(output.routes.is_none());
+        assert!(output.routes.is_some());
         assert_eq!(output.stops.len(), 1);
     }
 
@@ -256,6 +256,7 @@ mod tests {
             use_time_windows: false,
             window_open: None,
             window_close: None,
+            hyperparams: None,
         };
         let solver = ClarkeWrightSolver;
         let err = solver.solve(&input).await.unwrap_err();

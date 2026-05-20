@@ -2,6 +2,8 @@
 
 #[cfg(feature = "cli")]
 pub mod app;
+#[cfg(feature = "cli")]
+pub mod cli;
 pub mod core;
 #[cfg(feature = "cli")]
 pub mod event;

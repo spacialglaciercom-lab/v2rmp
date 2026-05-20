@@ -151,7 +151,7 @@ pub struct GuiApp {
     pub solver_id: String,
     pub optimize_status: Status,
     pub oneway_mode: crate::core::optimize::OnewayMode,
-    pub optimize_bbox: Option<(f64, f64, f64, f64)>,
+    pub optimize_bbox: Option<crate::core::geo_types::BBox>,
     pub optimize_bbox_input: String,
 
     // VRP
@@ -174,7 +174,7 @@ pub struct GuiApp {
     pub map_nodes: Vec<crate::core::optimize::RmpNode>,
     pub map_edges: Vec<crate::core::optimize::RmpEdge>,
     pub map_file_label: String,
-    pub map_bounds: Option<(f64, f64, f64, f64)>,
+    pub map_bounds: Option<crate::core::geo_types::BBox>,
     pub cpp_output: Option<crate::core::optimize::CppOutput>,
     pub map_solve_error: Option<String>,
     pub map_depot_text: String,
@@ -250,7 +250,10 @@ impl Default for GuiApp {
 impl GuiApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut app = Self::default();
-        app.log(LogLevel::Info, format!("rmpca v{} started", env!("CARGO_PKG_VERSION")));
+        app.log(
+            LogLevel::Info,
+            format!("rmpca v{} started", env!("CARGO_PKG_VERSION")),
+        );
         app.log(LogLevel::Info, "Ready - select a workflow step to begin");
         app
     }
@@ -316,7 +319,11 @@ impl GuiApp {
                     self.set_network(nodes, edges, label);
                     self.log(
                         LogLevel::Success,
-                        format!("Loaded {} nodes, {} edges", self.map_nodes.len(), self.map_edges.len()),
+                        format!(
+                            "Loaded {} nodes, {} edges",
+                            self.map_nodes.len(),
+                            self.map_edges.len()
+                        ),
                     );
                 }
                 Err(e) => {
@@ -349,7 +356,12 @@ impl GuiApp {
                 max_lon = max_lon.max(n.lon);
             }
             let pad = 0.002;
-            self.map_bounds = Some((min_lat - pad, max_lat + pad, min_lon - pad, max_lon + pad));
+            self.map_bounds = Some(crate::core::geo_types::BBox {
+                min_lon: min_lon - pad,
+                min_lat: min_lat - pad,
+                max_lon: max_lon + pad,
+                max_lat: max_lat + pad,
+            });
         }
         self.map_nodes = nodes;
         self.map_edges = edges;
@@ -385,84 +397,82 @@ impl eframe::App for GuiApp {
         egui::Panel::bottom("log_panel")
             .min_size(80.0)
             .show_inside(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("Logs");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("Clear").clicked() {
-                        self.log_entries.clear();
-                    }
+                ui.horizontal(|ui| {
+                    ui.heading("Logs");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button("Clear").clicked() {
+                            self.log_entries.clear();
+                        }
+                    });
                 });
+                egui::ScrollArea::vertical()
+                    .max_height(120.0)
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| {
+                        for entry in &self.log_entries {
+                            ui.horizontal(|ui| {
+                                let ts_color = egui::Color32::from_rgb(80, 180, 220);
+                                let level_color = match entry.level {
+                                    LogLevel::Info => egui::Color32::from_rgb(80, 180, 220),
+                                    LogLevel::Success => egui::Color32::from_rgb(80, 220, 80),
+                                    LogLevel::Warn => egui::Color32::from_rgb(220, 200, 60),
+                                    LogLevel::Error => egui::Color32::from_rgb(220, 80, 80),
+                                };
+                                ui.colored_label(ts_color, &entry.timestamp);
+                                ui.colored_label(level_color, format!("[{}]", entry.level));
+                                ui.label(&entry.message);
+                            });
+                        }
+                    });
             });
-            egui::ScrollArea::vertical()
-                .max_height(120.0)
-                .stick_to_bottom(true)
-                .show(ui, |ui| {
-                    for entry in &self.log_entries {
-                        ui.horizontal(|ui| {
-                            let ts_color = egui::Color32::from_rgb(80, 180, 220);
-                            let level_color = match entry.level {
-                                LogLevel::Info => egui::Color32::from_rgb(80, 180, 220),
-                                LogLevel::Success => egui::Color32::from_rgb(80, 220, 80),
-                                LogLevel::Warn => egui::Color32::from_rgb(220, 200, 60),
-                                LogLevel::Error => egui::Color32::from_rgb(220, 80, 80),
-                            };
-                            ui.colored_label(ts_color, &entry.timestamp);
-                            ui.colored_label(level_color, format!("[{}]", entry.level));
-                            ui.label(&entry.message);
-                        });
-                    }
-                });
-        });
 
         // Left sidebar
         egui::Panel::left("sidebar")
             .min_size(180.0)
             .default_size(200.0)
             .show_inside(ui, |ui| {
-            ui.vertical(|ui| {
-                ui.heading("Workflow");
-                ui.separator();
+                ui.vertical(|ui| {
+                    ui.heading("Workflow");
+                    ui.separator();
 
-                let items = [
-                    ("Extract Data", View::Extract),
-                    ("Clean GeoJSON", View::Clean),
-                    ("Compile Map", View::Compile),
-                    ("CPP Solver", View::Optimize),
-                    ("VRP Solver", View::Vrp),
-                    ("Cached Maps", View::BrowseMaps),
-                    ("Saved Routes", View::BrowseRoutes),
-                ];
+                    let items = [
+                        ("Extract Data", View::Extract),
+                        ("Clean GeoJSON", View::Clean),
+                        ("Compile Map", View::Compile),
+                        ("CPP Solver", View::Optimize),
+                        ("VRP Solver", View::Vrp),
+                        ("Cached Maps", View::BrowseMaps),
+                        ("Saved Routes", View::BrowseRoutes),
+                    ];
 
-                for (label, view) in items {
-                    let is_selected = self.current_view == view;
-                    if ui.selectable_label(is_selected, label).clicked() {
-                        self.current_view = view.clone();
-                        if view == View::BrowseMaps {
-                            self.refresh_cached_maps();
-                            self.browse_selection = 0;
-                        }
-                        if view == View::BrowseRoutes {
-                            self.refresh_saved_routes();
-                            self.browse_selection = 0;
+                    for (label, view) in items {
+                        let is_selected = self.current_view == view;
+                        if ui.selectable_label(is_selected, label).clicked() {
+                            self.current_view = view.clone();
+                            if view == View::BrowseMaps {
+                                self.refresh_cached_maps();
+                                self.browse_selection = 0;
+                            }
+                            if view == View::BrowseRoutes {
+                                self.refresh_saved_routes();
+                                self.browse_selection = 0;
+                            }
                         }
                     }
-                }
+                });
             });
-        });
 
         // Central panel
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            match self.current_view {
-                View::Home => home::draw(ui, self),
-                View::Extract => extract::draw(ui, self),
-                View::Compile => compile::draw(ui, self),
-                View::Clean => clean::draw(ui, self),
-                View::Optimize => optimize::draw(ui, self),
-                View::Vrp => vrp::draw(ui, self),
-                View::BrowseMaps => browse::draw_maps(ui, self),
-                View::BrowseRoutes => browse::draw_routes(ui, self),
-                View::Help => help::draw(ui),
-            }
+        egui::CentralPanel::default().show_inside(ui, |ui| match self.current_view {
+            View::Home => home::draw(ui, self),
+            View::Extract => extract::draw(ui, self),
+            View::Compile => compile::draw(ui, self),
+            View::Clean => clean::draw(ui, self),
+            View::Optimize => optimize::draw(ui, self),
+            View::Vrp => vrp::draw(ui, self),
+            View::BrowseMaps => browse::draw_maps(ui, self),
+            View::BrowseRoutes => browse::draw_routes(ui, self),
+            View::Help => help::draw(ui),
         });
 
         ctx.request_repaint();
@@ -512,10 +522,16 @@ pub fn status_label(ui: &mut egui::Ui, status: &Status) {
             });
         }
         Status::Done(msg) => {
-            ui.colored_label(egui::Color32::from_rgb(80, 220, 80), format!("Status: Done - {}", msg));
+            ui.colored_label(
+                egui::Color32::from_rgb(80, 220, 80),
+                format!("Status: Done - {}", msg),
+            );
         }
         Status::Error(msg) => {
-            ui.colored_label(egui::Color32::from_rgb(220, 80, 80), format!("Status: Error: {}", msg));
+            ui.colored_label(
+                egui::Color32::from_rgb(220, 80, 80),
+                format!("Status: Error: {}", msg),
+            );
         }
     }
 }
@@ -526,18 +542,17 @@ pub fn project_latlon(
     lon: f64,
     canvas_center: egui::Pos2,
     canvas_size: egui::Vec2,
-    bounds: (f64, f64, f64, f64),
+    bbox: &crate::core::geo_types::BBox,
     zoom: f32,
     pan: egui::Vec2,
 ) -> egui::Pos2 {
-    let (min_lat, max_lat, min_lon, max_lon) = bounds;
-    let lat_range = (max_lat - min_lat).max(0.001);
-    let lon_range = (max_lon - min_lon).max(0.001);
+    let lat_range = (bbox.max_lat - bbox.min_lat).max(0.001);
+    let lon_range = (bbox.max_lon - bbox.min_lon).max(0.001);
     let scale_x = canvas_size.x / lon_range as f32;
     let scale_y = canvas_size.y / lat_range as f32;
     let scale = scale_x.min(scale_y) * zoom;
-    let x = (lon - min_lon) as f32 * scale + (canvas_size.x - lon_range as f32 * scale) * 0.5;
-    let y = (max_lat - lat) as f32 * scale + (canvas_size.y - lat_range as f32 * scale) * 0.5;
+    let x = (lon - bbox.min_lon) as f32 * scale + (canvas_size.x - lon_range as f32 * scale) * 0.5;
+    let y = (bbox.max_lat - lat) as f32 * scale + (canvas_size.y - lat_range as f32 * scale) * 0.5;
     egui::pos2(
         canvas_center.x + x - canvas_size.x * 0.5 + pan.x,
         canvas_center.y + y - canvas_size.y * 0.5 + pan.y,
@@ -546,10 +561,8 @@ pub fn project_latlon(
 
 /// Render the map canvas (reused across views that need map viz).
 pub fn draw_map_canvas(ui: &mut egui::Ui, app: &mut GuiApp) {
-    let (rect, response) = ui.allocate_exact_size(
-        ui.available_size(),
-        egui::Sense::click_and_drag(),
-    );
+    let (rect, response) =
+        ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
 
     if ui.is_rect_visible(rect) {
         let painter = ui.painter_at(rect);
@@ -581,8 +594,8 @@ pub fn draw_map_canvas(ui: &mut egui::Ui, app: &mut GuiApp) {
             app.map_zoom = 1.0;
         }
 
-        let bounds = match app.map_bounds {
-            Some(b) => b,
+        let bbox = match app.map_bounds {
+            Some(ref b) => b,
             None => return,
         };
 
@@ -595,7 +608,7 @@ pub fn draw_map_canvas(ui: &mut egui::Ui, app: &mut GuiApp) {
                     n.lon,
                     canvas_center,
                     canvas_size,
-                    bounds,
+                    bbox,
                     app.map_zoom,
                     app.map_pan,
                 )
@@ -639,7 +652,15 @@ pub fn draw_map_canvas(ui: &mut egui::Ui, app: &mut GuiApp) {
                 .cpp_output
                 .as_ref()
                 .is_some_and(|o| o.circuit.contains(&(i as u32)));
-            painter.circle_filled(*pt, node_radius, if on_circuit { circuit_node_color } else { node_color });
+            painter.circle_filled(
+                *pt,
+                node_radius,
+                if on_circuit {
+                    circuit_node_color
+                } else {
+                    node_color
+                },
+            );
         }
 
         if let Some(ref out) = app.cpp_output {
@@ -660,16 +681,15 @@ pub fn draw_map_canvas(ui: &mut egui::Ui, app: &mut GuiApp) {
 
         // Cursor position
         if let Some(mouse) = response.hover_pos() {
-            let (min_lat, max_lat, min_lon, max_lon) = bounds;
-            let lat_range = (max_lat - min_lat).max(0.001);
-            let lon_range = (max_lon - min_lon).max(0.001);
+            let lat_range = (bbox.max_lat - bbox.min_lat).max(0.001);
+            let lon_range = (bbox.max_lon - bbox.min_lon).max(0.001);
             let scale_x = canvas_size.x / lon_range as f32;
             let scale_y = canvas_size.y / lat_range as f32;
             let scale = scale_x.min(scale_y) * app.map_zoom;
             let rel_x = mouse.x - canvas_center.x - app.map_pan.x + canvas_size.x * 0.5;
             let rel_y = mouse.y - canvas_center.y - app.map_pan.y + canvas_size.y * 0.5;
-            let lon = rel_x / scale + min_lon as f32;
-            let lat = max_lat as f32 - rel_y / scale;
+            let lon = rel_x / scale + bbox.min_lon as f32;
+            let lat = bbox.max_lat as f32 - rel_y / scale;
             painter.text(
                 egui::pos2(rect.min.x + 8.0, rect.max.y - 24.0),
                 egui::Align2::LEFT_BOTTOM,

@@ -20,3 +20,11 @@
 ## 2026-05-08 - [Avoid Redundant Allocations]
 **Learning:** Using `std::slice::from_ref(item)` is a zero-cost way to pass a single item to a function expecting a slice, avoiding unnecessary vector allocations or clones that occur with `&[item.clone()]`.
 **Action:** Prefer `std::slice::from_ref` for performance-critical paths where single items are passed as slices.
+
+## 2026-05-10 - [Geometric Computation & Matrix Optimization]
+**Learning:** Reducing trigonometric complexity from (n^2)$ to (n)$ in distance matrix construction by pre-calculating radians and cosines significantly improves VRP performance. In path-based metrics (like turn classification), reusing bearings between segments reduces  and trig calls by 50%. Using  for angle normalization is more robust and performant than  loops or the  operator in Rust.
+**Action:** Always pre-calculate trig values before (n^2)$ loops and reuse intermediate geometric results in contiguous path iterations. Use  for all circular value normalization.
+
+## 2026-05-10 - [Geometric Computation & Matrix Optimization]
+**Learning:** Reducing trigonometric complexity from $O(n^2)$ to $O(n)$ in distance matrix construction by pre-calculating radians and cosines significantly improves VRP performance. In path-based metrics (like turn classification), reusing bearings between segments reduces `atan2` and trig calls by 50%. Using `rem_euclid` for angle normalization is more robust and performant than `while` loops or the `%` operator in Rust.
+**Action:** Always pre-calculate trig values before $O(n^2)$ loops and reuse intermediate geometric results in contiguous path iterations. Use `rem_euclid` for all circular value normalization.
