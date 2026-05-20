@@ -167,7 +167,7 @@ class ONNXExportWrapper(nn.Module):
 # Export logic
 # ═══════════════════════════════════════════════════════════════════════════
 
-def load_checkpoint(path_or_repo: str, ckpt_name: str = None) -> dict:
+def load_checkpoint(path_or_repo: str, ckpt_name: str | None = None) -> dict:
     """Load a checkpoint dict from local path or HF Hub."""
     if ckpt_name:
         print(f"Downloading {ckpt_name} from {path_or_repo}...")
@@ -179,7 +179,7 @@ def load_checkpoint(path_or_repo: str, ckpt_name: str = None) -> dict:
 
 
 def export_to_onnx(ckpt: dict, output_path: str, problem_size: int = 50,
-                   max_steps: int = None):
+                   max_steps: int | None = None):
     """Export a loaded checkpoint to ONNX."""
     
     # Extract config from checkpoint
@@ -204,7 +204,7 @@ def export_to_onnx(ckpt: dict, output_path: str, problem_size: int = 50,
     
     # Build model
     model = CVRPModel(embedding_dim, num_heads, num_layers, ff_dim)
-    model.load_state_dict(state)
+    model.load_state_dict(state)  # type: ignore
     model.eval()
     
     if max_steps is None:
@@ -245,7 +245,7 @@ def export_to_onnx(ckpt: dict, output_path: str, problem_size: int = 50,
     onnx.checker.check_model(onnx_model)
     
     # Runtime test
-    import onnxruntime as ort
+    import onnxruntime as ort  # type: ignore
     import numpy as np
     sess = ort.InferenceSession(output_path)
     r = sess.run(None, {

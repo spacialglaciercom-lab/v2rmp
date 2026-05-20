@@ -1,6 +1,5 @@
-import pytest
 from vector_clean import _geom_to_shapely
-from shapely.geometry import Point, LineString
+from shapely.geometry import Point
 
 def test_geom_to_shapely_valid():
     geom = {'type': 'Point', 'coordinates': [1.0, 2.0]}

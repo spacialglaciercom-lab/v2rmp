@@ -2,7 +2,8 @@
 import onnxruntime as ort
 import numpy as np
 
-def test_inference(model_path):
+def test_inference():
+    model_path = "cvrp20_model.onnx"
     print(f"Testing model: {model_path}")
     try:
         sess = ort.InferenceSession(model_path)

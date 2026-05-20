@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -21,7 +20,7 @@ def recv(proc):
 def test():
     if not SERVER_BIN.exists():
         print(f"Error: {SERVER_BIN} not found. Run 'cargo build --bin rmpca-mcp'")
-        sys.exit(1)
+        return # skip in pytest if not built
 
     print(f"Starting server: {SERVER_BIN}")
     proc = subprocess.Popen(

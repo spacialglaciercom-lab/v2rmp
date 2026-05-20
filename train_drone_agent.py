@@ -11,11 +11,14 @@ embeddings_path = 'mile_end_embeddings.json'
 if not os.path.exists(embeddings_path):
     embeddings_path = '/mnt/mile_end_embeddings.json'
 
-with open(embeddings_path, 'r') as f:
-    emb_data = json.load(f)
-    nodes = emb_data['nodes']
+if os.path.exists(embeddings_path):
+    with open(embeddings_path, 'r') as f:
+        emb_data = json.load(f)
+        nodes = emb_data['nodes']
     # Map node_idx to vector
-    node_vectors = {n['node_idx']: n['vector'] for n in nodes}
+        node_vectors = {n['node_idx']: n['vector'] for n in nodes}
+else:
+    node_vectors = {}
 
 # 2. Simple Drone Environment
 class DroneEnv:

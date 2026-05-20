@@ -1,6 +1,5 @@
 import struct
 import zlib
-import sys
 
 def split_rmp(input_path):
     with open(input_path, "rb") as f:
@@ -76,7 +75,7 @@ def split_rmp(input_path):
     with open("half2.rmp", "wb") as f:
         f.write(create_half(False))
 
-    print(f"Created half1.rmp and half2.rmp")
+    print("Created half1.rmp and half2.rmp")
 
 if __name__ == "__main__":
     split_rmp("../Downloads/test_filtered.rmp")

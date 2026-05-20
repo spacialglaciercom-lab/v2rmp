@@ -67,14 +67,15 @@ def extract_text(resp):
         return json.dumps(result)
     return content[0].get("text", "{}")
 
-client = MCPClient("/home/rmp/v2rmp/target/debug/rmpca-mcp")
-tools_resp = client.list_tools()
-tools = [t["name"] for t in tools_resp.get("result", {}).get("tools", [])]
-print(f"Available tools: {tools}")
+if __name__ == "__main__":
+    client = MCPClient("/home/rmp/v2rmp/target/debug/rmpca-mcp")
+    tools_resp = client.list_tools()
+    tools = [t["name"] for t in tools_resp.get("result", {}).get("tools", [])]
+    print(f"Available tools: {tools}")
 
-target_tool = "v2rmp_neural_optimize"
+    target_tool = "v2rmp_neural_optimize"
 
-args = {
+    args = {
     "model_path": "/home/rmp/v2rmp/cvrp50_model.onnx",
     "locations": [
         [45.5017, -73.5673], [45.5088, -73.5540], [45.4948, -73.5779], [45.5122, -73.5547],
@@ -85,13 +86,13 @@ args = {
     ],
     "demands": [0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
     "capacity": 10.0
-}
+    }
 
-print(f"Calling {target_tool} ...")
-try:
-    resp = client.call(target_tool, args)
-    print(extract_text(resp))
-except Exception as e:
-    print(f"Error: {e}")
-finally:
-    client.close()
+    print(f"Calling {target_tool} ...")
+    try:
+        resp = client.call(target_tool, args)
+        print(extract_text(resp))
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        client.close()
