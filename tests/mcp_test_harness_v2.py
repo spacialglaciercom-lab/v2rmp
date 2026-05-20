@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """v2rmp MCP Tools Test Harness v2 — faster, with per-test timeout."""
-import json, os, subprocess, sys, math, struct, select, time
+import json
+import subprocess
+import sys
+import math
+import struct
+import select
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -217,7 +223,7 @@ def main():
     actual_dem = TEST_DIR / "mountain.dem.vrt"
 
     stops = generate_delivery_stops(-0.04, 45.76, num_stops=6)
-    print(f"Data ready. Starting server ...")
+    print("Data ready. Starting server ...")
 
     client = MCPClient(SERVER_BIN)
     results = {}

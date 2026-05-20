@@ -39,6 +39,7 @@ impl SolveResult {
         VRPSolverOutput {
             stops: routes.iter().flatten().cloned().collect(),
             routes: Some(routes),
+            geometry: None,
             total_distance_km: format!("{:.2}", self.total_distance),
             total_time_min: (self.total_time / 60.0).round() as u32,
             route_stats: None,
@@ -74,6 +75,8 @@ pub struct VRPSolverRouteStats {
 pub struct DistCell {
     pub distance: f64,
     pub time: f64,
+    /// Optional sequence of node indices forming the path.
+    pub path: Option<Vec<u32>>,
 }
 
 /// Distance/time matrix: `matrix[from][to]`.
@@ -159,6 +162,9 @@ pub struct TurnCounts {
 pub struct VRPSolverOutput {
     pub stops: Vec<VRPSolverStop>,
     pub routes: Option<Vec<Vec<VRPSolverStop>>>,
+    /// High-fidelity road geometry for each route.
+    /// Vec of routes, where each route is a Vec of [lat, lon] coordinates.
+    pub geometry: Option<Vec<Vec<[f64; 2]>>>,
     pub total_distance_km: String,
     pub total_time_min: u32,
     pub route_stats: Option<Vec<VRPSolverRouteStats>>,
@@ -438,8 +444,9 @@ mod tests {
     #[test]
     fn test_dist_cell() {
         let cell = DistCell {
-            distance: 10.5,
-            time: 300.0,
+            distance: 10.0,
+            time: 600.0,
+            path: None,
         };
         let json = serde_json::to_string(&cell).unwrap();
         let back: DistCell = serde_json::from_str(&json).unwrap();

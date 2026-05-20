@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::fs;
+use v2rmp::core::drone::{DroneModel, DroneSpec, DroneVrpInstance, OutputFormat, wpml};
 use v2rmp::core::drone::solver::DroneSolver;
-use v2rmp::core::drone::{DroneModel, DroneSpec, DroneVrpInstance};
 
 #[derive(Parser)]
 #[command(name = "rmpca-drone")]
@@ -19,6 +19,10 @@ enum Commands {
         /// Drone model (FlyCart30 or Wing)
         #[arg(long, default_value = "FlyCart30")]
         drone: String,
+
+        /// Override battery capacity in Wh
+        #[arg(long)]
+        battery_wh: Option<f64>,
 
         /// Path to GeoJSON file with customers (point features with 'demand' property)
         #[arg(long)]
@@ -39,6 +43,10 @@ enum Commands {
         /// Output path for the solution GeoJSON
         #[arg(short, long)]
         output: Option<String>,
+
+        /// Output format (json or wpml)
+        #[arg(long, default_value = "json")]
+        format: String,
     },
 
     /// Calculate energy for a single flight leg
@@ -74,16 +82,24 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Solve {
             drone,
+            battery_wh,
             customers,
             depot_lat,
             depot_lon,
             wind,
             output,
+            format,
         } => {
             let model = match drone.to_lowercase().as_str() {
                 "flycart30" | "fc30" => DroneModel::FlyCart30,
                 "wing" => DroneModel::Wing,
                 _ => anyhow::bail!("Unknown drone model: {}", drone),
+            };
+
+            let out_format = match format.to_lowercase().as_str() {
+                "json" => OutputFormat::Json,
+                "wpml" => OutputFormat::Wpml,
+                _ => anyhow::bail!("Unknown output format: {}", format),
             };
 
             // Load customers from GeoJSON
@@ -111,6 +127,7 @@ fn main() -> Result<()> {
 
             let instance = DroneVrpInstance {
                 drone_model: model.clone(),
+                battery_capacity_wh: battery_wh,
                 depot: [depot_lat, depot_lon],
                 customers: customer_coords,
                 demands_kg: demands,
@@ -133,9 +150,18 @@ fn main() -> Result<()> {
             }
 
             if let Some(out_path) = output {
-                let json = serde_json::to_string_pretty(&result)?;
-                fs::write(out_path, json)?;
-                println!("Result saved to {}", result.routes.len());
+                match out_format {
+                    OutputFormat::Json => {
+                        let json = serde_json::to_string_pretty(&result)?;
+                        fs::write(&out_path, json)?;
+                        println!("Result saved to {}", out_path);
+                    }
+                    OutputFormat::Wpml => {
+                        let wpml = wpml::generate_wpml(&instance, &result)?;
+                        fs::write(&out_path, wpml)?;
+                        println!("WPML mission saved to {}", out_path);
+                    }
+                }
             }
         }
         Commands::Energy {

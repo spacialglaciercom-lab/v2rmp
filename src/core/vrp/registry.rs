@@ -211,7 +211,8 @@ mod tests {
                 Ok(VRPSolverOutput {
                     stops: vec![],
                     routes: None,
-                    total_distance_km: "0.00".into(),
+                    geometry: None,
+                    total_distance_km: "0.0".to_string(),
                     total_time_min: 0,
                     route_stats: None,
                     route_metrics: None,

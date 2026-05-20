@@ -5,10 +5,14 @@ pub struct DroneSolver;
 
 impl DroneSolver {
     pub fn solve(instance: &DroneVrpInstance) -> Result<DroneVrpResult> {
-        let spec = match instance.drone_model {
+        let mut spec = match instance.drone_model {
             DroneModel::FlyCart30 => DroneSpec::flycart30(),
             DroneModel::Wing => DroneSpec::wing(),
         };
+
+        if let Some(cap) = instance.battery_capacity_wh {
+            spec.battery_capacity_wh = cap;
+        }
 
         let mut routes = Vec::new();
         let mut unvisited: Vec<usize> = (0..instance.customers.len()).collect();
@@ -96,6 +100,7 @@ impl DroneSolver {
         Ok(DroneVrpResult {
             routes,
             energy_used_wh: total_energy,
+            algorithm: "Greedy Nearest Neighbor (Energy Constrained)".to_string(),
             violations,
         })
     }

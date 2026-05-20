@@ -26,13 +26,14 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
-use std::path::Path;
 use std::path::PathBuf;
 use v2rmp::core::clean::{clean_geojson, CleanOptions};
 use v2rmp::core::compile::{CompileRequest, CompileResult};
 #[cfg(feature = "extract")]
 use v2rmp::core::elevation::local::LocalDem;
+#[cfg(feature = "extract")]
 use v2rmp::core::elevation::FuelCalculator;
+#[cfg(feature = "extract")]
 use v2rmp::core::extract::{BBoxRequest, ExtractRequest, ExtractResult, ExtractSource, RoadClass};
 #[cfg(feature = "ml")]
 use v2rmp::core::ml::automl::predict_hyperparams;
@@ -50,10 +51,10 @@ use v2rmp::core::nlp::QwenNLParser;
 #[cfg(feature = "ml")]
 use v2rmp::core::nlp::{parse_query, to_vrp_json};
 use v2rmp::core::optimize::{
-    OnewayMode, OptimizeRequest, OptimizeResult, SolverMode, TurnPenalties,
+    CppEngine, OnewayMode, OptimizeRequest, OptimizeResult, SolverMode, TurnPenalties,
 };
 use v2rmp::core::vrp::registry::solve_with;
-use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
+use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverOutput, VRPSolverStop, VrpObjective};
 use v2rmp::core::vrp::utils::{build_haversine_matrix, get_valhalla_matrix};
 
 // ── JSON-RPC / MCP types ───────────────────────────────────────────────────
@@ -1389,6 +1390,7 @@ fn handle_compile(args: &Value) -> Result<Value> {
         road_classes: vec![],
         clean_options,
         prune_disconnected: prune,
+        prune_spurs: false,
     };
 
     let result: CompileResult = v2rmp::core::compile::run_compile(&req)?;
@@ -1446,6 +1448,7 @@ async fn handle_optimize(args: &Value) -> Result<Value> {
         depot,
         oneway_mode,
         mode,
+        cpp_engine: CppEngine::default(),
         num_vehicles,
         solver_id,
         coordinates: None,
@@ -1458,6 +1461,8 @@ async fn handle_optimize(args: &Value) -> Result<Value> {
         "total_segments": result.total_segments,
         "num_routes": result.num_routes,
         "elapsed_ms": result.elapsed_ms,
+        "is_partial": result.is_partial,
+        "unreachable_edges": result.unreachable_edges,
     });
 
     if args
@@ -1735,7 +1740,7 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
     let matrix = build_haversine_matrix(&stops, avg_speed_kmh);
 
     #[cfg(feature = "ml")]
-    let mut input = VRPSolverInput {
+    let input = VRPSolverInput {
         locations: stops,
         num_vehicles,
         vehicle_capacity,
@@ -2414,6 +2419,7 @@ fn handle_score_route(args: &Value) -> Result<Value> {
     let output = VRPSolverOutput {
         stops: routes.iter().flatten().cloned().collect(),
         routes: Some(routes),
+        geometry: None,
         total_distance_km,
         total_time_min: 0,
         route_stats: None,
@@ -2588,6 +2594,7 @@ async fn handle_pipeline(args: &Value) -> Result<Value> {
         road_classes: vec![],
         clean_options: None,
         prune_disconnected,
+        prune_spurs: false,
     };
     let compile_result = v2rmp::core::compile::run_compile(&compile_req)?;
 
@@ -2638,6 +2645,8 @@ async fn handle_pipeline(args: &Value) -> Result<Value> {
             "deadhead_distance_km": optimize_result.deadhead_distance_km,
             "efficiency_pct": optimize_result.efficiency_pct,
             "num_routes": optimize_result.num_routes,
+            "is_partial": optimize_result.is_partial,
+            "unreachable_edges": optimize_result.unreachable_edges,
         },
     }))
 }
@@ -3167,9 +3176,11 @@ async fn main() -> Result<()> {
                     "optimize" => handle_optimize(&args).await,
                     "clean" => handle_clean(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     "vrp_solve" => handle_vrp_solve(&args).await,
+                    #[cfg(feature = "extract")]
                     "elevation_query" => {
                         handle_elevation_query(&args).map_err(|e| anyhow::anyhow!("{e}"))
                     }
+                    #[cfg(feature = "extract")]
                     "elevation_profile" => {
                         handle_elevation_profile(&args).map_err(|e| anyhow::anyhow!("{e}"))
                     }
@@ -3179,14 +3190,37 @@ async fn main() -> Result<()> {
                     "haversine_distance" => {
                         handle_haversine_distance(&args).map_err(|e| anyhow::anyhow!("{e}"))
                     }
+                    #[cfg(feature = "extract")]
                     "elevation_stats" => {
                         handle_elevation_stats(&args).map_err(|e| anyhow::anyhow!("{e}"))
                     }
+                    #[cfg(feature = "extract")]
                     "dem_info" => handle_dem_info(&args).map_err(|e| anyhow::anyhow!("{e}")),
+                    #[cfg(feature = "extract")]
                     "fuel_estimate" => {
                         handle_fuel_estimate(&args).map_err(|e| anyhow::anyhow!("{e}"))
                     }
                     "inspect_rmp" => handle_inspect_rmp(&args).map_err(|e| anyhow::anyhow!("{e}")),
+                    "predict_solver" => {
+                        handle_predict_solver(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "predict_quality" => {
+                        handle_predict_quality(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "score_route" => handle_score_route(&args).map_err(|e| anyhow::anyhow!("{e}")),
+                    "route_embedding" => {
+                        handle_route_embedding(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "tune_hyperparams" => {
+                        handle_tune_hyperparams(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "submit_feedback" => {
+                        handle_submit_feedback(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "parse_routing_query" => {
+                        handle_parse_routing_query(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    #[cfg(feature = "extract")]
                     "pipeline" => handle_pipeline(&args).await,
                     "get_valhalla_matrix" => handle_get_valhalla_matrix(&args).await,
                     other => {

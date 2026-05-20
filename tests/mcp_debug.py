@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Minimal debug script to isolate the hang."""
-import json, subprocess, time, sys
+import json
+import subprocess
+import sys
 from pathlib import Path
+import select
+"""Minimal debug script to isolate the hang."""
 
 ROOT = Path(__file__).resolve().parent.parent
 SERVER = ROOT / "target" / "release" / "rmpca-mcp-server"
@@ -23,7 +26,6 @@ proc.stdin.write(json.dumps({"jsonrpc":"2.0","id":0,"method":"initialize","param
 proc.stdin.flush()
 
 # Read response with timeout
-import select
 ready, _, _ = select.select([proc.stdout], [], [], 10)
 if ready:
     line = proc.stdout.readline()

@@ -13,14 +13,21 @@ Augment training data via feature-level SMOTE + noise, then retrain all models.
 Usage: python augment_and_retrain.py
 """
 
-import os, sys, json, time, math, argparse, copy
+import os
+import json
+import time
+import math
+import argparse
+import copy
 from collections import Counter
 
 import numpy as np
 from safetensors.numpy import save_file
 
 try:
-    import torch, torch.nn as nn, torch.nn.functional as F
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
     torch.manual_seed(42)
 except ImportError:
     raise RuntimeError("PyTorch is required.")
@@ -465,7 +472,7 @@ def main():
 
     # Show raw distribution
     c_raw = Counter(SOLVER_TO_IDX.get(e["best_solver"], 0) for e in entries)
-    print(f"\n  Raw class distribution:")
+    print("\n  Raw class distribution:")
     for sid in SOLVER_IDS:
         print(f"    {sid:18s}: {c_raw[SOLVER_TO_IDX[sid]]:5d}")
 
@@ -476,7 +483,7 @@ def main():
 
     # Show augmented distribution
     c_aug = Counter(SOLVER_TO_IDX.get(e["best_solver"], 0) for e in aug_entries)
-    print(f"\n  Augmented class distribution:")
+    print("\n  Augmented class distribution:")
     for sid in SOLVER_IDS:
         print(f"    {sid:18s}: {c_aug[SOLVER_TO_IDX[sid]]:5d}")
 
@@ -498,7 +505,7 @@ def main():
         pred = m(torch.from_numpy(X).float()).argmax(dim=1).numpy()
     print(f"  Full-data accuracy: {np.mean(pred == Y_label):.4f}")
     c_pred = Counter(pred)
-    print(f"\n  Predicted class distribution:")
+    print("\n  Predicted class distribution:")
     for sid in SOLVER_IDS:
         print(f"    {sid:18s}: {c_pred[SOLVER_TO_IDX[sid]]:5d}")
 

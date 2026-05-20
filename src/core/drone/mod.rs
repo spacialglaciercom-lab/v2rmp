@@ -1,4 +1,10 @@
 pub mod solver;
+pub mod wpml;
+
+pub mod mod_types {
+    pub use super::{DroneModel, DroneVrpInstance, DroneVrpResult, NoFlyZone};
+}
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -71,6 +77,7 @@ pub struct NoFlyZone {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DroneVrpInstance {
     pub drone_model: DroneModel,
+    pub battery_capacity_wh: Option<f64>,
     pub depot: [f64; 2],
     pub customers: Vec<[f64; 2]>,
     pub demands_kg: Vec<f64>,
@@ -78,10 +85,17 @@ pub struct DroneVrpInstance {
     pub no_fly_zones: Vec<NoFlyZone>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum OutputFormat {
+    Json,
+    Wpml,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DroneVrpResult {
     pub routes: Vec<Vec<usize>>,
     pub energy_used_wh: f64,
+    pub algorithm: String,
     pub violations: Vec<String>,
 }
 

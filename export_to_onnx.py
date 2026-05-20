@@ -12,8 +12,6 @@ Usage:
 """
 
 import argparse
-import os
-import sys
 
 import torch
 import torch.nn as nn
@@ -74,8 +72,9 @@ class Encoder(nn.Module):
     def forward(self, locs, demands):
         x = torch.cat([locs, demands], dim=-1)
         x = self.proj(x)
-        for l in self.layers:
-            x = l(x)
+        for layer in self.layers:
+            x = layer(x)
+
         return x, x.mean(dim=1, keepdim=True)
 
 
@@ -156,7 +155,7 @@ class ONNXExportWrapper(nn.Module):
         self.max_steps = max_steps
 
     def forward(self, locs, demand, capacity):
-        B, N = locs.shape[0], locs.shape[1]
+        B, _N = locs.shape[0], locs.shape[1]
         depot_l = torch.full((B, 1, 2), 0.5, device=locs.device, dtype=locs.dtype)
         full_l = torch.cat([depot_l, locs], 1)
         depot_d = torch.zeros(B, 1, 1, device=demand.device, dtype=demand.dtype)
