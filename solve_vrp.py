@@ -3,6 +3,7 @@ import subprocess
 import select
 import time
 import threading
+import os
 
 class MCPClient:
     def __init__(self, bin_path):
@@ -67,31 +68,35 @@ def extract_text(resp):
         return json.dumps(result)
     return content[0].get("text", "{}")
 
-client = MCPClient("/home/rmp/v2rmp/target/debug/rmpca-mcp")
-tools_resp = client.list_tools()
-tools = [t["name"] for t in tools_resp.get("result", {}).get("tools", [])]
-print(f"Available tools: {tools}")
 
-target_tool = "v2rmp_neural_optimize"
+if not os.path.exists("target/debug/rmpca-mcp"):
+    print("Warning: target/debug/rmpca-mcp not found. Skipping script execution. Please build with 'cargo build --bin rmpca-mcp'")
+else:
+    client = MCPClient("target/debug/rmpca-mcp")
+    tools_resp = client.list_tools()
+    tools = [t["name"] for t in tools_resp.get("result", {}).get("tools", [])]
+    print(f"Available tools: {tools}")
 
-args = {
-    "model_path": "/home/rmp/v2rmp/cvrp50_model.onnx",
-    "locations": [
-        [45.5017, -73.5673], [45.5088, -73.5540], [45.4948, -73.5779], [45.5122, -73.5547],
-        [45.5195, -73.6219], [45.4312, -73.5934], [45.5410, -73.6276], [45.5042, -73.6143],
-        [45.5161, -73.5684], [45.5284, -73.5972], [45.4851, -73.5285], [45.4475, -73.6821],
-        [45.5398, -73.5512], [45.5583, -73.5519], [45.6015, -73.6331], [45.5020, -73.4474],
-        [45.4678, -73.7412], [45.4278, -73.8341], [45.4116, -73.6845], [45.4897, -73.6231]
-    ],
-    "demands": [0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-    "capacity": 10.0
-}
+    target_tool = "v2rmp_neural_optimize"
 
-print(f"Calling {target_tool} ...")
-try:
-    resp = client.call(target_tool, args)
-    print(extract_text(resp))
-except Exception as e:
-    print(f"Error: {e}")
-finally:
-    client.close()
+    args = {
+        "model_path": "/home/rmp/v2rmp/cvrp50_model.onnx",
+        "locations": [
+            [45.5017, -73.5673], [45.5088, -73.5540], [45.4948, -73.5779], [45.5122, -73.5547],
+            [45.5195, -73.6219], [45.4312, -73.5934], [45.5410, -73.6276], [45.5042, -73.6143],
+            [45.5161, -73.5684], [45.5284, -73.5972], [45.4851, -73.5285], [45.4475, -73.6821],
+            [45.5398, -73.5512], [45.5583, -73.5519], [45.6015, -73.6331], [45.5020, -73.4474],
+            [45.4678, -73.7412], [45.4278, -73.8341], [45.4116, -73.6845], [45.4897, -73.6231]
+        ],
+        "demands": [0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        "capacity": 10.0
+    }
+
+    print(f"Calling {target_tool} ...")
+    try:
+        resp = client.call(target_tool, args)
+        print(extract_text(resp))
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        client.close()

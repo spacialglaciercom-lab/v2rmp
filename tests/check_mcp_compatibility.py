@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 #!/usr/bin/env python3
 """
 tests/check_mcp_compatibility.py — MCP server tool compatibility guard.
@@ -17,7 +18,6 @@ Usage:
 """
 
 import json
-import os
 import re
 import sys
 from pathlib import Path

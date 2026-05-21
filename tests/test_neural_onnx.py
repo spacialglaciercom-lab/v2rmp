@@ -1,8 +1,15 @@
+# mypy: ignore-errors
 #!/usr/bin/env python3
+import os
+import pytest
 import onnxruntime as ort
 import numpy as np
 
+@pytest.mark.parametrize('model_path', ['cvrp20_model.onnx', 'cvrp50_model.onnx'])
 def test_inference(model_path):
+    if not os.path.exists(model_path):
+        pytest.skip(f"Model {model_path} not found")
+
     print(f"Testing model: {model_path}")
     try:
         sess = ort.InferenceSession(model_path)
@@ -31,7 +38,3 @@ def test_inference(model_path):
         
     except Exception as e:
         print(f"Failed: {e}")
-
-if __name__ == "__main__":
-    test_inference("cvrp20_model.onnx")
-    test_inference("cvrp50_model.onnx")

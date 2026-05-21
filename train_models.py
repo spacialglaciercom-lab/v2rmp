@@ -136,7 +136,7 @@ class MLP(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-def train_classifier(name, X, Y, hidden_dims, epochs=400, lr=1e-3, batch_size=128, patience=40):
+def train_classifier(name, X, Y, hidden_dims, epochs=int(os.environ.get('EPOCHS', 400)), lr=1e-3, batch_size=128, patience=40):
     print(f"\nTraining {name} ...")
     num_classes = int(Y.max()) + 1
     model = MLP(X.shape[1], hidden_dims, num_classes)
@@ -205,7 +205,7 @@ def train_classifier(name, X, Y, hidden_dims, epochs=400, lr=1e-3, batch_size=12
     print(f"  Best val accuracy: {best_acc:.4f}")
     return best_state
 
-def train_regressor(name, X, Y, hidden_dims, epochs=400, lr=1e-3, batch_size=256, patience=40):
+def train_regressor(name, X, Y, hidden_dims, epochs=int(os.environ.get('EPOCHS', 400)), lr=1e-3, batch_size=256, patience=40):
     print(f"\nTraining {name} ...")
     model = MLP(X.shape[1], hidden_dims, Y.shape[1])
     crit = nn.MSELoss()
@@ -291,7 +291,7 @@ if __name__ == "__main__":
 
     # 1. Solver Selector (classifier)
     sel_state = train_classifier("Solver Selector", X, Y_label, [128, 64],
-                                 epochs=600, lr=1e-3, batch_size=128, patience=60)
+                                 epochs=int(os.environ.get('EPOCHS', 600)), lr=1e-3, batch_size=128, patience=60)
     save_file(state_to_candle(sel_state), "models/solver_selector.safetensors")
 
     # Quick sanity check on full data
@@ -306,19 +306,19 @@ if __name__ == "__main__":
 
     # 2. Quality Predictor
     q_state = train_regressor("Quality Predictor", X, Y_quality, [64, 32],
-                              epochs=400, lr=1e-3, batch_size=256, patience=40)
+                              epochs=int(os.environ.get('EPOCHS', 400)), lr=1e-3, batch_size=256, patience=40)
     save_file(state_to_candle(q_state), "models/quality_predictor.safetensors")
 
     # 3. AutoML Predictor
     a_state = train_regressor("AutoML Predictor", X, Y_automl, [64],
-                              epochs=300, lr=1e-3, batch_size=256, patience=30)
+                              epochs=int(os.environ.get('EPOCHS', 300)), lr=1e-3, batch_size=256, patience=30)
     save_file(state_to_candle(a_state), "models/automl.safetensors")
 
     # 4. Move Scorer
     move_X = np.array([m[0] for m in moves], dtype=np.float32)
     move_Y = np.array([[m[1]] for m in moves], dtype=np.float32)
     mv_state = train_regressor("Move Scorer", move_X, move_Y, [32, 16],
-                                 epochs=500, lr=1e-3, batch_size=512, patience=50)
+                                 epochs=int(os.environ.get('EPOCHS', 500)), lr=1e-3, batch_size=512, patience=50)
     save_file(state_to_candle(mv_state), "models/move_scorer.safetensors")
 
     # 5. GraphSAGE placeholder
