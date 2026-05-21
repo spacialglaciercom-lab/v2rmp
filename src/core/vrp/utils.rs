@@ -55,13 +55,15 @@ pub fn build_haversine_matrix(locations: &[VRPSolverStop], avg_speed_kmh: f64) -
     matrix
 }
 
+use crate::core::ml::graph_embed::RoadEmbedding;
+
 /// Build a distance matrix using graph shortest paths (Dijkstra).
 /// Fallback to haversine if graph information is insufficient.
 pub fn build_graph_matrix(
     stops: &[VRPSolverStop],
     nodes: &[RmpNode],
     edges: &[RmpEdge],
-    _embeddings: Option<&[f32]>,
+    _embeddings: Option<&[RoadEmbedding]>,
     avg_speed_kmh: f64,
 ) -> DistMatrix {
     let n_stops = stops.len();

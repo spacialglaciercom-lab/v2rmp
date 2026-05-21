@@ -1083,7 +1083,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
     // ── Graph Embeddings ─────────────────────────────────────────────
     #[cfg(feature = "ml")]
     let embeddings = {
-        let embs = crate::core::ml::graph_embed::embed_network(&nodes, &edges, None);
+        let embs = crate::core::ml::graph_embed::embed_network(&nodes, &edges);
         if !embs.is_empty() {
             Some(embs)
         } else {
@@ -1091,7 +1091,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         }
     };
     #[cfg(not(feature = "ml"))]
-    let _embeddings: Option<std::collections::HashMap<usize, Vec<f32>>> = None;
+    let embeddings: Option<Vec<crate::core::ml::graph_embed::RoadEmbedding>> = None;
 
     // 2. Build VRP Stops
     let mut stops: Vec<VRPSolverStop> = Vec::new();
@@ -1154,7 +1154,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         .await
         .map_err(|e| anyhow::anyhow!("VRP Solver error: {}", e))?;
 
-    let _elapsed_ms = start.elapsed().as_millis() as u64;
+    let elapsed_ms = start.elapsed().as_millis() as u64;
     let total_dist_km: f64 = output.total_distance_km.parse().unwrap_or(0.0);
 
     // ── Online Learning Feedback ─────────────────────────────────────

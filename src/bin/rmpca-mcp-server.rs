@@ -27,6 +27,11 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
+use v2rmp::core::ml::features::InstanceFeatures;
+use v2rmp::core::ml::quality_predictor::predict_quality;
+use v2rmp::core::ml::automl::predict_hyperparams;
+use v2rmp::core::ml::feedback::{log_solve, SolveLogEntry};
+use v2rmp::core::nlp::{parse_query, to_vrp_json, QwenNLParser};
 use v2rmp::core::clean::{clean_geojson, CleanOptions};
 use v2rmp::core::compile::{CompileRequest, CompileResult};
 #[cfg(feature = "extract")]
@@ -2900,7 +2905,7 @@ fn handle_tune_hyperparams(args: &Value) -> Result<Value> {
 // ── Parse Routing Query handler ──────────────────────────────────────────
 
 fn handle_parse_routing_query(args: &Value) -> Result<Value> {
-    let _query = args
+    let query = args
         .get("query")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing 'query' parameter"))?;

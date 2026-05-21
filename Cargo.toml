@@ -156,6 +156,7 @@ getrandom = { version = "0.2", features = ["js"] }
 [features]
 default = ["cli", "ml"]
 cli = []
-ml = ["candle-core", "candle-nn", "candle-transformers", "tokenizers", "hf-hub", "ort"]
+ml = ["candle-core", "candle-nn", "candle-transformers", "tokenizers", "hf-hub"]
+onnx = ["ort"]
 gui = ["eframe", "egui", "rfd", "wasm-bindgen-futures"]
 extract = ["gdal"]

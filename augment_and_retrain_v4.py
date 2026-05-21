@@ -385,7 +385,7 @@ def train_classifier_soft(name, X, Y_hard, Y_soft, hidden_dims, epochs=400, lr=1
         else:
             no_improve += 1
 
-        if epoch % 50 == 0 or no_improve == 0:
+        if epoch % 5 == 0 or no_improve == 0:
             pc_str = ', '.join(f'{SOLVER_IDS[i]}={per_class[i]:.2f}' for i in range(num_classes) if counts[i] > 0)
             print(f"  Epoch {epoch:3d} — loss={epoch_loss/max(steps,1):.4f} val_acc={vacc:.4f}  [{pc_str}]")
 
@@ -444,7 +444,7 @@ def train_regressor(name, X, Y, hidden_dims, epochs=400, lr=1e-3, batch_size=256
         else:
             no_improve += 1
 
-        if epoch % 50 == 0 or no_improve == 0:
+        if epoch % 5 == 0 or no_improve == 0:
             print(f"  Epoch {epoch:3d} — tr_loss={epoch_loss / nb:.6f} val_mse={vloss:.6f}")
 
         if no_improve > patience:

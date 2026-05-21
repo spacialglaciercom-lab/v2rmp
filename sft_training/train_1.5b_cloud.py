@@ -1,4 +1,17 @@
-#!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "datasets",
+#     "peft",
+#     "trl",
+#     "transformers",
+#     "huggingface_hub",
+#     "bitsandbytes",
+#     "accelerate",
+#     "trackio"
+# ]
+# ///
+
 import json
 import torch
 from datasets import Dataset
@@ -19,7 +32,7 @@ HUB_MODEL_ID = "aerialblancaservices/v2rmp-agent-1.5b"
 # ─── Load dataset from Hub ──────────────────────────────────────────────────
 
 DATASET_REPO = "aerialblancaservices/v2rmp-sft-data"
-DATASET_FILE = "dataset.jsonl"
+DATASET_FILE = "dataset_final.jsonl"
 
 print("Downloading v2rmp training dataset from Hub...")
 dataset_path = hf_hub_download(
@@ -30,7 +43,7 @@ dataset_path = hf_hub_download(
 print(f"  Downloaded to: {dataset_path}")
 
 examples = []
-with open(dataset_path, "r") as f:
+with open(dataset_path, "r", encoding="utf-8") as f:
     for line in f:
         if line.strip():
             examples.append(json.loads(line))
@@ -88,8 +101,7 @@ training_args = SFTConfig(
     eval_steps=50,
     push_to_hub=True,
     hub_model_id=HUB_MODEL_ID,
-    report_to="trackio",
-    run_name="sft_v2rmp_qwen1.5b_qlora",
+    report_to="none",
     seed=42,
 )
 

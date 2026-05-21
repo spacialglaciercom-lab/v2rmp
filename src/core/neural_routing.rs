@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
+#[cfg(feature = "ort")]
 use ort::session::Session;
+#[cfg(feature = "ort")]
 use ort::value::Value;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -30,10 +32,12 @@ pub struct NeuralRouteResponse {
     pub solve_time_ms: u64,
 }
 
+#[cfg(feature = "ort")]
 pub struct NeuralInferenceEngine {
     session: Session,
 }
 
+#[cfg(feature = "ort")]
 impl NeuralInferenceEngine {
     /// Initialize the engine by loading an ONNX model.
     pub fn new<P: AsRef<Path>>(model_path: P) -> Result<Self> {
@@ -104,7 +108,26 @@ impl NeuralInferenceEngine {
 }
 
 /// Convenience function for one-off neural routing
+#[cfg(feature = "ort")]
 pub fn solve_neural(req: &NeuralRouteRequest) -> Result<NeuralRouteResponse> {
     let mut engine = NeuralInferenceEngine::new(&req.model_path)?;
     engine.solve(req)
+}
+
+#[cfg(not(feature = "ort"))]
+pub struct NeuralInferenceEngine;
+
+#[cfg(not(feature = "ort"))]
+impl NeuralInferenceEngine {
+    pub fn new<P: AsRef<Path>>(_model_path: P) -> Result<Self> {
+        anyhow::bail!("Neural inference requires the 'ort' feature, which is not available on this platform.")
+    }
+    pub fn solve(&mut self, _req: &NeuralRouteRequest) -> Result<NeuralRouteResponse> {
+        anyhow::bail!("Neural inference requires the 'ort' feature.")
+    }
+}
+
+#[cfg(not(feature = "ort"))]
+pub fn solve_neural(_req: &NeuralRouteRequest) -> Result<NeuralRouteResponse> {
+    anyhow::bail!("Neural inference requires the 'ort' feature.")
 }

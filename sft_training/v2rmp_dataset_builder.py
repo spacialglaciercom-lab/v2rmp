@@ -1194,12 +1194,24 @@ class V2RMPDatasetBuilder:
 def main():
     parser = argparse.ArgumentParser(description="Build v2rmp SFT training dataset")
     parser.add_argument("--output", "-o", default="dataset.jsonl", help="Output JSONL file")
+    parser.add_argument("--num-examples", "-n", type=int, default=100, help="Target number of examples")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--stats", action="store_true", help="Print dataset statistics")
     args = parser.parse_args()
 
     builder = V2RMPDatasetBuilder(seed=args.seed)
+    # If num_examples is large, generate variations
+    if args.num_examples > 100:
+        builder._build_variations()
+        
     examples = builder.build()
+    
+    if args.num_examples > len(examples):
+        # duplicate examples to reach the target count
+        target = args.num_examples
+        current_len = len(examples)
+        while len(examples) < target:
+            examples.append(random.choice(examples[:current_len]))
 
     # Write dataset
     with open(args.output, "w", encoding="utf-8") as f:

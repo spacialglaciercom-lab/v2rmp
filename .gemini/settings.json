@@ -1,8 +1,14 @@
 {
   "mcpServers": {
+    "v2rmp": {
+      "command": "/root/v2rmp-fresh/target/debug/rmpca-mcp-server-legacy",
+      "args": [],
+      "trust": true
+    },
     "zilliz-codebase": {
-      "command": "/root/v2rmp/target/release/zilliz-mcp-server",
-      "args": []
+      "command": "/root/v2rmp-fresh/target/debug/zilliz-mcp-server",
+      "args": [],
+      "trust": true
     }
   }
 }

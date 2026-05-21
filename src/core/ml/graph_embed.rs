@@ -108,12 +108,26 @@ impl GraphSAGE {
 }
 
 pub fn default_model_path() -> std::path::PathBuf {
-    std::env::current_exe()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .parent()
-        .unwrap_or(std::path::Path::new("."))
-        .join("models")
-        .join("graph_embed.safetensors")
+    // 1. Try CARGO_MANIFEST_DIR (useful for tests)
+    if let Ok(base) = std::env::var("CARGO_MANIFEST_DIR") {
+        let path = std::path::PathBuf::from(base).join("models").join("graph_embed.safetensors");
+        if path.exists() {
+            return path;
+        }
+    }
+
+    // 2. Try current exe parent (useful for deployed binaries)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let path = parent.join("models").join("graph_embed.safetensors");
+            if path.exists() {
+                return path;
+            }
+        }
+    }
+
+    // 3. Fallback to current directory
+    std::path::PathBuf::from("models/graph_embed.safetensors")
 }
 
 fn try_embed_network(
@@ -178,13 +192,20 @@ fn try_embed_network(
     Ok(result)
 }
 
-/// Embed a road network graph.
-///
-/// Currently returns random-normal embeddings as a placeholder.
-/// A real implementation would load a pre-trained GraphSAGE model
-/// (PyTorch → ONNX → Candle) or train directly in Rust.
+/// Embed a road network graph using a pre-trained GraphSAGE model.
 #[allow(dead_code)]
-pub fn embed_network(_nodes: &[RmpNode], _edges: &[RmpEdge]) -> Vec<RoadEmbedding> {
-    // TODO: load GraphSAGE/Graph Attention model and run inference.
-    Vec::new()
+pub fn embed_network(nodes: &[RmpNode], edges: &[RmpEdge]) -> Vec<RoadEmbedding> {
+    let path = default_model_path();
+    if !path.exists() {
+        tracing::warn!("GraphSAGE model not found at {}", path.display());
+        return Vec::new();
+    }
+
+    match try_embed_network(nodes, edges, &path) {
+        Ok(embs) => embs,
+        Err(e) => {
+            tracing::error!("GraphSAGE embedding failed: {}", e);
+            Vec::new()
+        }
+    }
 }

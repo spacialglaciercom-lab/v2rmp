@@ -67,7 +67,7 @@ def extract_text(resp):
         return json.dumps(result)
     return content[0].get("text", "{}")
 
-client = MCPClient("/home/rmp/v2rmp/target/debug/rmpca-mcp")
+client = MCPClient("./target/debug/rmpca-mcp")
 tools_resp = client.list_tools()
 tools = [t["name"] for t in tools_resp.get("result", {}).get("tools", [])]
 print(f"Available tools: {tools}")
