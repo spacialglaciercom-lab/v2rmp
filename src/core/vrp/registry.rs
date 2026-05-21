@@ -1,23 +1,4 @@
 #![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(
-    dead_code,
-    unused_imports,
-    unused_variables,
-    unused_macros,
-    clippy::all
-)]
-#![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(
-    dead_code,
-    unused_imports,
-    unused_variables,
-    unused_macros,
-    clippy::all
-)]
 //! Dynamic solver registry: built-ins first, then dynamically registered solvers.
 
 use super::solvers::clarke_wright::ClarkeWrightSolver;

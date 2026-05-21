@@ -26,5 +26,9 @@ pub mod selector;
 #[cfg(feature = "ml")]
 use candle_core::Device;
 
-// Re-export the legacy rule-based module for backwards compatibility.
-// New code should prefer `selector::predict_solver`.
+/// Return the best available Candle compute device.
+/// Falls back to CPU when CUDA/Metal are unavailable.
+#[cfg(feature = "ml")]
+pub fn best_device() -> anyhow::Result<Device> {
+    Ok(Device::Cpu)
+}

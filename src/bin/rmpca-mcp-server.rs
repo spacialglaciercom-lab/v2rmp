@@ -26,19 +26,22 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use v2rmp::core::clean::{clean_geojson, CleanOptions};
 use v2rmp::core::compile::{CompileRequest, CompileResult};
 #[cfg(feature = "extract")]
 use v2rmp::core::elevation::local::LocalDem;
+#[cfg(feature = "extract")]
 use v2rmp::core::elevation::FuelCalculator;
+#[cfg(feature = "extract")]
 use v2rmp::core::extract::{BBoxRequest, ExtractRequest, ExtractResult, ExtractSource, RoadClass};
 use v2rmp::core::optimize::{
-    OnewayMode, OptimizeRequest, OptimizeResult, SolverMode, TurnPenalties,
+    CppEngine, OnewayMode, OptimizeRequest, OptimizeResult, SolverMode, TurnPenalties,
 };
 use v2rmp::core::vrp::registry::solve_with;
-use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
+use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverOutput, VRPSolverStop, VrpObjective};
 use v2rmp::core::vrp::utils::{build_haversine_matrix, get_valhalla_matrix};
+use v2rmp::core::ml_legacy::{score_route, route_feature_vector, RouteFeatures};
 
 // ── JSON-RPC / MCP types ───────────────────────────────────────────────────
 
@@ -1169,6 +1172,7 @@ fn tool_definitions() -> Vec<ToolDef> {
         #[cfg(feature = "ml")]
         ToolDef {
             name: "embed",
+            title: "Generate BERT Embeddings",
             description: "Generate BERT embeddings for an array of text strings. Returns an array of float vectors.",
             input_schema: json!({
                 "type": "object",
@@ -1181,9 +1185,16 @@ fn tool_definitions() -> Vec<ToolDef> {
                 },
                 "required": ["texts"]
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
             name: "classify_turn",
+            title: "Classify Turn",
             description: "Classify a turn as 'straight', 'left', 'right', or 'u_turn' based on its bearing delta (in radians).",
             input_schema: json!({
                 "type": "object",
@@ -1195,9 +1206,16 @@ fn tool_definitions() -> Vec<ToolDef> {
                 },
                 "required": ["bearing_delta"]
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
         ToolDef {
             name: "parse_csv_stops",
+            title: "Parse CSV Stops",
             description: "Parse a CSV file of stops into an array of VRPSolverStop objects.",
             input_schema: json!({
                 "type": "object",
@@ -1209,6 +1227,12 @@ fn tool_definitions() -> Vec<ToolDef> {
                 },
                 "required": ["csv_path"]
             }),
+            annotations: Some(json!({
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+            })),
         },
     ]
 }
@@ -1345,6 +1369,12 @@ async fn handle_extract_overture(args: &Value) -> Result<Value> {
         road_classes,
         output_path,
         pbf_path: None,
+        database_url: None,
+        table_name: None,
+        r2_bucket: None,
+        r2_access_key_id: None,
+        r2_secret_access_key: None,
+        r2_endpoint: None,
     };
 
     let result: ExtractResult = v2rmp::core::extract::run_extract(&req).await?;
@@ -1379,6 +1409,12 @@ async fn handle_extract_osm(args: &Value) -> Result<Value> {
         road_classes,
         output_path,
         pbf_path,
+        database_url: None,
+        table_name: None,
+        r2_bucket: None,
+        r2_access_key_id: None,
+        r2_secret_access_key: None,
+        r2_endpoint: None,
     };
 
     let result: ExtractResult = v2rmp::core::extract::run_extract(&req).await?;
@@ -1764,7 +1800,6 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
     // Build haversine distance matrix
     let matrix = build_haversine_matrix(&stops, avg_speed_kmh);
 
-    #[cfg(feature = "ml")]
     let input = VRPSolverInput {
         locations: stops,
         num_vehicles,
@@ -2249,24 +2284,41 @@ fn handle_predict_solver(args: &Value) -> Result<Value> {
         anyhow::bail!("ML feature is not enabled. Cannot use predict_solver.");
     }
 
-    let stops: Vec<VRPSolverStop> = stops_val
-        .iter()
-        .enumerate()
-        .map(|(i, s)| {
-            let lat = s.get("lat").and_then(|v| v.as_f64())
-                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
-            let lon = s.get("lon").and_then(|v| v.as_f64())
-                .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
-            let label = s.get("label").and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let demand = s.get("demand").and_then(|v| v.as_f64());
-            Ok(VRPSolverStop {
-                lat,
-                lon,
-                label: if label.is_empty() { format!("Stop {}", i) } else { label },
-                demand,
-                arrival_time: None,
+    #[cfg(feature = "ml")]
+    {
+        use v2rmp::core::ml::features::InstanceFeatures;
+        use v2rmp::core::ml::selector::{default_model_path, predict_solver};
+
+        let stops_val = args
+            .get("stops")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'stops' array"))?;
+
+        let stops: Vec<VRPSolverStop> = stops_val
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let lat = s
+                    .get("lat")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+                let lon = s
+                    .get("lon")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+                let label = s.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let demand = s.get("demand").and_then(|v| v.as_f64());
+                Ok(VRPSolverStop {
+                    lat,
+                    lon,
+                    label: if label.is_empty() {
+                        format!("Stop {}", i)
+                    } else {
+                        label
+                    },
+                    demand,
+                    arrival_time: None,
+                })
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -2581,6 +2633,12 @@ async fn handle_pipeline(args: &Value) -> Result<Value> {
         road_classes: RoadClass::all_vehicle(),
         output_path: extract_path.clone(),
         pbf_path,
+        database_url: None,
+        table_name: None,
+        r2_bucket: None,
+        r2_access_key_id: None,
+        r2_secret_access_key: None,
+        r2_endpoint: None,
     };
     let extract_result = v2rmp::core::extract::run_extract(&extract_req).await?;
 
@@ -2623,6 +2681,7 @@ async fn handle_pipeline(args: &Value) -> Result<Value> {
         depot,
         oneway_mode: OnewayMode::default(),
         mode,
+        cpp_engine: v2rmp::core::optimize::CppEngine::Internal,
         num_vehicles,
         solver_id,
         coordinates: None,
@@ -3249,22 +3308,28 @@ async fn main() -> Result<()> {
                     "clean" => handle_clean(&args)
                         .map_err(|e| anyhow::anyhow!("{e}")),
                     "vrp_solve" => handle_vrp_solve(&args).await,
+                    #[cfg(feature = "extract")]
                     "elevation_query" => handle_elevation_query(&args)
                         .map_err(|e| anyhow::anyhow!("{e}")),
+                    #[cfg(feature = "extract")]
                     "elevation_profile" => handle_elevation_profile(&args)
                         .map_err(|e| anyhow::anyhow!("{e}")),
                     "list_solvers" => handle_list_solvers(&args)
                         .map_err(|e| anyhow::anyhow!("{e}")),
                     "haversine_distance" => handle_haversine_distance(&args)
                         .map_err(|e| anyhow::anyhow!("{e}")),
+                    #[cfg(feature = "extract")]
                     "elevation_stats" => handle_elevation_stats(&args)
                         .map_err(|e| anyhow::anyhow!("{e}")),
+                    #[cfg(feature = "extract")]
                     "dem_info" => handle_dem_info(&args)
                         .map_err(|e| anyhow::anyhow!("{e}")),
+                    #[cfg(feature = "extract")]
                     "fuel_estimate" => handle_fuel_estimate(&args)
                         .map_err(|e| anyhow::anyhow!("{e}")),
                     "inspect_rmp" => handle_inspect_rmp(&args)
                         .map_err(|e| anyhow::anyhow!("{e}")),
+                    #[cfg(feature = "extract")]
                     "pipeline" => handle_pipeline(&args).await,
                     "get_valhalla_matrix" => handle_get_valhalla_matrix(&args).await,
                     "predict_solver" => handle_predict_solver(&args)

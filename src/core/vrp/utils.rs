@@ -45,11 +45,70 @@ pub fn build_haversine_matrix(locations: &[VRPSolverStop], avg_speed_kmh: f64) -
             let time_sec = (dist / avg_speed_kmh) * 3600.0;
             row.push(DistCell {
                 distance: dist,
-                time,
-            };
+                time: time_sec,
+                path: None,
+            });
+        }
+        matrix.push(row);
+    }
 
-            matrix[i][j] = cell.clone();
-            matrix[j][i] = cell;
+    matrix
+}
+
+/// Build a distance matrix using graph shortest paths (Dijkstra).
+/// Fallback to haversine if graph information is insufficient.
+pub fn build_graph_matrix(
+    stops: &[VRPSolverStop],
+    nodes: &[RmpNode],
+    edges: &[RmpEdge],
+    _embeddings: Option<&[f32]>,
+    avg_speed_kmh: f64,
+) -> DistMatrix {
+    let n_stops = stops.len();
+    let mut matrix = vec![vec![DistCell { distance: 0.0, time: 0.0, path: None }; n_stops]; n_stops];
+
+    // 1. Build adjacency list
+    let mut adj = vec![Vec::new(); nodes.len()];
+    for edge in edges {
+        adj[edge.from as usize].push((edge.to as usize, edge.weight_m / 1000.0));
+    }
+
+    // 2. Snap stops to nearest nodes
+    let snapped_nodes: Vec<usize> = stops.iter().map(|stop| {
+        let mut best_node = 0;
+        let mut min_dist = f64::MAX;
+        for (i, node) in nodes.iter().enumerate() {
+            let d = super::super::haversine_m(stop.lat, stop.lon, node.lat, node.lon);
+            if d < min_dist {
+                min_dist = d;
+                best_node = i;
+            }
+        }
+        best_node
+    }).collect();
+
+    // 3. All-pairs shortest paths between stops
+    for (i, &start_node) in snapped_nodes.iter().enumerate() {
+        let (dists, _prev) = dijkstra(start_node, &adj, nodes.len());
+        for (j, &end_node) in snapped_nodes.iter().enumerate() {
+            let d_km = dists[end_node];
+            if d_km < f64::MAX {
+                matrix[i][j] = DistCell {
+                    distance: d_km,
+                    time: (d_km / avg_speed_kmh) * 3600.0,
+                    path: None,
+                };
+            } else {
+                // Fallback to haversine
+                let stop1 = &stops[i];
+                let stop2 = &stops[j];
+                let d_h_km = haversine_km(stop1.lat, stop1.lon, stop2.lat, stop2.lon);
+                matrix[i][j] = DistCell {
+                    distance: d_h_km,
+                    time: (d_h_km / avg_speed_kmh) * 3600.0,
+                    path: None,
+                };
+            }
         }
     }
 

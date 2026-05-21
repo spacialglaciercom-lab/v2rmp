@@ -656,53 +656,60 @@ fn handle_tool_call(params: Value) -> Result<Value> {
             }))
         }
         "v2rmp_neural_optimize" => {
-            use v2rmp::core::neural_routing::{solve_neural, NeuralRouteRequest};
+            #[cfg(feature = "ml")]
+            {
+                use v2rmp::core::neural_routing::{solve_neural, NeuralRouteRequest};
 
-            let locations_raw = arguments
-                .get("locations")
-                .and_then(Value::as_array)
-                .context("Missing locations")?;
-            let mut locations = Vec::with_capacity(locations_raw.len());
-            for loc in locations_raw {
-                let coords = loc.as_array().context("Invalid coordinate format")?;
-                let lat = coords[0].as_f64().context("Invalid latitude")?;
-                let lon = coords[1].as_f64().context("Invalid longitude")?;
-                // NeuralRouteRequest expects [lat, lon, elevation]
-                locations.push([lat, lon, 0.0]);
+                let locations_raw = arguments
+                    .get("locations")
+                    .and_then(Value::as_array)
+                    .context("Missing locations")?;
+                let mut locations = Vec::with_capacity(locations_raw.len());
+                for loc in locations_raw {
+                    let coords = loc.as_array().context("Invalid coordinate format")?;
+                    let lat = coords[0].as_f64().context("Invalid latitude")?;
+                    let lon = coords[1].as_f64().context("Invalid longitude")?;
+                    // NeuralRouteRequest expects [lat, lon, elevation]
+                    locations.push([lat, lon, 0.0]);
+                }
+
+                let demands = arguments
+                    .get("demands")
+                    .and_then(Value::as_array)
+                    .context("Missing demands")?
+                    .iter()
+                    .filter_map(|v| v.as_f64())
+                    .collect();
+
+                let req = NeuralRouteRequest {
+                    model_path: arguments
+                        .get("model_path")
+                        .and_then(Value::as_str)
+                        .context("Missing model_path")?
+                        .to_string(),
+                    locations,
+                    demands,
+                    capacity: arguments
+                        .get("capacity")
+                        .and_then(Value::as_f64)
+                        .unwrap_or(1.0),
+                };
+
+                let res = solve_neural(&req)?;
+                let val = json!(res);
+                Ok(json!({
+                    "content": [{
+                        "type": "text",
+                        "text": serde_json::to_string(&res)?
+                    }],
+                    "structured": val,
+                    "isError": false
+                }))
             }
-
-            let demands = arguments
-                .get("demands")
-                .and_then(Value::as_array)
-                .context("Missing demands")?
-                .iter()
-                .filter_map(|v| v.as_f64())
-                .collect();
-
-            let req = NeuralRouteRequest {
-                model_path: arguments
-                    .get("model_path")
-                    .and_then(Value::as_str)
-                    .context("Missing model_path")?
-                    .to_string(),
-                locations,
-                demands,
-                capacity: arguments
-                    .get("capacity")
-                    .and_then(Value::as_f64)
-                    .unwrap_or(1.0),
-            };
-
-            let res = solve_neural(&req)?;
-            let val = json!(res);
-            Ok(json!({
-                "content": [{
-                    "type": "text",
-                    "text": serde_json::to_string(&res)?
-                }],
-                "structured": val,
-                "isError": false
-            }))
+            #[cfg(not(feature = "ml"))]
+            {
+                anyhow::bail!("The 'ml' feature is required for neural optimization.")
+            }
         }
         "v2rmp_generate_osmand_link" => {
             let gpx_url = arguments

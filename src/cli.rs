@@ -61,6 +61,7 @@ enum Commands {
     #[cfg(feature = "ml")]
     TuneHyperparams(TuneHyperparamsArgs),
     /// Parse a natural-language routing query into JSON
+    #[cfg(feature = "ml")]
     ParseQuery(ParseQueryArgs),
     /// Generate node/edge embeddings for a road network graph
     #[cfg(feature = "ml")]
@@ -76,6 +77,7 @@ struct EmbedArgs {
 
 // ── Graph Embed ──────────────────────────────────────────────────────
 
+#[cfg(feature = "ml")]
 #[derive(clap::Args, Serialize, Deserialize)]
 #[serde(default)]
 struct GraphEmbedArgs {
@@ -132,6 +134,7 @@ struct GraphEmbedArgs {
     output: Option<String>,
 }
 
+#[cfg(feature = "ml")]
 impl Default for GraphEmbedArgs {
     fn default() -> Self {
         Self {
@@ -147,7 +150,6 @@ impl Default for GraphEmbedArgs {
             lr: 0.025,
             epochs: 5,
             include_edges: false,
-            output: None,
         }
     }
 }
@@ -274,6 +276,7 @@ struct TuneHyperparamsArgs {
 
 // ── Parse Query ────────────────────────────────────────────────────────
 
+#[cfg(feature = "ml")]
 #[derive(clap::Args, Serialize, Deserialize)]
 struct ParseQueryArgs {
     /// Natural language routing query
@@ -499,7 +502,7 @@ struct ExtractArgs {
     /// Path to local OSM PBF file (required for source=osm)
     #[arg(long)]
     #[serde(default)]
-    pbf: Option<String>,
+    pbf_path: Option<String>,
 }
 
 // ── Compile ───────────────────────────────────────────────────────────
@@ -720,7 +723,7 @@ struct PipelineArgs {
     /// Path to local OSM PBF file (optional)
     #[arg(long)]
     #[serde(default)]
-    pub pbf: Option<String>,
+    pub pbf_path: Option<String>,
 }
 
 #[cfg(feature = "extract")]
@@ -851,8 +854,15 @@ async fn run_extract_cmd(args: ExtractArgs, json: bool) -> Result<()> {
         },
         road_classes,
         output_path: args.output.clone(),
-        pbf_path: args.pbf.clone(),
+        pbf_path: args.pbf_path.clone(),
+        database_url: None,
+        table_name: None,
+        r2_bucket: None,
+        r2_access_key_id: None,
+        r2_secret_access_key: None,
+        r2_endpoint: None,
     };
+
 
     let result = crate::core::extract::run_extract(&req).await?;
 
@@ -1148,7 +1158,6 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
 
     let matrix = crate::core::vrp::utils::build_haversine_matrix(&stops, 40.0);
 
-    #[cfg(feature = "ml")]
     let vrp_input = VRPSolverInput {
         locations: stops,
         num_vehicles: args.vehicles,
@@ -1238,8 +1247,15 @@ async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         },
         road_classes: RoadClass::all_vehicle(),
         output_path: extract_path.clone(),
-        pbf_path: args.pbf.clone(),
+        pbf_path: args.pbf_path.clone(),
+        database_url: None,
+        table_name: None,
+        r2_bucket: None,
+        r2_access_key_id: None,
+        r2_secret_access_key: None,
+        r2_endpoint: None,
     };
+
     let extract_result = crate::core::extract::run_extract(&extract_req)
         .await
         .context("Pipeline failed at stage 'extract'")?;
@@ -1285,6 +1301,7 @@ async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         depot,
         oneway_mode: OnewayMode::default(),
         mode: SolverMode::Cpp,
+        cpp_engine: CppEngine::Internal,
         num_vehicles: 1,
         solver_id: "clarke_wright".to_string(),
         coordinates: None,
@@ -1443,9 +1460,50 @@ async fn run_embed_cmd(args: EmbedArgs, json: bool) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(feature = "ml"))]
-fn run_graph_embed_cmd(_args: GraphEmbedArgs, _json: bool) -> Result<()> {
-    anyhow::bail!("ML feature is not enabled. Cannot generate graph embeddings.");
+#[cfg(feature = "ml")]
+fn run_graph_embed_cmd(args: GraphEmbedArgs, _json: bool) -> Result<()> {
+    use crate::core::ml::node_embed::{EmbedConfig, EmbedMethod, embed_graph};
+    use crate::core::optimize::read_rmp_file;
+
+    let file_data = std::fs::read(&args.input)?;
+    let (nodes, edges) = read_rmp_file(&file_data)
+        .map_err(|e| anyhow::anyhow!("Failed to parse .rmp: {}", e))?;
+
+    let method = match args.method {
+        crate::core::ml::node_embed::EmbedMethod::Node2Vec => EmbedMethod::Node2Vec,
+        crate::core::ml::node_embed::EmbedMethod::Line => EmbedMethod::Line,
+        crate::core::ml::node_embed::EmbedMethod::FastRp => EmbedMethod::FastRp,
+        crate::core::ml::node_embed::EmbedMethod::Spatial => EmbedMethod::Spatial,
+    };
+
+    let config = EmbedConfig {
+        method,
+        dimensions: args.dim,
+        walk_length: args.walk_length,
+        num_walks: args.num_walks,
+        p: args.p,
+        q: args.q,
+        window: args.window,
+        negative_samples: args.negative_samples,
+        lr: args.lr,
+        epochs: args.epochs,
+        threads: 1,
+        include_edges: args.include_edges,
+    };
+
+    println!("Running {} embedding...", args.input);
+    let output = embed_graph(&nodes, &edges, &config)
+        .map_err(|e| anyhow::anyhow!("Embedding failed: {}", e))?;
+
+    let output_json = serde_json::to_string_pretty(&output)?;
+    if let Some(out_path) = args.output {
+        std::fs::write(&out_path, output_json)?;
+        println!("Wrote embeddings to {}", out_path);
+    } else {
+        println!("{}", output_json);
+    }
+
+    Ok(())
 }
 
 fn run_list_cmd(args: ListArgs, json: bool) -> Result<()> {
@@ -1627,6 +1685,7 @@ use crate::core::ml::features::InstanceFeatures;
 use crate::core::ml::quality_predictor::predict_quality;
 #[cfg(feature = "ml")]
 use crate::core::ml::selector::{default_model_path, predict_solver};
+#[cfg(feature = "ml")]
 use crate::core::nlp::{parse_query, to_vrp_json};
 use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
 
@@ -1735,6 +1794,7 @@ async fn run_tune_hyperparams_cmd(args: TuneHyperparamsArgs) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "ml")]
 fn run_parse_query_cmd(args: ParseQueryArgs) -> Result<()> {
     let parsed = parse_query(&args.query);
     let json = to_vrp_json(&parsed);
@@ -1791,6 +1851,7 @@ pub async fn run() -> Result<()> {
         Commands::PredictQuality(args) => run_predict_quality_cmd(args).await,
         #[cfg(feature = "ml")]
         Commands::TuneHyperparams(args) => run_tune_hyperparams_cmd(args).await,
+        #[cfg(feature = "ml")]
         Commands::ParseQuery(args) => run_parse_query_cmd(args),
         #[cfg(feature = "ml")]
         Commands::GraphEmbed(args) => run_graph_embed_cmd(args, cli.json),

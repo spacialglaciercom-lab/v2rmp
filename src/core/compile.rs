@@ -53,7 +53,12 @@ pub fn run_compile(req: &CompileRequest) -> anyhow::Result<CompileResult> {
         geojson = cleaned_fc;
     }
 
-    let (buf, node_count, edge_count) = build_rmp_buffer(&geojson, req.prune_disconnected)?;
+    let (buf, node_count, edge_count) = build_rmp_buffer(
+        &geojson,
+        &req.road_classes,
+        req.prune_disconnected,
+        req.prune_spurs,
+    )?;
 
     // Write output file
     std::fs::write(&req.output_rmp, &buf)

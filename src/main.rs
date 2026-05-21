@@ -1,6 +1,7 @@
 #[cfg(feature = "cli")]
 use v2rmp::{app, cli, event, ui};
 
+#[cfg(feature = "cli")]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // No arguments = launch the TUI; any arguments = CLI mode

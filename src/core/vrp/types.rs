@@ -1,23 +1,4 @@
 #![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(
-    dead_code,
-    unused_imports,
-    unused_variables,
-    unused_macros,
-    clippy::all
-)]
-#![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(dead_code)]
-#![allow(
-    dead_code,
-    unused_imports,
-    unused_variables,
-    unused_macros,
-    clippy::all
-)]
 //! Core types for the VRP solver system.
 
 use serde::{Deserialize, Serialize};

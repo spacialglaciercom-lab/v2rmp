@@ -11,6 +11,8 @@ use std::io::Write;
 pub enum ExtractSource {
     Osm,
     Overture,
+    Postgres,
+    R2,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +41,12 @@ pub struct ExtractRequest {
     pub road_classes: Vec<RoadClass>,
     pub output_path: String,
     pub pbf_path: Option<String>,
+    pub database_url: Option<String>,
+    pub table_name: Option<String>,
+    pub r2_bucket: Option<String>,
+    pub r2_access_key_id: Option<String>,
+    pub r2_secret_access_key: Option<String>,
+    pub r2_endpoint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -109,6 +117,8 @@ pub async fn run_extract(req: &ExtractRequest) -> anyhow::Result<ExtractResult> 
     match req.source {
         ExtractSource::Overture => run_overture_extract(req).await,
         ExtractSource::Osm => run_osm_extract(req).await,
+        ExtractSource::Postgres => anyhow::bail!("Postgres extraction not yet implemented"),
+        ExtractSource::R2 => anyhow::bail!("R2 extraction not yet implemented"),
     }
 }
 

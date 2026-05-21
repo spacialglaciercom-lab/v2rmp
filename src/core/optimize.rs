@@ -373,11 +373,13 @@ pub fn solve_cpp(
     for (idx, edge) in edges.iter().enumerate() {
         let from = edge.from as usize;
         let to = edge.to as usize;
+        let b = bearing(nodes[from].lat, nodes[from].lon, nodes[to].lat, nodes[to].lon);
 
         adj[from].push(AdjEntry {
             to: edge.to,
             weight_m: edge.weight_m,
-            edge_idx: idx,
+            edge_idx: idx as u32,
+            bearing: b,
         });
 
         match oneway {
@@ -385,7 +387,8 @@ pub fn solve_cpp(
                 adj[to].push(AdjEntry {
                     to: edge.from,
                     weight_m: edge.weight_m,
-                    edge_idx: idx,
+                    edge_idx: idx as u32,
+                    bearing: (b + 180.0) % 360.0,
                 });
             }
             OnewayMode::Respect => {
@@ -393,7 +396,8 @@ pub fn solve_cpp(
                     adj[to].push(AdjEntry {
                         to: edge.from,
                         weight_m: edge.weight_m,
-                        edge_idx: idx,
+                        edge_idx: idx as u32,
+                        bearing: (b + 180.0) % 360.0,
                     });
                 }
             }
@@ -402,14 +406,16 @@ pub fn solve_cpp(
                     adj[to].push(AdjEntry {
                         to: edge.from,
                         weight_m: edge.weight_m,
-                        edge_idx: idx,
+                        edge_idx: idx as u32,
+                        bearing: (b + 180.0) % 360.0,
                     });
-                    adj[from].retain(|e| e.edge_idx != idx);
+                    adj[from].retain(|e| e.edge_idx != idx as u32);
                 } else {
                     adj[to].push(AdjEntry {
                         to: edge.from,
                         weight_m: edge.weight_m,
-                        edge_idx: idx,
+                        edge_idx: idx as u32,
+                        bearing: (b + 180.0) % 360.0,
                     });
                 }
             }
@@ -444,193 +450,168 @@ pub fn solve_cpp(
                 .partial_cmp(&self.cost)
                 .unwrap_or(Ordering::Equal)
         }
-        impl Eq for State {}
-        impl Ord for State {
-            fn cmp(&self, other: &Self) -> Ordering {
-                other
-                    .cost
-                    .partial_cmp(&self.cost)
-                    .unwrap_or(Ordering::Equal)
-            }
-        }
-        impl PartialOrd for State {
-            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-                Some(self.cmp(other))
-            }
+    }
+    impl PartialOrd for State {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
         }
     }
 
-    for &u in &odd_vertices {
-        if matched[u] {
-            continue;
-        }
+    // 1. All-Pairs Shortest Paths between odd vertices
+    let mut dist_matrix = vec![vec![f64::MAX; num_odd]; num_odd];
+    let mut parent_pointers = vec![vec![None; n]; num_odd];
 
-        // 1. All-Pairs Shortest Paths between odd vertices
-        let mut dist_matrix = vec![vec![f64::MAX; num_odd]; num_odd];
-        // Store parent pointers to reconstruct paths only for matched pairs
-        let mut parent_pointers = vec![vec![None; n]; num_odd];
-
+    for (i, &u) in odd_vertices.iter().enumerate() {
+        let mut dists = vec![f64::MAX; n];
+        let mut heap = BinaryHeap::new();
         dists[u] = 0.0;
         heap.push(State {
             cost: 0.0,
             position: u,
         });
 
-            dists[u] = 0.0;
-            heap.push(State {
-                cost: 0.0,
-                position: u,
-            });
-
         while let Some(State { cost, position }) = heap.pop() {
             if cost > dists[position] {
                 continue;
             }
 
-                for edge in &adj[position] {
-                    let next_cost = cost + edge.weight_m;
-                    if next_cost < dists[edge.to as usize] {
-                        dists[edge.to as usize] = next_cost;
-                        parent_pointers[i][edge.to as usize] =
-                            Some((position, edge.weight_m, edge.edge_idx));
-                        heap.push(State {
-                            cost: next_cost,
-                            position: edge.to as usize,
-                        });
-                    }
-                }
-            }
-
             for edge in &adj[position] {
-                let next = State {
-                    cost: cost + edge.weight_m,
-                    position: edge.to as usize,
-                };
-                if next.cost < dists[next.position] {
-                    dists[next.position] = next.cost;
-                    prev[next.position] = Some((position, edge.weight_m, edge.edge_idx));
-                    heap.push(next);
+                let next_cost = cost + edge.weight_m;
+                if next_cost < dists[edge.to as usize] {
+                    dists[edge.to as usize] = next_cost;
+                    parent_pointers[i][edge.to as usize] =
+                        Some((position, edge.weight_m, edge.edge_idx));
+                    heap.push(State {
+                        cost: next_cost,
+                        position: edge.to as usize,
+                    });
                 }
             }
         }
 
-        // 2. Minimum Weight Perfect Matching
-        let mut pairs = Vec::new();
+        for (j, &v) in odd_vertices.iter().enumerate() {
+            dist_matrix[i][j] = dists[v];
+        }
+    }
 
-        if num_odd <= 24 {
-            // Exact DP (Bitmask DP)
-            let mut memo = vec![f64::MAX; 1 << num_odd];
-            let mut parent_mask = vec![usize::MAX; 1 << num_odd];
-            memo[0] = 0.0;
+    // 2. Minimum Weight Perfect Matching
+    let mut pairs = Vec::new();
 
-            for mask in 0..(1 << num_odd) {
-                if memo[mask] == f64::MAX {
-                    continue;
-                }
+    if num_odd <= 24 {
+        // Exact DP (Bitmask DP)
+        let mut memo = vec![f64::MAX; 1 << num_odd];
+        let mut parent_mask = vec![usize::MAX; 1 << num_odd];
+        memo[0] = 0.0;
 
-                // Find first unmatched vertex
-                let mut i = 0;
-                while i < num_odd {
-                    if (mask & (1 << i)) == 0 {
-                        break;
-                    }
-                    i += 1;
-                }
-                if i == num_odd {
-                    continue;
-                }
-
-                #[allow(clippy::needless_range_loop)]
-                for j in (i + 1)..num_odd {
-                    if (mask & (1 << j)) == 0 && dist_matrix[i][j] < f64::MAX {
-                        let next_mask = mask | (1 << i) | (1 << j);
-                        let new_cost = memo[mask] + dist_matrix[i][j];
-                        if new_cost < memo[next_mask] {
-                            memo[next_mask] = new_cost;
-                            parent_mask[next_mask] = mask;
-                        }
-                    }
-                }
+        for mask in 0..(1 << num_odd) {
+            if memo[mask] == f64::MAX {
+                continue;
             }
 
-            // Backtrack
-            let mut curr_mask = (1 << num_odd) - 1;
-            while curr_mask > 0 {
-                let prev_mask = parent_mask[curr_mask];
-                if prev_mask == usize::MAX {
+            // Find first unmatched vertex
+            let mut i = 0;
+            while i < num_odd {
+                if (mask & (1 << i)) == 0 {
                     break;
                 }
-                let diff = curr_mask ^ prev_mask;
-
-                let mut u = usize::MAX;
-                let mut v = usize::MAX;
-                for i in 0..num_odd {
-                    if (diff & (1 << i)) != 0 {
-                        if u == usize::MAX {
-                            u = i;
-                        } else {
-                            v = i;
-                        }
-                    }
-                }
-                pairs.push((u, v));
-                curr_mask = prev_mask;
+                i += 1;
             }
-        } else {
-            // Greedy fallback for very large odd-vertex counts
-            let mut matched = vec![false; num_odd];
-            for i in 0..num_odd {
-                if matched[i] {
-                    continue;
-                }
-                let mut best_j = None;
-                let mut best_dist = f64::MAX;
-                
-                #[allow(clippy::needless_range_loop)]
-                for j in (i + 1)..num_odd {
-                    if !matched[j] && dist_matrix[i][j] < best_dist {
-                        best_dist = dist_matrix[i][j];
-                        best_j = Some(j);
-                    }
-                }
+            if i == num_odd {
+                continue;
+            }
 
-                if let Some(j) = best_j {
-                    matched[i] = true;
-                    matched[j] = true;
-                    pairs.push((i, j));
+            #[allow(clippy::needless_range_loop)]
+            for j in (i + 1)..num_odd {
+                if (mask & (1 << j)) == 0 && dist_matrix[i][j] < f64::MAX {
+                    let next_mask = mask | (1 << i) | (1 << j);
+                    let new_cost = memo[mask] + dist_matrix[i][j];
+                    if new_cost < memo[next_mask] {
+                        memo[next_mask] = new_cost;
+                        parent_mask[next_mask] = mask;
+                    }
                 }
             }
         }
 
-        // Add the paths for all matched pairs into duplicate_edges
-        for (u_idx, v_idx) in pairs {
-            let target_v = odd_vertices[v_idx];
-            let mut curr = target_v;
-            while let Some((p, weight, eidx)) = parent_pointers[u_idx][curr] {
-                let b = bearing(
-                    nodes[p].lat,
-                    nodes[p].lon,
-                    nodes[curr].lat,
-                    nodes[curr].lon,
-                );
-                duplicate_edges.push((p, curr, weight, eidx, b));
-                curr = p;
+        // Backtrack
+        let mut curr_mask = (1 << num_odd) - 1;
+        while curr_mask > 0 {
+            let prev_mask = parent_mask[curr_mask];
+            if prev_mask == usize::MAX {
+                break;
             }
+            let diff = curr_mask ^ prev_mask;
+
+            let mut u = usize::MAX;
+            let mut v = usize::MAX;
+            for i in 0..num_odd {
+                if (diff & (1 << i)) != 0 {
+                    if u == usize::MAX {
+                        u = i;
+                    } else {
+                        v = i;
+                    }
+                }
+            }
+            pairs.push((u, v));
+            curr_mask = prev_mask;
+        }
+    } else {
+        // Greedy fallback for very large odd-vertex counts
+        let mut matched = vec![false; num_odd];
+        for i in 0..num_odd {
+            if matched[i] {
+                continue;
+            }
+            let mut best_j = None;
+            let mut best_dist = f64::MAX;
+
+            #[allow(clippy::needless_range_loop)]
+            for j in (i + 1)..num_odd {
+                if !matched[j] && dist_matrix[i][j] < best_dist {
+                    best_dist = dist_matrix[i][j];
+                    best_j = Some(j);
+                }
+            }
+
+            if let Some(j) = best_j {
+                matched[i] = true;
+                matched[j] = true;
+                pairs.push((i, j));
+            }
+        }
+    }
+
+    // Add the paths for all matched pairs into duplicate_edges
+    for (u_idx, v_idx) in pairs {
+        let target_v = odd_vertices[v_idx];
+        let mut curr = target_v;
+        while let Some((p, weight, eidx)) = parent_pointers[u_idx][curr] {
+            let b = bearing(
+                nodes[p].lat,
+                nodes[p].lon,
+                nodes[curr].lat,
+                nodes[curr].lon,
+            );
+            duplicate_edges.push((p, curr, weight, eidx, b));
+            curr = p;
         }
     }
 
     // Add duplicate edges
     let deadhead_edge_idx = usize::MAX;
-    for &(u, v, weight, eidx) in &duplicate_edges {
+    for &(u, v, weight, eidx, b) in &duplicate_edges {
         adj[u].push(AdjEntry {
             to: v as u32,
             weight_m: weight,
             edge_idx: eidx,
+            bearing: b,
         });
         adj[v].push(AdjEntry {
             to: u as u32,
             weight_m: weight,
             edge_idx: eidx,
+            bearing: (b + 180.0) % 360.0,
         });
     }
 
@@ -1062,7 +1043,6 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
         &edges,
         req.oneway_mode,
         req.depot,
-        req.turn_penalties,
     )?;
 
     if let Some(ref route_path) = req.route_file {
@@ -1237,7 +1217,6 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
                         "u_turn" => turns.u_turn += 1,
                         _ => turns.straight += 1,
                     }
-                    b_in = b_out;
                 }
             }
         }
@@ -1368,10 +1347,10 @@ pub fn write_gpx_cpp(path: &str, nodes: &[RmpNode], circuit: &[u32]) -> anyhow::
             )?;
         }
     }
-    writeln!(writer, "    </trkseg>")?;
-    writeln!(writer, "  </trk>")?;
-    writeln!(writer, "</gpx>")?;
-    writer.flush()?;
+    writeln!(file, "    </trkseg>")?;
+    writeln!(file, "  </trk>")?;
+    writeln!(file, "</gpx>")?;
+    file.flush()?;
 
     Ok(())
 }

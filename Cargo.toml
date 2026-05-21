@@ -84,11 +84,12 @@ required-features = ["gui"]
 [[bin]]
 name = "generate-training-data"
 path = "src/bin/generate-training-data.rs"
+required-features = ["ml"]
 
 [[bin]]
 name = "evaluate-selector"
 path = "src/bin/evaluate-selector.rs"
-required-features = ["extract"]
+required-features = ["extract", "ml"]
 
 [dependencies]
 duct = "1.1"
@@ -107,11 +108,11 @@ dirs = "5.0"
 shellexpand = "3.1"
 dotenvy = "0.15"
 regex = "1"
-candle-core = "0.10"
-candle-nn = "0.10"
-candle-transformers = "0.10"
-tokenizers = "0.22"
-hf-hub = { version = "0.5", default-features = false, features = ["ureq"] }
+candle-core = { version = "0.10", optional = true }
+candle-nn = { version = "0.10", optional = true }
+candle-transformers = { version = "0.10", optional = true }
+tokenizers = { version = "0.22", optional = true }
+hf-hub = { version = "0.5", default-features = false, features = ["ureq"], optional = true }
 object_store = { version = "0.11", features = ["aws"] }
 parquet = { version = "54", features = ["async"] }
 arrow = "54"
@@ -131,7 +132,7 @@ crc32fast = "1.4"
 petgraph = "0.6"
 rstar = "0.12"
 ordered-float = "4.2"
-ort = { version = "2.0.0-rc.9", features = ["ndarray"] }
+ort = { version = "2.0.0-rc.9", features = ["ndarray"], optional = true }
 ndarray = "0.15"
 pmtiles = { version = "0.23.0", features = ["mmap-async-tokio", "tilejson"] }
 mvt-reader = "2.3.0"
@@ -155,6 +156,6 @@ getrandom = { version = "0.2", features = ["js"] }
 [features]
 default = ["cli", "ml"]
 cli = []
-ml = []
+ml = ["candle-core", "candle-nn", "candle-transformers", "tokenizers", "hf-hub", "ort"]
 gui = ["eframe", "egui", "rfd", "wasm-bindgen-futures"]
 extract = ["gdal"]
