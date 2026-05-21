@@ -67,7 +67,17 @@ pub fn build_graph_matrix(
     avg_speed_kmh: f64,
 ) -> DistMatrix {
     let n_stops = stops.len();
-    let mut matrix = vec![vec![DistCell { distance: 0.0, time: 0.0, path: None }; n_stops]; n_stops];
+    let mut matrix = vec![
+        vec![
+            DistCell {
+                distance: 0.0,
+                time: 0.0,
+                path: None
+            };
+            n_stops
+        ];
+        n_stops
+    ];
 
     // 1. Build adjacency list
     let mut adj = vec![Vec::new(); nodes.len()];
@@ -76,18 +86,21 @@ pub fn build_graph_matrix(
     }
 
     // 2. Snap stops to nearest nodes
-    let snapped_nodes: Vec<usize> = stops.iter().map(|stop| {
-        let mut best_node = 0;
-        let mut min_dist = f64::MAX;
-        for (i, node) in nodes.iter().enumerate() {
-            let d = super::super::haversine_m(stop.lat, stop.lon, node.lat, node.lon);
-            if d < min_dist {
-                min_dist = d;
-                best_node = i;
+    let snapped_nodes: Vec<usize> = stops
+        .iter()
+        .map(|stop| {
+            let mut best_node = 0;
+            let mut min_dist = f64::MAX;
+            for (i, node) in nodes.iter().enumerate() {
+                let d = super::super::haversine_m(stop.lat, stop.lon, node.lat, node.lon);
+                if d < min_dist {
+                    min_dist = d;
+                    best_node = i;
+                }
             }
-        }
-        best_node
-    }).collect();
+            best_node
+        })
+        .collect();
 
     // 3. All-pairs shortest paths between stops
     for (i, &start_node) in snapped_nodes.iter().enumerate() {
@@ -1014,7 +1027,6 @@ mod tests {
         let route = nearest_neighbor_route(&m, &[0], 0);
         assert_eq!(route, vec![0]);
     }
-
 
     #[test]
     fn test_matrix_get_helpers() {

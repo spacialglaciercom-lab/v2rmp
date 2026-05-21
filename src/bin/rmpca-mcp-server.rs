@@ -26,12 +26,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
-use std::path::{Path, PathBuf};
-use v2rmp::core::ml::features::InstanceFeatures;
-use v2rmp::core::ml::quality_predictor::predict_quality;
-use v2rmp::core::ml::automl::predict_hyperparams;
-use v2rmp::core::ml::feedback::{log_solve, SolveLogEntry};
-use v2rmp::core::nlp::{parse_query, to_vrp_json, QwenNLParser};
+use std::path::PathBuf;
 use v2rmp::core::clean::{clean_geojson, CleanOptions};
 use v2rmp::core::compile::{CompileRequest, CompileResult};
 #[cfg(feature = "extract")]
@@ -40,13 +35,18 @@ use v2rmp::core::elevation::local::LocalDem;
 use v2rmp::core::elevation::FuelCalculator;
 #[cfg(feature = "extract")]
 use v2rmp::core::extract::{BBoxRequest, ExtractRequest, ExtractResult, ExtractSource, RoadClass};
+use v2rmp::core::ml::automl::predict_hyperparams;
+use v2rmp::core::ml::features::InstanceFeatures;
+use v2rmp::core::ml::feedback::{log_solve, SolveLogEntry};
+use v2rmp::core::ml::quality_predictor::predict_quality;
+use v2rmp::core::ml_legacy::{route_feature_vector, score_route, RouteFeatures};
+use v2rmp::core::nlp::{parse_query, to_vrp_json, QwenNLParser};
 use v2rmp::core::optimize::{
     CppEngine, OnewayMode, OptimizeRequest, OptimizeResult, SolverMode, TurnPenalties,
 };
 use v2rmp::core::vrp::registry::solve_with;
 use v2rmp::core::vrp::types::{VRPSolverInput, VRPSolverOutput, VRPSolverStop, VrpObjective};
 use v2rmp::core::vrp::utils::{build_haversine_matrix, get_valhalla_matrix};
-use v2rmp::core::ml_legacy::{score_route, route_feature_vector, RouteFeatures};
 
 // ── JSON-RPC / MCP types ───────────────────────────────────────────────────
 
@@ -1252,7 +1252,11 @@ fn validate_file_path(path: &str) -> anyhow::Result<std::path::PathBuf> {
     if path.contains("..") {
         anyhow::bail!("Path contains '..' which is not allowed");
     }
-    if p.is_absolute() && !path.starts_with("/tmp") && !path.starts_with("/home") && !path.starts_with("./") {
+    if p.is_absolute()
+        && !path.starts_with("/tmp")
+        && !path.starts_with("/home")
+        && !path.starts_with("./")
+    {
         // Allow absolute paths under /tmp, /home, and relative paths
         // Reject other absolute paths to prevent accessing system files
     }
@@ -1285,19 +1289,40 @@ fn parse_bbox(args: &Value) -> anyhow::Result<BBoxRequest> {
 
     // Validate coordinate ranges
     if !(-180.0..=180.0).contains(&min_lon) || !(-180.0..=180.0).contains(&max_lon) {
-        anyhow::bail!("Longitude must be between -180 and 180 degrees. Got min_lon={}, max_lon={}", min_lon, max_lon);
+        anyhow::bail!(
+            "Longitude must be between -180 and 180 degrees. Got min_lon={}, max_lon={}",
+            min_lon,
+            max_lon
+        );
     }
     if !(-90.0..=90.0).contains(&min_lat) || !(-90.0..=90.0).contains(&max_lat) {
-        anyhow::bail!("Latitude must be between -90 and 90 degrees. Got min_lat={}, max_lat={}", min_lat, max_lat);
+        anyhow::bail!(
+            "Latitude must be between -90 and 90 degrees. Got min_lat={}, max_lat={}",
+            min_lat,
+            max_lat
+        );
     }
     if min_lon >= max_lon {
-        anyhow::bail!("min_lon ({}) must be less than max_lon ({})", min_lon, max_lon);
+        anyhow::bail!(
+            "min_lon ({}) must be less than max_lon ({})",
+            min_lon,
+            max_lon
+        );
     }
     if min_lat >= max_lat {
-        anyhow::bail!("min_lat ({}) must be less than max_lat ({})", min_lat, max_lat);
+        anyhow::bail!(
+            "min_lat ({}) must be less than max_lat ({})",
+            min_lat,
+            max_lat
+        );
     }
 
-    Ok(BBoxRequest { min_lon, min_lat, max_lon, max_lat })
+    Ok(BBoxRequest {
+        min_lon,
+        min_lat,
+        max_lon,
+        max_lat,
+    })
 }
 
 #[cfg(feature = "extract")]
@@ -1756,7 +1781,9 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
                 .get("lon")
                 .and_then(|v| v.as_f64())
                 .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
-            let label = s.get("label").and_then(|v| v.as_str())
+            let label = s
+                .get("label")
+                .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
             let demand = s.get("demand").and_then(|v| v.as_f64());
@@ -2311,7 +2338,11 @@ fn handle_predict_solver(args: &Value) -> Result<Value> {
                     .get("lon")
                     .and_then(|v| v.as_f64())
                     .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
-                let label = s.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let label = s
+                    .get("label")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let demand = s.get("demand").and_then(|v| v.as_f64());
                 Ok(VRPSolverStop {
                     lat,
@@ -2963,6 +2994,7 @@ fn handle_parse_routing_query(args: &Value) -> Result<Value> {
 // ── Submit Feedback handler ────────────────────────────────────────────
 
 #[cfg(feature = "ml")]
+#[allow(dead_code)]
 fn handle_submit_feedback(args: &Value) -> Result<Value> {
     let stops_val = args
         .get("stops")
@@ -3088,6 +3120,7 @@ fn handle_submit_feedback(args: &Value) -> Result<Value> {
 }
 
 #[cfg(not(feature = "ml"))]
+#[allow(dead_code)]
 fn handle_submit_feedback(_args: &Value) -> Result<Value> {
     anyhow::bail!("ML feature is not enabled. submit_feedback requires feature extraction.")
 }
@@ -3152,10 +3185,10 @@ async fn handle_get_valhalla_matrix(args: &Value) -> Result<Value> {
     }))
 }
 
-
 // ── Low-priority Handlers ──────────────────────────────────────────────────
 
 #[cfg(feature = "ml")]
+#[allow(dead_code)]
 fn handle_embed(args: &Value) -> Result<Value> {
     let texts_val = args
         .get("texts")
@@ -3180,10 +3213,12 @@ fn handle_embed(args: &Value) -> Result<Value> {
 }
 
 #[cfg(not(feature = "ml"))]
+#[allow(dead_code)]
 fn handle_embed(_args: &Value) -> Result<Value> {
     anyhow::bail!("ML feature is not enabled. embed requires the 'ml' feature.")
 }
 
+#[allow(dead_code)]
 fn handle_classify_turn(args: &Value) -> Result<Value> {
     let bearing_delta = args
         .get("bearing_delta")
@@ -3198,6 +3233,7 @@ fn handle_classify_turn(args: &Value) -> Result<Value> {
     }))
 }
 
+#[allow(dead_code)]
 fn handle_parse_csv_stops(args: &Value) -> Result<Value> {
     let csv_path = args
         .get("csv_path")
@@ -3216,7 +3252,6 @@ fn handle_parse_csv_stops(args: &Value) -> Result<Value> {
 }
 
 // ── Main loop ───────────────────────────────────────────────────────────────
-
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -3307,48 +3342,54 @@ async fn main() -> Result<()> {
                     "extract_overture" => handle_extract_overture(&args).await,
                     #[cfg(feature = "extract")]
                     "extract_osm" => handle_extract_osm(&args).await,
-                    "compile" => handle_compile(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "compile" => handle_compile(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     "optimize" => handle_optimize(&args).await,
-                    "clean" => handle_clean(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "clean" => handle_clean(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     "vrp_solve" => handle_vrp_solve(&args).await,
                     #[cfg(feature = "extract")]
-                    "elevation_query" => handle_elevation_query(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "elevation_query" => {
+                        handle_elevation_query(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
                     #[cfg(feature = "extract")]
-                    "elevation_profile" => handle_elevation_profile(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "list_solvers" => handle_list_solvers(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "haversine_distance" => handle_haversine_distance(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "elevation_profile" => {
+                        handle_elevation_profile(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "list_solvers" => {
+                        handle_list_solvers(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "haversine_distance" => {
+                        handle_haversine_distance(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
                     #[cfg(feature = "extract")]
-                    "elevation_stats" => handle_elevation_stats(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "elevation_stats" => {
+                        handle_elevation_stats(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
                     #[cfg(feature = "extract")]
-                    "dem_info" => handle_dem_info(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "dem_info" => handle_dem_info(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     #[cfg(feature = "extract")]
-                    "fuel_estimate" => handle_fuel_estimate(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "inspect_rmp" => handle_inspect_rmp(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "fuel_estimate" => {
+                        handle_fuel_estimate(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "inspect_rmp" => handle_inspect_rmp(&args).map_err(|e| anyhow::anyhow!("{e}")),
                     #[cfg(feature = "extract")]
                     "pipeline" => handle_pipeline(&args).await,
                     "get_valhalla_matrix" => handle_get_valhalla_matrix(&args).await,
-                    "predict_solver" => handle_predict_solver(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "score_route" => handle_score_route(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "route_embedding" => handle_route_embedding(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "predict_quality" => handle_predict_quality(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "tune_hyperparams" => handle_tune_hyperparams(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
-                    "parse_routing_query" => handle_parse_routing_query(&args)
-                        .map_err(|e| anyhow::anyhow!("{e}")),
+                    "predict_solver" => {
+                        handle_predict_solver(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "score_route" => handle_score_route(&args).map_err(|e| anyhow::anyhow!("{e}")),
+                    "route_embedding" => {
+                        handle_route_embedding(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "predict_quality" => {
+                        handle_predict_quality(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "tune_hyperparams" => {
+                        handle_tune_hyperparams(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
+                    "parse_routing_query" => {
+                        handle_parse_routing_query(&args).map_err(|e| anyhow::anyhow!("{e}"))
+                    }
                     other => {
                         send_err(&req.id, -32602, &format!("Unknown tool: {other}"));
                         continue;

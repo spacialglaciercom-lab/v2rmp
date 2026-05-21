@@ -4,7 +4,9 @@ use std::io::{self, BufRead, Write};
 use v2rmp::core::compile::{run_compile, CompileRequest};
 #[cfg(feature = "extract")]
 use v2rmp::core::extract::{BBoxRequest, ExtractRequest, ExtractSource, RoadClass};
-use v2rmp::core::optimize::{run_optimize, CppEngine, OnewayMode, OptimizeRequest, SolverMode, TurnPenalties};
+use v2rmp::core::optimize::{
+    run_optimize, CppEngine, OnewayMode, OptimizeRequest, SolverMode, TurnPenalties,
+};
 use v2rmp::core::postgis_cpp::{run_postgis_cpp, PostGisCppRequest};
 use v2rmp::core::r2::R2Storage;
 
@@ -340,9 +342,18 @@ fn handle_tool_call(params: Value) -> Result<Value> {
                     for col in row.columns() {
                         let name = col.name();
                         let val: Value = match col.type_info().name() {
-                            "TEXT" | "VARCHAR" | "NAME" => row.get::<Option<String>, _>(name).map(Value::String).unwrap_or(Value::Null),
-                            "INT4" | "INTEGER" => row.get::<Option<i32>, _>(name).map(|n| json!(n)).unwrap_or(Value::Null),
-                            "INT8" | "BIGINT" => row.get::<Option<i64>, _>(name).map(|n| json!(n)).unwrap_or(Value::Null),
+                            "TEXT" | "VARCHAR" | "NAME" => row
+                                .get::<Option<String>, _>(name)
+                                .map(Value::String)
+                                .unwrap_or(Value::Null),
+                            "INT4" | "INTEGER" => row
+                                .get::<Option<i32>, _>(name)
+                                .map(|n| json!(n))
+                                .unwrap_or(Value::Null),
+                            "INT8" | "BIGINT" => row
+                                .get::<Option<i64>, _>(name)
+                                .map(|n| json!(n))
+                                .unwrap_or(Value::Null),
                             _ => json!("<type not displayed>"),
                         };
                         res_row.insert(name.to_string(), val);

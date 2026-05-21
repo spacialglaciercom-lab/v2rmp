@@ -1,6 +1,4 @@
 #[cfg(feature = "cli")]
-use v2rmp::{app, cli, event, ui};
-#[cfg(feature = "cli")]
 use ratatui::backend::CrosstermBackend;
 #[cfg(feature = "cli")]
 use ratatui::Terminal;
@@ -8,6 +6,8 @@ use ratatui::Terminal;
 use std::io;
 #[cfg(feature = "cli")]
 use std::time::Duration;
+#[cfg(feature = "cli")]
+use v2rmp::{app, event, ui};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -20,12 +20,12 @@ async fn main() -> anyhow::Result<()> {
         let mut app = app::App::new();
         app.log(
             app::LogLevel::Info,
-            format!("rmpca v{} - Route Optimization Engine", env!("CARGO_PKG_VERSION")),
+            format!(
+                "rmpca v{} - Route Optimization Engine",
+                env!("CARGO_PKG_VERSION")
+            ),
         );
-        app.log(
-            app::LogLevel::Info,
-            "Press 'h' for help, 'q' to quit.".into(),
-        );
+        app.log(app::LogLevel::Info, "Press 'h' for help, 'q' to quit.");
 
         let tick_rate = Duration::from_millis(250);
         loop {
@@ -35,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
                 event::handle_event(&mut app, ev).await?;
             }
 
-            if app.should_quit {
+            if !app.running {
                 break;
             }
         }
@@ -44,7 +44,10 @@ async fn main() -> anyhow::Result<()> {
     }
     #[cfg(not(feature = "cli"))]
     {
-        println!("rmpca v{} - Route Optimization Engine (CLI feature disabled)", env!("CARGO_PKG_VERSION"));
+        println!(
+            "rmpca v{} - Route Optimization Engine (CLI feature disabled)",
+            env!("CARGO_PKG_VERSION")
+        );
         println!("This binary requires the 'cli' feature for the TUI.");
         Ok(())
     }

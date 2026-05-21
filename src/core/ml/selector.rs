@@ -13,9 +13,9 @@ use crate::core::ml_legacy::predict_solver as rule_predict_solver;
 use crate::core::vrp::types::VRPSolverInput;
 use anyhow::{Context, Result};
 #[cfg(feature = "ml")]
-use candle_core::{Device, Tensor, DType};
+use candle_core::{DType, Device, Tensor};
 #[cfg(feature = "ml")]
-use candle_nn::{linear, Module, VarBuilder, Linear};
+use candle_nn::{linear, Linear, Module, VarBuilder};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -132,7 +132,10 @@ pub fn predict_solver(
                         }
                     }
                     Err(e) => {
-                        tracing::warn!("Failed to load neural selector: {}. Falling back to rule-based.", e);
+                        tracing::warn!(
+                            "Failed to load neural selector: {}. Falling back to rule-based.",
+                            e
+                        );
                     }
                 }
             }

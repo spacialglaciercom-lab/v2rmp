@@ -257,10 +257,7 @@ fn prune_disconnected_components(
 /// Iteratively remove degree-1 leaf nodes and their single incident edge.
 /// Handles boundary clipping artifacts: edges cut at the bbox boundary become
 /// dead-end spurs that force the CPP solver into unnecessary deadhead.
-fn prune_leaf_spurs(
-    nodes: &mut Vec<(f64, f64)>,
-    edges: &mut Vec<(u32, u32, f64, u8)>,
-) {
+fn prune_leaf_spurs(nodes: &mut Vec<(f64, f64)>, edges: &mut Vec<(u32, u32, f64, u8)>) {
     loop {
         let n = nodes.len();
         let mut degree = vec![0usize; n];
@@ -281,8 +278,7 @@ fn prune_leaf_spurs(
         let kept: Vec<(u32, u32, f64, u8)> = edges
             .drain(..)
             .filter(|(from, to, _, _)| {
-                !leaf_set.contains(&(*from as usize))
-                    && !leaf_set.contains(&(*to as usize))
+                !leaf_set.contains(&(*from as usize)) && !leaf_set.contains(&(*to as usize))
             })
             .collect();
         *edges = kept;
@@ -298,10 +294,8 @@ fn prune_leaf_spurs(
         }
 
         for edge in edges.iter_mut() {
-            edge.0 = old_to_new[edge.0 as usize]
-                .expect("edge endpoint should not be a leaf");
-            edge.1 = old_to_new[edge.1 as usize]
-                .expect("edge endpoint should not be a leaf");
+            edge.0 = old_to_new[edge.0 as usize].expect("edge endpoint should not be a leaf");
+            edge.1 = old_to_new[edge.1 as usize].expect("edge endpoint should not be a leaf");
         }
 
         *nodes = new_nodes;

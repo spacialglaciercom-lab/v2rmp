@@ -838,14 +838,18 @@ async fn handle_graph_embed_keys(app: &mut App, code: KeyCode, _mods: KeyModifie
                 crate::app::LogLevel::Info,
                 format!(
                     "Edge embeddings: {}",
-                    if app.graph_embed_include_edges { "ON" } else { "OFF" }
+                    if app.graph_embed_include_edges {
+                        "ON"
+                    } else {
+                        "OFF"
+                    }
                 ),
             );
         }
         KeyCode::Enter => {
             #[cfg(feature = "ml")]
             {
-                use crate::core::ml::node_embed::{EmbedConfig, EmbedMethod, embed_graph};
+                use crate::core::ml::node_embed::{embed_graph, EmbedConfig, EmbedMethod};
                 use crate::core::optimize::read_rmp_file;
 
                 let input_path = match &app.graph_embed_input {
@@ -982,7 +986,7 @@ async fn handle_graph_embed_keys(app: &mut App, code: KeyCode, _mods: KeyModifie
                         }
                     }
                     Err(e) => {
-                        app.graph_embed_status = Status::Error(e.clone());
+                        app.graph_embed_status = Status::Error(e.to_string());
                         app.log(
                             crate::app::LogLevel::Error,
                             format!("Embedding failed: {}", e),

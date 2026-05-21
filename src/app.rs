@@ -590,22 +590,34 @@ impl App {
             }
             InputField::VrpInputFile => {
                 self.vrp_input_file = Some(path_str.clone());
-                self.log(LogLevel::Success, format!("VRP .rmp selected: {}", path_str));
+                self.log(
+                    LogLevel::Success,
+                    format!("VRP .rmp selected: {}", path_str),
+                );
                 self.current_view = View::Vrp;
             }
             InputField::VrpModelPath => {
                 self.vrp_model_path = path_str.clone();
-                self.log(LogLevel::Success, format!("VRP model selected: {}", path_str));
+                self.log(
+                    LogLevel::Success,
+                    format!("VRP model selected: {}", path_str),
+                );
                 self.current_view = View::Vrp;
             }
             InputField::GraphEmbedInputFile => {
                 self.graph_embed_input = Some(path_str.clone());
-                self.log(LogLevel::Success, format!("Graph input selected: {}", path_str));
+                self.log(
+                    LogLevel::Success,
+                    format!("Graph input selected: {}", path_str),
+                );
                 self.current_view = View::GraphEmbed;
             }
             InputField::GraphEmbedOutputFile => {
                 self.graph_embed_output = Some(path_str.clone());
-                self.log(LogLevel::Success, format!("Graph output selected: {}", path_str));
+                self.log(
+                    LogLevel::Success,
+                    format!("Graph output selected: {}", path_str),
+                );
                 self.current_view = View::GraphEmbed;
             }
             _ => {
@@ -787,19 +799,34 @@ impl App {
             }
             InputField::GraphEmbedInputFile => {
                 self.graph_embed_input = Some(value.clone());
-                self.log(LogLevel::Success, format!("Graph embed input set: {}", value));
+                self.log(
+                    LogLevel::Success,
+                    format!("Graph embed input set: {}", value),
+                );
             }
             InputField::GraphEmbedOutputFile => {
                 self.graph_embed_output = Some(value.clone());
-                self.log(LogLevel::Success, format!("Graph embed output set: {}", value));
+                self.log(
+                    LogLevel::Success,
+                    format!("Graph embed output set: {}", value),
+                );
             }
             InputField::GraphEmbedMethod => {
                 let valid = ["node2vec", "line", "fastrp", "spatial"];
                 if valid.contains(&value.to_lowercase().as_str()) {
                     self.graph_embed_method = value.to_lowercase();
-                    self.log(LogLevel::Success, format!("Method set: {}", self.graph_embed_method));
+                    self.log(
+                        LogLevel::Success,
+                        format!("Method set: {}", self.graph_embed_method),
+                    );
                 } else {
-                    self.log(LogLevel::Error, format!("Invalid method '{}'. Use: node2vec, line, fastrp, spatial", value));
+                    self.log(
+                        LogLevel::Error,
+                        format!(
+                            "Invalid method '{}'. Use: node2vec, line, fastrp, spatial",
+                            value
+                        ),
+                    );
                 }
             }
             InputField::GraphEmbedDimensions => {

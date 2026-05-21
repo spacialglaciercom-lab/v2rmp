@@ -150,6 +150,7 @@ impl Default for GraphEmbedArgs {
             lr: 0.025,
             epochs: 5,
             include_edges: false,
+            output: None,
         }
     }
 }
@@ -810,7 +811,9 @@ fn parse_oneway(s: &str) -> Result<OnewayMode> {
 fn parse_cpp_engine(s: &str) -> Result<CppEngine> {
     match s.to_lowercase().as_str() {
         "internal" | "" => Ok(CppEngine::Internal),
-        "external-rust-optimizer" | "external" | "rust-optimizer" => Ok(CppEngine::ExternalRustOptimizer),
+        "external-rust-optimizer" | "external" | "rust-optimizer" => {
+            Ok(CppEngine::ExternalRustOptimizer)
+        }
         other => anyhow::bail!("Unknown C++ engine: {other} (internal|external-rust-optimizer)"),
     }
 }
@@ -862,7 +865,6 @@ async fn run_extract_cmd(args: ExtractArgs, json: bool) -> Result<()> {
         r2_secret_access_key: None,
         r2_endpoint: None,
     };
-
 
     let result = crate::core::extract::run_extract(&req).await?;
 
@@ -1036,7 +1038,10 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
         tracing::info!("Optimization complete!");
         if result.is_partial {
             tracing::warn!("WARNING: Route is PARTIAL (Disconnected Components).");
-            tracing::warn!("Found {} unreachable edges from start node.", result.unreachable_edges);
+            tracing::warn!(
+                "Found {} unreachable edges from start node.",
+                result.unreachable_edges
+            );
         }
         tracing::info!("Total distance: {:.2} km", result.total_distance_km);
         tracing::info!("Stops/Segments: {}", result.total_segments);
@@ -1462,12 +1467,12 @@ async fn run_embed_cmd(args: EmbedArgs, json: bool) -> Result<()> {
 
 #[cfg(feature = "ml")]
 fn run_graph_embed_cmd(args: GraphEmbedArgs, _json: bool) -> Result<()> {
-    use crate::core::ml::node_embed::{EmbedConfig, EmbedMethod, embed_graph};
+    use crate::core::ml::node_embed::{embed_graph, EmbedConfig, EmbedMethod};
     use crate::core::optimize::read_rmp_file;
 
     let file_data = std::fs::read(&args.input)?;
-    let (nodes, edges) = read_rmp_file(&file_data)
-        .map_err(|e| anyhow::anyhow!("Failed to parse .rmp: {}", e))?;
+    let (nodes, edges) =
+        read_rmp_file(&file_data).map_err(|e| anyhow::anyhow!("Failed to parse .rmp: {}", e))?;
 
     let method = match args.method {
         crate::core::ml::node_embed::EmbedMethod::Node2Vec => EmbedMethod::Node2Vec,
@@ -1866,6 +1871,7 @@ pub async fn run() -> Result<()> {
 }
 
 #[cfg(test)]
+#[cfg(feature = "extract")]
 mod tests {
     use super::*;
 

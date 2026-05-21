@@ -110,7 +110,9 @@ impl GraphSAGE {
 pub fn default_model_path() -> std::path::PathBuf {
     // 1. Try CARGO_MANIFEST_DIR (useful for tests)
     if let Ok(base) = std::env::var("CARGO_MANIFEST_DIR") {
-        let path = std::path::PathBuf::from(base).join("models").join("graph_embed.safetensors");
+        let path = std::path::PathBuf::from(base)
+            .join("models")
+            .join("graph_embed.safetensors");
         if path.exists() {
             return path;
         }

@@ -663,10 +663,7 @@ fn shortest_path(graph: &RoadGraph, start: NodeIndex, goal: NodeIndex) -> Option
 
 /// Hierholzer's algorithm: find Eulerian circuit in the augmented graph.
 /// Returns a sequence of EdgeIndex.
-fn hierholzer(
-    graph: &RoadGraph,
-    start: NodeIndex,
-) -> Result<Vec<petgraph::graph::EdgeIndex>> {
+fn hierholzer(graph: &RoadGraph, start: NodeIndex) -> Result<Vec<petgraph::graph::EdgeIndex>> {
     if graph.edge_count() == 0 {
         return Ok(Vec::new());
     }
@@ -698,7 +695,7 @@ fn hierholzer(
                 }
             }
         }
-        
+
         if !found {
             if let Some((_, Some(ei))) = stack.pop() {
                 circuit_edges.push(ei);
@@ -761,13 +758,13 @@ fn build_route_from_edges(
     for &ei in route_edges {
         let e = &graph[ei];
         let (u, v) = graph.edge_endpoints(ei).unwrap();
-        
+
         // Determine traversal direction
         let (from_node, to_node) = if let Some(curr) = current_node {
-            if curr == u { 
-                (u, v) 
-            } else if curr == v { 
-                (v, u) 
+            if curr == u {
+                (u, v)
+            } else if curr == v {
+                (v, u)
             } else {
                 // Should not happen in a valid Eulerian circuit, but fallback gracefully
                 (u, v)
@@ -1094,10 +1091,7 @@ mod tests {
 
         // First and last node should be the same (circuit)
         // A circuit of edges must form a continuous loop
-        assert!(
-            circuit.len() >= 2,
-            "Circuit must have at least two edges"
-        );
+        assert!(circuit.len() >= 2, "Circuit must have at least two edges");
 
         // ── Build route ────────────────────────────────────
         let route =
@@ -1213,10 +1207,7 @@ mod tests {
             "Diamond should have deadhead"
         );
         // A circuit of edges must form a continuous loop
-        assert!(
-            circuit.len() >= 2,
-            "Circuit must have at least two edges"
-        );
+        assert!(circuit.len() >= 2, "Circuit must have at least two edges");
     }
 
     /// Single edge: 2 nodes, both degree 1 → both odd → matched pair → deadhead = original edge.
@@ -1250,10 +1241,7 @@ mod tests {
         let (circuit, _aug) =
             solve_cpp_with_matching(&graph, None).expect("should solve single edge");
         // A circuit of edges must form a continuous loop
-        assert!(
-            circuit.len() >= 2,
-            "Circuit must have at least two edges"
-        );
+        assert!(circuit.len() >= 2, "Circuit must have at least two edges");
         // 2 odd nodes → match them → duplicate the edge → circuit traverses it twice
         assert!(
             circuit.len() >= 2,

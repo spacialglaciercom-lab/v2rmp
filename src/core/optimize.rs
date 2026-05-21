@@ -1,7 +1,7 @@
 #![allow(clippy::needless_range_loop)]
 use crate::core::geo_types::BBox;
 use crate::core::vrp::registry::solve_with;
-use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective, VRPSolverOutput};
+use crate::core::vrp::types::{VRPSolverInput, VRPSolverOutput, VRPSolverStop, VrpObjective};
 use geojson::{Feature, FeatureCollection, Geometry, Value as GeoJsonValue};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -275,7 +275,7 @@ pub fn read_rmp_file(data: &[u8]) -> anyhow::Result<(Vec<RmpNode>, Vec<RmpEdge>)
 
 #[derive(Debug, Clone, Copy)]
 struct NodeRad {
-    lat: f64,
+    _lat: f64,
     lon: f64,
     sin_lat: f64,
     cos_lat: f64,
@@ -302,9 +302,10 @@ fn bearing_rad(n1: &NodeRad, n2: &NodeRad) -> f64 {
     (bearing_rad.to_degrees() + 360.0).rem_euclid(360.0)
 }
 
+#[allow(dead_code)]
 fn haversine_m_rad(n1: &NodeRad, n2: &NodeRad) -> f64 {
     const R: f64 = 6_371_000.0;
-    let dlat = n2.lat - n1.lat;
+    let dlat = n2._lat - n1._lat;
     let dlon = n2.lon - n1.lon;
     let a = (dlat / 2.0).sin().powi(2) + n1.cos_lat * n2.cos_lat * (dlon / 2.0).sin().powi(2);
     R * 2.0 * a.sqrt().atan2((1.0 - a).sqrt())
@@ -317,7 +318,7 @@ struct AdjEntry {
     to: u32,
     weight_m: f64,
     edge_idx: u32,
-    bearing: f64,
+    _bearing: f64,
 }
 
 /// In-memory CPP result: both the summary stats and the ordered node-IDs of the Eulerian circuit.
@@ -373,13 +374,18 @@ pub fn solve_cpp(
     for (idx, edge) in edges.iter().enumerate() {
         let from = edge.from as usize;
         let to = edge.to as usize;
-        let b = bearing(nodes[from].lat, nodes[from].lon, nodes[to].lat, nodes[to].lon);
+        let b = bearing(
+            nodes[from].lat,
+            nodes[from].lon,
+            nodes[to].lat,
+            nodes[to].lon,
+        );
 
         adj[from].push(AdjEntry {
             to: edge.to,
             weight_m: edge.weight_m,
             edge_idx: idx as u32,
-            bearing: b,
+            _bearing: b,
         });
 
         match oneway {
@@ -388,7 +394,7 @@ pub fn solve_cpp(
                     to: edge.from,
                     weight_m: edge.weight_m,
                     edge_idx: idx as u32,
-                    bearing: (b + 180.0) % 360.0,
+                    _bearing: (b + 180.0) % 360.0,
                 });
             }
             OnewayMode::Respect => {
@@ -397,7 +403,7 @@ pub fn solve_cpp(
                         to: edge.from,
                         weight_m: edge.weight_m,
                         edge_idx: idx as u32,
-                        bearing: (b + 180.0) % 360.0,
+                        _bearing: (b + 180.0) % 360.0,
                     });
                 }
             }
@@ -407,7 +413,7 @@ pub fn solve_cpp(
                         to: edge.from,
                         weight_m: edge.weight_m,
                         edge_idx: idx as u32,
-                        bearing: (b + 180.0) % 360.0,
+                        _bearing: (b + 180.0) % 360.0,
                     });
                     adj[from].retain(|e| e.edge_idx != idx as u32);
                 } else {
@@ -415,7 +421,7 @@ pub fn solve_cpp(
                         to: edge.from,
                         weight_m: edge.weight_m,
                         edge_idx: idx as u32,
-                        bearing: (b + 180.0) % 360.0,
+                        _bearing: (b + 180.0) % 360.0,
                     });
                 }
             }
@@ -587,41 +593,36 @@ pub fn solve_cpp(
         let target_v = odd_vertices[v_idx];
         let mut curr = target_v;
         while let Some((p, weight, eidx)) = parent_pointers[u_idx][curr] {
-            let b = bearing(
-                nodes[p].lat,
-                nodes[p].lon,
-                nodes[curr].lat,
-                nodes[curr].lon,
-            );
+            let b = bearing(nodes[p].lat, nodes[p].lon, nodes[curr].lat, nodes[curr].lon);
             duplicate_edges.push((p, curr, weight, eidx, b));
             curr = p;
         }
     }
 
     // Add duplicate edges
-    let deadhead_edge_idx = usize::MAX;
+    let _deadhead_edge_idx = usize::MAX;
     for &(u, v, weight, eidx, b) in &duplicate_edges {
         adj[u].push(AdjEntry {
             to: v as u32,
             weight_m: weight,
             edge_idx: eidx,
-            bearing: b,
+            _bearing: b,
         });
         adj[v].push(AdjEntry {
             to: u as u32,
             weight_m: weight,
             edge_idx: eidx,
-            bearing: (b + 180.0) % 360.0,
+            _bearing: (b + 180.0) % 360.0,
         });
     }
 
     // Pre-calculate radian coordinates and trig values for performance
-    let nodes_rad: Vec<NodeRad> = nodes
+    let _nodes_rad: Vec<NodeRad> = nodes
         .iter()
         .map(|n| {
             let lat = n.lat.to_radians();
             NodeRad {
-                lat,
+                _lat: lat,
                 lon: n.lon.to_radians(),
                 sin_lat: lat.sin(),
                 cos_lat: lat.cos(),
@@ -710,8 +711,6 @@ pub fn solve_cpp(
 
     // Turn classification
     if circuit.len() > 2 {
-        let mut last_bearing: Option<f64> = None;
-
         for i in 1..circuit.len().saturating_sub(1) {
             let prev = circuit[i - 1] as usize;
             let curr = circuit[i] as usize;
@@ -798,7 +797,11 @@ fn rmp_to_geojson(nodes: &[RmpNode], edges: &[RmpEdge]) -> FeatureCollection {
     // Group edges by their line geometry
     let mut edge_groups: HashMap<(u32, u32), Vec<&RmpEdge>> = HashMap::new();
     for edge in edges {
-        let key = if edge.from < edge.to { (edge.from, edge.to) } else { (edge.to, edge.from) };
+        let key = if edge.from < edge.to {
+            (edge.from, edge.to)
+        } else {
+            (edge.to, edge.from)
+        };
         edge_groups.entry(key).or_default().push(edge);
     }
 
@@ -807,7 +810,10 @@ fn rmp_to_geojson(nodes: &[RmpNode], edges: &[RmpEdge]) -> FeatureCollection {
         let from_node = &nodes[edge.from as usize];
         let to_node = &nodes[edge.to as usize];
 
-        let coords = vec![vec![from_node.lon, from_node.lat], vec![to_node.lon, to_node.lat]];
+        let coords = vec![
+            vec![from_node.lon, from_node.lat],
+            vec![to_node.lon, to_node.lat],
+        ];
 
         let mut properties = serde_json::Map::new();
         properties.insert("oneway".to_string(), json!(edge.oneway != 0));
@@ -921,13 +927,9 @@ fn run_external_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeRe
     let response: serde_json::Value = serde_json::from_slice(&output.stdout)?;
 
     // Extract values from response
-    let total_distance_km = response["total_distance_km"]
-        .as_f64()
-        .unwrap_or(0.0);
+    let total_distance_km = response["total_distance_km"].as_f64().unwrap_or(0.0);
     let stats = &response["stats"];
-    let deadhead_distance_km = stats["deadhead_distance_km"]
-        .as_f64()
-        .unwrap_or(0.0);
+    let deadhead_distance_km = stats["deadhead_distance_km"].as_f64().unwrap_or(0.0);
     let efficiency = stats["efficiency"].as_f64().unwrap_or(100.0);
 
     // Build route from response
@@ -994,7 +996,12 @@ fn run_external_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeRe
     };
 
     if route_points.len() > 2 {
-        let mut b_in = bearing(route_points[0].lat, route_points[0].lon, route_points[1].lat, route_points[1].lon);
+        let mut b_in = bearing(
+            route_points[0].lat,
+            route_points[0].lon,
+            route_points[1].lat,
+            route_points[1].lon,
+        );
         for i in 1..route_points.len().saturating_sub(1) {
             let curr = &route_points[i];
             let next = &route_points[i + 1];
@@ -1038,12 +1045,7 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     }
     let (nodes, edges) = read_rmp_file(&file_data)?;
 
-    let output = solve_cpp(
-        &nodes,
-        &edges,
-        req.oneway_mode,
-        req.depot,
-    )?;
+    let output = solve_cpp(&nodes, &edges, req.oneway_mode, req.depot)?;
 
     if let Some(ref route_path) = req.route_file {
         if route_path.ends_with(".json") {
@@ -1150,7 +1152,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         hyperparams: None,
     };
 
-    let mut output = solve_with(&req.solver_id, &vrp_input)
+    let output = solve_with(&req.solver_id, &vrp_input)
         .await
         .map_err(|e| anyhow::anyhow!("VRP Solver error: {}", e))?;
 
@@ -1192,7 +1194,7 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
                     .map(|s| {
                         let lat = s.lat.to_radians();
                         NodeRad {
-                            lat,
+                            _lat: lat,
                             lon: s.lon.to_radians(),
                             sin_lat: lat.sin(),
                             cos_lat: lat.cos(),
@@ -1275,7 +1277,11 @@ pub fn write_gpx_enriched(path: &str, output: &VRPSolverOutput) -> anyhow::Resul
         // Fallback to stop-to-stop if no geometry is available
         for (i, route) in routes.iter().enumerate() {
             writeln!(writer, "  <trk>")?;
-            writeln!(writer, "    <name>Optimized Route {} (Stop-to-Stop)</name>", i + 1)?;
+            writeln!(
+                writer,
+                "    <name>Optimized Route {} (Stop-to-Stop)</name>",
+                i + 1
+            )?;
             writeln!(writer, "    <trkseg>")?;
             for stop in route {
                 writeln!(
@@ -1360,12 +1366,10 @@ pub fn write_gpx_cpp(path: &str, nodes: &[RmpNode], circuit: &[u32]) -> anyhow::
 /// Run route optimization, dispatching to CPP or VRP based on `req.mode`.
 pub async fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     match req.mode {
-        SolverMode::Cpp => {
-            match req.cpp_engine {
-                CppEngine::Internal => run_cpp_optimize(req),
-                CppEngine::ExternalRustOptimizer => run_external_cpp_optimize(req),
-            }
-        }
+        SolverMode::Cpp => match req.cpp_engine {
+            CppEngine::Internal => run_cpp_optimize(req),
+            CppEngine::ExternalRustOptimizer => run_external_cpp_optimize(req),
+        },
         SolverMode::Vrp => run_vrp_optimize(req).await,
     }
 }

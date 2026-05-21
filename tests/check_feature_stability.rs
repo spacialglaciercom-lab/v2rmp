@@ -15,34 +15,34 @@ use v2rmp::core::vrp::utils::build_haversine_matrix;
 // for a Montreal 8-stop + depot VRP instance with 3 vehicles.
 // Computed via temporary compute_golden_temp.rs integration test.
 const GOLDEN: [f32; 28] = [
-    0.01600000,  // n_stops_norm
-    0.15000001,  // n_vehicles_norm
-    0.03417591,  // avg_pairwise_km_norm
-    0.00371534,  // lat_spread_norm
-    0.00419106,  // lon_spread_norm
-    0.04759511,  // density_norm
-    0.00336169,  // area_km2_norm
-    0.02165792,  // depot_centroid_dist_norm
-    14.0000000,  // knn_avg_degree
-    14.0000000,  // knn_max_degree
-    0.92307693,  // knn_clustering
-    0.06859717,  // knn_diameter_norm
-    0.01269179,  // knn_mst_weight_norm
-    0.03417591,  // knn_avg_shortest_path
-    0.00000000,  // knn_spectral_gap
-    0.00000000,  // knn_assortativity
-    0.03600000,  // total_demand_norm
-    0.02449490,  // demand_std_norm
-    0.00000000,  // tight_capacity_flag
-    0.12000000,  // capacity_ratio
-    0.03417591,  // dist_mean_norm
-    0.01504877,  // dist_std_norm
-    0.25445142,  // dist_skewness
-    0.02814293,  // depot_dist_mean_norm
-    1.00000000,  // objective_min_distance
-    0.00000000,  // objective_min_time
-    0.00000000,  // objective_balance_load
-    0.00000000,  // objective_min_vehicles
+    0.01600000, // n_stops_norm
+    0.15000001, // n_vehicles_norm
+    0.03417591, // avg_pairwise_km_norm
+    0.00371534, // lat_spread_norm
+    0.00419106, // lon_spread_norm
+    0.04759511, // density_norm
+    0.00336169, // area_km2_norm
+    0.02165792, // depot_centroid_dist_norm
+    14.0000000, // knn_avg_degree
+    14.0000000, // knn_max_degree
+    0.92307693, // knn_clustering
+    0.06859717, // knn_diameter_norm
+    0.01269179, // knn_mst_weight_norm
+    0.03417591, // knn_avg_shortest_path
+    0.00000000, // knn_spectral_gap
+    0.00000000, // knn_assortativity
+    0.03600000, // total_demand_norm
+    0.02449490, // demand_std_norm
+    0.00000000, // tight_capacity_flag
+    0.12000000, // capacity_ratio
+    0.03417591, // dist_mean_norm
+    0.01504877, // dist_std_norm
+    0.25445142, // dist_skewness
+    0.02814293, // depot_dist_mean_norm
+    1.00000000, // objective_min_distance
+    0.00000000, // objective_min_time
+    0.00000000, // objective_balance_load
+    0.00000000, // objective_min_vehicles
 ];
 
 /// Maximum allowed delta between computed and golden values.
@@ -53,40 +53,67 @@ const TOLERANCE: f32 = 5e-5;
 fn build_instance() -> VRPSolverInput {
     let stops = vec![
         VRPSolverStop {
-            lat: 45.5017, lon: -73.5673, label: "depot".into(),
-            demand: None, arrival_time: None,
+            lat: 45.5017,
+            lon: -73.5673,
+            label: "depot".into(),
+            demand: None,
+            arrival_time: None,
         },
         VRPSolverStop {
-            lat: 45.5088, lon: -73.5540, label: "a".into(),
-            demand: Some(5.0), arrival_time: None,
+            lat: 45.5088,
+            lon: -73.5540,
+            label: "a".into(),
+            demand: Some(5.0),
+            arrival_time: None,
         },
         VRPSolverStop {
-            lat: 45.5260, lon: -73.5900, label: "b".into(),
-            demand: Some(3.0), arrival_time: None,
+            lat: 45.5260,
+            lon: -73.5900,
+            label: "b".into(),
+            demand: Some(3.0),
+            arrival_time: None,
         },
         VRPSolverStop {
-            lat: 45.5150, lon: -73.5770, label: "c".into(),
-            demand: Some(7.0), arrival_time: None,
+            lat: 45.5150,
+            lon: -73.5770,
+            label: "c".into(),
+            demand: Some(7.0),
+            arrival_time: None,
         },
         VRPSolverStop {
-            lat: 45.4950, lon: -73.5800, label: "d".into(),
-            demand: Some(2.0), arrival_time: None,
+            lat: 45.4950,
+            lon: -73.5800,
+            label: "d".into(),
+            demand: Some(2.0),
+            arrival_time: None,
         },
         VRPSolverStop {
-            lat: 45.5340, lon: -73.6100, label: "e".into(),
-            demand: Some(4.0), arrival_time: None,
+            lat: 45.5340,
+            lon: -73.6100,
+            label: "e".into(),
+            demand: Some(4.0),
+            arrival_time: None,
         },
         VRPSolverStop {
-            lat: 45.5530, lon: -73.5500, label: "f".into(),
-            demand: Some(6.0), arrival_time: None,
+            lat: 45.5530,
+            lon: -73.5500,
+            label: "f".into(),
+            demand: Some(6.0),
+            arrival_time: None,
         },
         VRPSolverStop {
-            lat: 45.5050, lon: -73.5530, label: "g".into(),
-            demand: Some(1.0), arrival_time: None,
+            lat: 45.5050,
+            lon: -73.5530,
+            label: "g".into(),
+            demand: Some(1.0),
+            arrival_time: None,
         },
         VRPSolverStop {
-            lat: 45.5300, lon: -73.5650, label: "h".into(),
-            demand: Some(8.0), arrival_time: None,
+            lat: 45.5300,
+            lon: -73.5650,
+            label: "h".into(),
+            demand: Some(8.0),
+            arrival_time: None,
         },
     ];
     let matrix = build_haversine_matrix(&stops, 40.0);

@@ -121,7 +121,7 @@ impl SolveResult {
             }
             routes.push(route_stops);
         }
-        
+
         // Populate combined stops (excluding repeated depot visits if desired, but default is all)
         if !self.routes.is_empty() {
             for &idx in &self.routes[0] {

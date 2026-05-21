@@ -117,14 +117,14 @@ fn run_extract(app: &mut GuiApp) {
             }
         };
 
-    app.extract_status = Status::Running {
-        progress: 0,
-        message: "Starting extraction…".to_string(),
-    };
-    app.log(
-        LogLevel::Info,
-        format!("Starting extraction from {}", app.data_source),
-    );
+        app.extract_status = Status::Running {
+            progress: 0,
+            message: "Starting extraction…".to_string(),
+        };
+        app.log(
+            LogLevel::Info,
+            format!("Starting extraction from {}", app.data_source),
+        );
 
         let source = match app.data_source {
             DataSource::Osm => crate::core::extract::ExtractSource::Osm,
@@ -144,31 +144,35 @@ fn run_extract(app: &mut GuiApp) {
             pbf_path: None,
         };
 
-    // Run extraction synchronously (blocking the UI — could be moved to a thread)
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    match rt.block_on(crate::core::extract::run_extract(&req)) {
-        Ok(result) => {
-            app.extract_status =
-                Status::Done(format!("{} nodes, {} edges", result.nodes, result.edges));
-            app.log(
-                LogLevel::Success,
-                format!(
-                    "Extraction complete: {} nodes, {} edges",
-                    result.nodes, result.edges
-                ),
-            );
-        }
-        Err(e) => {
-            app.extract_status = Status::Error(e.to_string());
-            app.log(LogLevel::Error, format!("Extraction failed: {}", e));
+        // Run extraction synchronously (blocking the UI — could be moved to a thread)
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        match rt.block_on(crate::core::extract::run_extract(&req)) {
+            Ok(result) => {
+                app.extract_status =
+                    Status::Done(format!("{} nodes, {} edges", result.nodes, result.edges));
+                app.log(
+                    LogLevel::Success,
+                    format!(
+                        "Extraction complete: {} nodes, {} edges",
+                        result.nodes, result.edges
+                    ),
+                );
+            }
+            Err(e) => {
+                app.extract_status = Status::Error(e.to_string());
+                app.log(LogLevel::Error, format!("Extraction failed: {}", e));
+            }
         }
     }
     #[cfg(not(feature = "extract"))]
     {
-        app.log(LogLevel::Error, "Extraction feature not enabled. Build with --features extract");
+        app.log(
+            LogLevel::Error,
+            "Extraction feature not enabled. Build with --features extract",
+        );
         app.extract_status = Status::Error("Feature 'extract' disabled".to_string());
     }
 }

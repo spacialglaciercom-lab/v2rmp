@@ -238,9 +238,8 @@ fn single_walk(
             weights.push(bias);
         }
 
-        let dist = WeightedIndex::new(&weights).unwrap_or_else(|_| {
-            WeightedIndex::new(vec![1.0f64; neighbors.len()]).unwrap()
-        });
+        let dist = WeightedIndex::new(&weights)
+            .unwrap_or_else(|_| WeightedIndex::new(vec![1.0f64; neighbors.len()]).unwrap());
 
         let idx = dist.sample(rng);
         walk.push(neighbors[idx].0);
@@ -253,11 +252,7 @@ fn single_walk(
 ///
 /// Simple implementation inspired by word2vec. Trains an embedding matrix
 /// where co-occurring nodes in walks have similar representations.
-fn train_skip_gram(
-    walks: &[Vec<usize>],
-    num_nodes: usize,
-    config: &EmbedConfig,
-) -> Vec<Vec<f32>> {
+fn train_skip_gram(walks: &[Vec<usize>], num_nodes: usize, config: &EmbedConfig) -> Vec<Vec<f32>> {
     let dim = config.dimensions;
     let lr = config.lr as f32;
     let window = config.window;
@@ -363,11 +358,7 @@ fn dot_product(a: &[f32], b: &[f32]) -> f32 {
 ///
 /// 1st-order: directly connected nodes should have similar embeddings.
 /// 2nd-order: nodes with similar neighborhoods should be similar.
-fn train_line(
-    adj: &Adjacency,
-    edges: &[RmpEdge],
-    config: &EmbedConfig,
-) -> Vec<Vec<f32>> {
+fn train_line(adj: &Adjacency, edges: &[RmpEdge], config: &EmbedConfig) -> Vec<Vec<f32>> {
     let n = adj.num_nodes;
     let dim = config.dimensions;
     let lr = config.lr as f32;
@@ -395,9 +386,8 @@ fn train_line(
         .iter()
         .map(|&d| ((d as f64) / degree_sum).powf(0.75))
         .collect();
-    let neg_dist = WeightedIndex::new(&neg_weights).unwrap_or_else(|_| {
-        WeightedIndex::new(vec![1.0f64; n]).unwrap()
-    });
+    let neg_dist = WeightedIndex::new(&neg_weights)
+        .unwrap_or_else(|_| WeightedIndex::new(vec![1.0f64; n]).unwrap());
 
     let num_edges = edges.len();
     if num_edges == 0 {
@@ -591,15 +581,26 @@ fn train_fastrp(adj: &Adjacency, config: &EmbedConfig) -> Vec<Vec<f32>> {
 /// - eigenvector_centrality_approx
 ///
 /// Padded/truncated to config.dimensions.
-fn spatial_features(nodes: &[RmpNode], edges: &[RmpEdge], adj: &Adjacency, config: &EmbedConfig) -> Vec<Vec<f32>> {
+fn spatial_features(
+    nodes: &[RmpNode],
+    edges: &[RmpEdge],
+    adj: &Adjacency,
+    config: &EmbedConfig,
+) -> Vec<Vec<f32>> {
     let n = nodes.len();
     let dim = config.dimensions;
 
     // Compute lat/lon bounds for normalization
     let lat_min = nodes.iter().map(|n| n.lat).fold(f64::INFINITY, f64::min);
-    let lat_max = nodes.iter().map(|n| n.lat).fold(f64::NEG_INFINITY, f64::max);
+    let lat_max = nodes
+        .iter()
+        .map(|n| n.lat)
+        .fold(f64::NEG_INFINITY, f64::max);
     let lon_min = nodes.iter().map(|n| n.lon).fold(f64::INFINITY, f64::min);
-    let lon_max = nodes.iter().map(|n| n.lon).fold(f64::NEG_INFINITY, f64::max);
+    let lon_max = nodes
+        .iter()
+        .map(|n| n.lon)
+        .fold(f64::NEG_INFINITY, f64::max);
     let lat_range = (lat_max - lat_min).max(1e-10);
     let lon_range = (lon_max - lon_min).max(1e-10);
 
@@ -633,7 +634,8 @@ fn spatial_features(nodes: &[RmpNode], edges: &[RmpEdge], adj: &Adjacency, confi
         let min_w = weights.iter().cloned().fold(f64::INFINITY, f64::min) as f32;
         let std_w = if weights.len() > 1 {
             let mean = weights.iter().sum::<f64>() / weights.len() as f64;
-            let variance = weights.iter().map(|w| (w - mean).powi(2)).sum::<f64>() / weights.len() as f64;
+            let variance =
+                weights.iter().map(|w| (w - mean).powi(2)).sum::<f64>() / weights.len() as f64;
             variance.sqrt() as f32
         } else {
             0.0f32
@@ -659,7 +661,12 @@ fn spatial_features(nodes: &[RmpNode], edges: &[RmpEdge], adj: &Adjacency, confi
         features.resize(dim, 0.0f32);
 
         // Normalize the feature vector
-        let norm = features.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-10);
+        let norm = features
+            .iter()
+            .map(|x| x * x)
+            .sum::<f32>()
+            .sqrt()
+            .max(1e-10);
         for v in &mut features {
             *v /= norm;
         }
@@ -782,10 +789,7 @@ fn approx_eigenvector_centrality(adj: &Adjacency, iterations: usize) -> Vec<f32>
 // ── Edge embedding from node embeddings ───────────────────────────────
 
 /// Derive edge embeddings from node embeddings using Hadamard product.
-fn embed_edges(
-    edges: &[RmpEdge],
-    node_embs: &[Vec<f32>],
-) -> Vec<EdgeEmbedding> {
+fn embed_edges(edges: &[RmpEdge], node_embs: &[Vec<f32>]) -> Vec<EdgeEmbedding> {
     edges
         .iter()
         .enumerate()
@@ -851,7 +855,10 @@ pub fn embed_graph(
                 config.q,
             );
             let walks = generate_walks(&adj, config);
-            tracing::debug!("node2vec: generated {} walks, training skip-gram...", walks.len());
+            tracing::debug!(
+                "node2vec: generated {} walks, training skip-gram...",
+                walks.len()
+            );
             train_skip_gram(&walks, nodes.len(), config)
         }
         EmbedMethod::Line => {

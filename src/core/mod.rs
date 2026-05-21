@@ -9,7 +9,6 @@ pub mod embed;
 pub mod extract;
 pub mod geo_types;
 pub mod metrics;
-pub mod optimize;
 #[cfg(feature = "ml")]
 pub mod ml;
 pub mod ml_legacy;
@@ -17,13 +16,14 @@ pub mod ml_legacy;
 pub mod neural_routing;
 #[cfg(feature = "ml")]
 pub mod nlp;
+pub mod optimize;
+pub mod osm;
+#[cfg(feature = "extract")]
+pub mod overture;
 pub mod partition;
 pub mod pmtiles_extract;
 pub mod postgis_cpp;
 pub mod r2;
-pub mod osm;
-#[cfg(feature = "extract")]
-pub mod overture;
 pub mod vrp;
 
 /// Haversine distance in meters between two WGS-84 points (lat, lon order).

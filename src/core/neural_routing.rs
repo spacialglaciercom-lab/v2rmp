@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 #[cfg(feature = "ort")]
 use ort::session::Session;
 #[cfg(feature = "ort")]
@@ -120,7 +120,9 @@ pub struct NeuralInferenceEngine;
 #[cfg(not(feature = "ort"))]
 impl NeuralInferenceEngine {
     pub fn new<P: AsRef<Path>>(_model_path: P) -> Result<Self> {
-        anyhow::bail!("Neural inference requires the 'ort' feature, which is not available on this platform.")
+        anyhow::bail!(
+            "Neural inference requires the 'ort' feature, which is not available on this platform."
+        )
     }
     pub fn solve(&mut self, _req: &NeuralRouteRequest) -> Result<NeuralRouteResponse> {
         anyhow::bail!("Neural inference requires the 'ort' feature.")

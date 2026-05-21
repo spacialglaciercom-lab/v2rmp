@@ -11,7 +11,9 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let green = ratatui::style::Color::Green;
 
     let input_display = match &app.graph_embed_input {
-        Some(p) => ratatui::text::Span::styled(p.clone(), ratatui::style::Style::default().fg(green)),
+        Some(p) => {
+            ratatui::text::Span::styled(p.clone(), ratatui::style::Style::default().fg(green))
+        }
         None => ratatui::text::Span::styled(
             "(not set)".to_string(),
             ratatui::style::Style::default().fg(yellow),
@@ -19,7 +21,9 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     };
 
     let output_display = match &app.graph_embed_output {
-        Some(p) => ratatui::text::Span::styled(p.clone(), ratatui::style::Style::default().fg(green)),
+        Some(p) => {
+            ratatui::text::Span::styled(p.clone(), ratatui::style::Style::default().fg(green))
+        }
         None => ratatui::text::Span::styled(
             "(stdout)".to_string(),
             ratatui::style::Style::default().fg(gray),
@@ -36,8 +40,16 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ratatui::style::Color::LightYellow
     };
 
-    let edges_label = if app.graph_embed_include_edges { "ON" } else { "OFF" };
-    let edges_color = if app.graph_embed_include_edges { green } else { gray };
+    let edges_label = if app.graph_embed_include_edges {
+        "ON"
+    } else {
+        "OFF"
+    };
+    let edges_color = if app.graph_embed_include_edges {
+        green
+    } else {
+        gray
+    };
 
     let status_text = format!("Status: {}", app.graph_embed_status);
     let status_color = app.graph_embed_status.color();
@@ -63,7 +75,9 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             ratatui::text::Span::raw("Method:             "),
             ratatui::text::Span::styled(
                 app.graph_embed_method.clone(),
-                ratatui::style::Style::default().fg(method_color).add_modifier(ratatui::style::Modifier::BOLD),
+                ratatui::style::Style::default()
+                    .fg(method_color)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
             ),
         ]),
         ratatui::text::Line::from(vec![
@@ -86,24 +100,24 @@ pub fn draw(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             "Method Parameters:",
             ratatui::style::Style::default().fg(cyan),
         )),
-        ratatui::text::Line::from(vec![
-            ratatui::text::Span::styled(
-                format!("  Walk length: {}  |  Num walks: {}", app.graph_embed_walk_length, app.graph_embed_num_walks),
-                ratatui::style::Style::default().fg(gray),
+        ratatui::text::Line::from(vec![ratatui::text::Span::styled(
+            format!(
+                "  Walk length: {}  |  Num walks: {}",
+                app.graph_embed_walk_length, app.graph_embed_num_walks
             ),
-        ]),
-        ratatui::text::Line::from(vec![
-            ratatui::text::Span::styled(
-                format!("  p (return): {}  |  q (in-out): {}", app.graph_embed_p, app.graph_embed_q),
-                ratatui::style::Style::default().fg(gray),
+            ratatui::style::Style::default().fg(gray),
+        )]),
+        ratatui::text::Line::from(vec![ratatui::text::Span::styled(
+            format!(
+                "  p (return): {}  |  q (in-out): {}",
+                app.graph_embed_p, app.graph_embed_q
             ),
-        ]),
-        ratatui::text::Line::from(vec![
-            ratatui::text::Span::styled(
-                format!("  Epochs (LINE): {}", app.graph_embed_epochs),
-                ratatui::style::Style::default().fg(gray),
-            ),
-        ]),
+            ratatui::style::Style::default().fg(gray),
+        )]),
+        ratatui::text::Line::from(vec![ratatui::text::Span::styled(
+            format!("  Epochs (LINE): {}", app.graph_embed_epochs),
+            ratatui::style::Style::default().fg(gray),
+        )]),
         ratatui::text::Line::from(""),
         ratatui::text::Line::from(ratatui::text::Span::styled(
             status_text,

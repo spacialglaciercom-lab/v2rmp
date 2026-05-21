@@ -71,6 +71,17 @@ Connect AI agents to v2rmp with 25+ tools:
 
 Tools: `extract_overture`, `compile`, `optimize`, `v2rmp_rust_optimizer`, `vrp_solve`, `partition`, `list_r2_bucket`, etc.
 
+## 🤖 Offline AI Agent
+
+`v2rmp` features a specialized, 100% offline LLM agent designed to orchestrate the route optimization pipeline. Built on a fine-tuned 1.5B parameter model, it translates natural language routing requests directly into tool commands—without needing internet access or cloud APIs.
+
+```bash
+# Pull and run the local agent via Ollama
+ollama run spacialglaciercom/v2rmp-agent
+```
+
+For more info, visit the [Ollama Hub page](https://ollama.com/spacialglaciercom/v2rmp-agent).
+
 ## Performance
 
 | Metric | Internal Engine | External rust-optimizer |

@@ -100,7 +100,7 @@ fn test_graph_sage_loading() {
             weight_m: 1000.0,
             oneway: 0,
         }];
-        let embeddings = embed_network(&nodes, &edges, Some(model_path));
+        let embeddings = embed_network(&nodes, &edges);
         // If it loaded and ran, we should have 1 embedding (for the 1 edge)
         assert!(!embeddings.is_empty());
         assert_eq!(embeddings.len(), 1);

@@ -1,7 +1,4 @@
-use crate::core::vrp::types::{
-    VRPSolver, VRPSolverInput, VRPSolverOutput,
-};
-use crate::core::vrp::utils::{matrix_get_dist, two_opt_improve};
+use crate::core::vrp::types::{VRPSolver, VRPSolverInput, VRPSolverOutput};
 use anyhow::Result;
 use async_trait::async_trait;
 #[cfg(feature = "ort")]
@@ -9,7 +6,6 @@ use ort::session::Session;
 #[cfg(feature = "ort")]
 use ort::value::Value;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashSet};
 
 pub struct NeuralGnnSolver;
 
@@ -66,7 +62,7 @@ impl VRPSolver for NeuralGnnSolver {
                 .matrix
                 .as_ref()
                 .ok_or("GNN solver requires a distance matrix")?;
-            
+
             let n = input.locations.len();
             if n < 2 {
                 return Err("Need at least 2 locations".to_string());
@@ -74,7 +70,7 @@ impl VRPSolver for NeuralGnnSolver {
 
             // 1. Build Inputs for GNN
             // node_embeddings: [N, 64]
-            
+
             let mut node_emb_data = Vec::with_capacity(n * 64);
             for loc in &input.locations {
                 // Find nearest embedding
@@ -96,7 +92,8 @@ impl VRPSolver for NeuralGnnSolver {
             let mut adj_data = vec![0.0f32; n * n];
             for i in 0..n {
                 for j in 0..n {
-                    if i != j && matrix_get_dist(matrix, i, j) < 5.0 { // threshold for adjacency
+                    if i != j && matrix_get_dist(matrix, i, j) < 5.0 {
+                        // threshold for adjacency
                         adj_data[i * n + j] = 1.0;
                     }
                 }
@@ -117,16 +114,19 @@ impl VRPSolver for NeuralGnnSolver {
             let meta_val = Value::from_array(([1, 3], meta_data))
                 .map_err(|e| format!("Failed to create meta Value: {}", e))?;
 
-            let outputs = session.run(ort::inputs![
-                "node_embeddings" => node_emb_val,
-                "adj_matrix" => adj_val,
-                "meta_state" => meta_val,
-            ])
-            .map_err(|e| format!("Inference failed: {}", e))?;
+            let outputs = session
+                .run(ort::inputs![
+                    "node_embeddings" => node_emb_val,
+                    "adj_matrix" => adj_val,
+                    "meta_state" => meta_val,
+                ])
+                .map_err(|e| format!("Inference failed: {}", e))?;
 
-
-            let output_val = outputs.get("node_scores").ok_or("Output 'node_scores' not found")?;
-            let (_shape, scores) = output_val.try_extract_tensor::<f32>()
+            let output_val = outputs
+                .get("node_scores")
+                .ok_or("Output 'node_scores' not found")?;
+            let (_shape, scores) = output_val
+                .try_extract_tensor::<f32>()
                 .map_err(|e| format!("Failed to extract scores: {}", e))?;
 
             // 3. Greedy Construction guided by GNN scores
@@ -144,7 +144,7 @@ impl VRPSolver for NeuralGnnSolver {
                         // Combine GNN score with distance penalty
                         let dist = matrix_get_dist(matrix, curr, next) as f32;
                         let score = scores[next] - (dist * 0.1); // Weighting heuristic
-                        
+
                         if score > max_score {
                             max_score = score;
                             best_next = Some(next);
@@ -167,8 +167,12 @@ impl VRPSolver for NeuralGnnSolver {
             let mut total_dist = 0.0;
             let mut total_time = 0.0;
             for i in 0..improved.len() - 1 {
-                total_dist += matrix_get_dist(matrix, improved[i], improved[i+1]);
-                total_time += matrix.get(improved[i]).and_then(|row| row.get(improved[i+1])).map(|c| c.time).unwrap_or(0.0);
+                total_dist += matrix_get_dist(matrix, improved[i], improved[i + 1]);
+                total_time += matrix
+                    .get(improved[i])
+                    .and_then(|row| row.get(improved[i + 1]))
+                    .map(|c| c.time)
+                    .unwrap_or(0.0);
             }
 
             let mut stops = Vec::new();
@@ -178,7 +182,10 @@ impl VRPSolver for NeuralGnnSolver {
 
             Ok(VRPSolverOutput {
                 stops,
-                routes: Some(vec![improved.iter().map(|&i| input.locations[i].clone()).collect()]),
+                routes: Some(vec![improved
+                    .iter()
+                    .map(|&i| input.locations[i].clone())
+                    .collect()]),
                 geometry: None,
                 total_distance_km: format!("{:.2}", total_dist),
                 total_time_min: (total_time / 60.0) as u32,

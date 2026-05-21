@@ -132,7 +132,9 @@ fn generate_default(rng: &mut FastPrng) -> InstanceConfig {
     let area_scale = rng.range_f(0.5, 3.0);
     let objective = objective_from_idx(rng.range(0, 4));
 
-    let stops = make_stops(rng, n_stops, depot_lat, depot_lon, pattern, area_scale, 1.0, 20.0);
+    let stops = make_stops(
+        rng, n_stops, depot_lat, depot_lon, pattern, area_scale, 1.0, 20.0,
+    );
 
     InstanceConfig {
         stops,
@@ -156,7 +158,15 @@ fn generate_tight_capacity(rng: &mut FastPrng) -> InstanceConfig {
     let total_capacity = 100.0 * n_vehicles as f64;
     let per_stop_demand = total_capacity * rng.range_f(0.80, 0.95) / n_stops as f64;
 
-    let stops = make_stops_with_demand(rng, n_stops, depot_lat, depot_lon, pattern, area_scale, per_stop_demand);
+    let stops = make_stops_with_demand(
+        rng,
+        n_stops,
+        depot_lat,
+        depot_lon,
+        pattern,
+        area_scale,
+        per_stop_demand,
+    );
 
     InstanceConfig {
         stops,
@@ -204,7 +214,9 @@ fn generate_large_dense(rng: &mut FastPrng) -> InstanceConfig {
         _ => VrpObjective::MinVehicles,
     };
 
-    let stops = make_stops(rng, n_stops, depot_lat, depot_lon, pattern, area_scale, 1.0, 15.0);
+    let stops = make_stops(
+        rng, n_stops, depot_lat, depot_lon, pattern, area_scale, 1.0, 15.0,
+    );
 
     InstanceConfig {
         stops,
@@ -325,7 +337,16 @@ fn make_stops_with_demand(
     area_scale: f64,
     per_stop_demand: f64,
 ) -> Vec<VRPSolverStop> {
-    let mut stops = make_stops(rng, n_stops, depot_lat, depot_lon, pattern, area_scale, per_stop_demand * 0.5, per_stop_demand * 1.5);
+    let mut stops = make_stops(
+        rng,
+        n_stops,
+        depot_lat,
+        depot_lon,
+        pattern,
+        area_scale,
+        per_stop_demand * 0.5,
+        per_stop_demand * 1.5,
+    );
 
     // Override demands to be centered around per_stop_demand
     for stop in stops.iter_mut().skip(1) {
@@ -370,7 +391,8 @@ fn mst_lower_bound(locations: &[VRPSolverStop], n_vehicles: usize) -> f64 {
     let mut dists = vec![vec![0.0; n_others]; n_others];
     for i in 0..n_others {
         for j in (i + 1)..n_others {
-            let d = haversine_m(others[i].lat, others[i].lon, others[j].lat, others[j].lon) / 1000.0;
+            let d =
+                haversine_m(others[i].lat, others[i].lon, others[j].lat, others[j].lon) / 1000.0;
             dists[i][j] = d;
             dists[j][i] = d;
         }

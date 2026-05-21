@@ -17,11 +17,18 @@ pub fn generate_wpml(instance: &DroneVrpInstance, result: &DroneVrpResult) -> Re
         for (stop_idx, &cust_idx) in route.iter().enumerate() {
             let lat = instance.customers[cust_idx][0];
             let lon = instance.customers[cust_idx][1];
-            
+
             xml.push_str("      <Placemark>\n");
-            xml.push_str(&format!("        <name>Route {} Stop {}</name>\n", route_idx + 1, stop_idx + 1));
+            xml.push_str(&format!(
+                "        <name>Route {} Stop {}</name>\n",
+                route_idx + 1,
+                stop_idx + 1
+            ));
             xml.push_str("        <Point>\n");
-            xml.push_str(&format!("          <coordinates>{},{},50</coordinates>\n", lon, lat));
+            xml.push_str(&format!(
+                "          <coordinates>{},{},50</coordinates>\n",
+                lon, lat
+            ));
             xml.push_str("        </Point>\n");
             xml.push_str("        <wpml:index>");
             xml.push_str(&(route_idx * 100 + stop_idx).to_string());
@@ -39,6 +46,6 @@ pub fn generate_wpml(instance: &DroneVrpInstance, result: &DroneVrpResult) -> Re
     xml.push_str("    </Folder>\n");
     xml.push_str("  </Document>\n");
     xml.push_str("</kml>");
-    
+
     Ok(xml)
 }

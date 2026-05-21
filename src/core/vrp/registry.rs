@@ -6,9 +6,9 @@ use super::solvers::default::DefaultSolver;
 #[cfg(all(feature = "ml", feature = "ort"))]
 use super::solvers::neural::NeuralSolver;
 #[cfg(all(feature = "ml", feature = "ort"))]
-use super::solvers::neural_guided::NeuralGuidedSolver;
-#[cfg(all(feature = "ml", feature = "ort"))]
 use super::solvers::neural_gnn::NeuralGnnSolver;
+#[cfg(all(feature = "ml", feature = "ort"))]
+use super::solvers::neural_guided::NeuralGuidedSolver;
 use super::solvers::or_opt::OrOptSolver;
 use super::solvers::sweep::SweepSolver;
 use super::solvers::two_opt::TwoOptSolver;
