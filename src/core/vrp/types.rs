@@ -123,8 +123,8 @@ impl SolveResult {
         }
 
         // Populate combined stops (excluding repeated depot visits if desired, but default is all)
-        if !self.routes.is_empty() {
-            for &idx in &self.routes[0] {
+        for route_indices in &self.routes {
+            for &idx in route_indices {
                 if idx < input.locations.len() {
                     stops.push(input.locations[idx].clone());
                 }

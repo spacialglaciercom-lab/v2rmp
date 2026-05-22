@@ -133,7 +133,7 @@ mod tests {
         assert!(ids.contains(&"sweep".to_string()));
         assert!(ids.contains(&"two_opt".to_string()));
         assert!(ids.contains(&"or_opt".to_string()));
-        #[cfg(feature = "ml")]
+        #[cfg(all(feature = "ml", feature = "ort"))]
         assert!(ids.contains(&"neural_guided".to_string()));
         assert!(ids.contains(&"default".to_string()));
     }
