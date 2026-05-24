@@ -53,6 +53,12 @@ pub struct ParsedRoutingQuery {
     pub objective: Option<String>,
     /// Source data bbox (if extracting network).
     pub bbox: Option<BoundingBox>,
+    /// City name for coordinate generation (e.g., "montreal", "toronto").
+    pub city: Option<String>,
+    /// Number of random coordinates to generate (if no explicit stops).
+    pub generate_stops: Option<u32>,
+    /// Whether this is a drone VRP task.
+    pub is_drone: bool,
     /// Raw extracted entities for debugging.
     pub entities: HashMap<String, String>,
 }
@@ -72,7 +78,13 @@ pub fn parse_query(query: &str) -> ParsedRoutingQuery {
     let mut result = ParsedRoutingQuery::default();
 
     // ── Intent classification ─────────────────────────────────────────
-    if lower.contains("sweep") || lower.contains("street") || lower.contains("road") {
+    // Check for drone VRP first (highest priority)
+    if lower.contains("drone") || lower.contains("uav") || lower.contains("drone vrp") {
+        result.variant = "drone_vrp".to_string();
+        result.is_drone = true;
+        // Drone-specific defaults
+        result.avg_speed_kmh = Some(36.0); // 10 m/s = 36 km/h typical drone speed
+    } else if lower.contains("sweep") || lower.contains("street") || lower.contains("road") {
         result.variant = "cpp".to_string();
     } else if lower.contains("time window") || lower.contains("by ") || lower.contains("deadline") {
         result.variant = "cvrptw".to_string();
@@ -86,15 +98,29 @@ pub fn parse_query(query: &str) -> ParsedRoutingQuery {
 
     // ── Entity extraction: numbers ──────────────────────────────────
     // "50 packages", "5 vans", "100 customers", etc.
-    let num_regex = regex::Regex::new(r"(\d+)\s*(package|stop|customer|van|vehicle|driver|truck|route)").unwrap();
+    let num_regex = regex::Regex::new(r"(\d+)\s*(package|stop|customer|van|vehicle|driver|truck|route|random|coordinates?|points?|locations?)").unwrap();
     for cap in num_regex.captures_iter(&lower) {
         let num: u32 = cap[1].parse().unwrap_or(0);
         let noun = &cap[2];
         entities.insert(noun.to_string(), num.to_string());
         match noun {
-            "package" | "stop" | "customer" => result.num_stops = Some(num),
+            "package" | "stop" | "customer" | "random" | "coordinates" | "coordinate" | "points" | "point" | "locations" | "location" => {
+                result.num_stops = Some(num);
+                result.generate_stops = Some(num);
+            },
             "van" | "vehicle" | "driver" | "truck" | "route" => result.num_vehicles = Some(num),
             _ => {}
+        }
+    }
+
+    // ── City extraction for coordinate generation ────────────────────
+    // Check for known city names
+    let cities = ["montreal", "toronto", "vancouver", "calgary", "ottawa", "edmonton", "winnipeg", "quebec", "halifax"];
+    for city in &cities {
+        if lower.contains(city) {
+            result.city = Some(city.to_string());
+            entities.insert("city".to_string(), city.to_string());
+            break;
         }
     }
 
@@ -167,6 +193,98 @@ pub fn parse_query(query: &str) -> ParsedRoutingQuery {
             min_lon: lon - delta,
             max_lon: lon + delta,
         });
+    } else if let Some(city) = &result.city {
+        // Set default depot and bbox for known cities
+        match city.as_str() {
+            "montreal" => {
+                result.depot = Some((45.5017, -73.5673));
+                result.bbox = Some(BoundingBox {
+                    min_lat: 45.4,
+                    max_lat: 45.8,
+                    min_lon: -73.9,
+                    max_lon: -73.5,
+                });
+            },
+            "toronto" => {
+                result.depot = Some((43.6511, -79.3470));
+                result.bbox = Some(BoundingBox {
+                    min_lat: 43.58,
+                    max_lat: 43.85,
+                    min_lon: -79.6,
+                    max_lon: -79.1,
+                });
+            },
+            "vancouver" => {
+                result.depot = Some((49.2827, -123.1207));
+                result.bbox = Some(BoundingBox {
+                    min_lat: 49.15,
+                    max_lat: 49.4,
+                    min_lon: -123.3,
+                    max_lon: -122.9,
+                });
+            },
+            "calgary" => {
+                result.depot = Some((51.0447, -114.0719));
+                result.bbox = Some(BoundingBox {
+                    min_lat: 50.85,
+                    max_lat: 51.25,
+                    min_lon: -114.3,
+                    max_lon: -113.8,
+                });
+            },
+            "ottawa" => {
+                result.depot = Some((45.4215, -75.6972));
+                result.bbox = Some(BoundingBox {
+                    min_lat: 45.25,
+                    max_lat: 45.6,
+                    min_lon: -75.9,
+                    max_lon: -75.4,
+                });
+            },
+            "edmonton" => {
+                result.depot = Some((53.5444, -113.4909));
+                result.bbox = Some(BoundingBox {
+                    min_lat: 53.4,
+                    max_lat: 53.7,
+                    min_lon: -113.7,
+                    max_lon: -113.2,
+                });
+            },
+            "winnipeg" => {
+                result.depot = Some((49.8951, -97.1384));
+                result.bbox = Some(BoundingBox {
+                    min_lat: 49.75,
+                    max_lat: 50.05,
+                    min_lon: -97.4,
+                    max_lon: -96.8,
+                });
+            },
+            "quebec" => {
+                result.depot = Some((46.8139, -71.2080));
+                result.bbox = Some(BoundingBox {
+                    min_lat: 46.7,
+                    max_lat: 46.95,
+                    min_lon: -71.45,
+                    max_lon: -70.95,
+                });
+            },
+            "halifax" => {
+                result.depot = Some((44.6488, -63.5752));
+                result.bbox = Some(BoundingBox {
+                    min_lat: 44.55,
+                    max_lat: 44.75,
+                    min_lon: -63.7,
+                    max_lon: -63.4,
+                });
+            },
+            _ => {},
+        }
+    }
+
+    // Default to 10 random stops if no explicit stops but generate_stops is set
+    if result.generate_stops.is_none() && result.num_stops.is_none() {
+        result.generate_stops = Some(10);
+        result.num_stops = Some(10);
     }
 
     result.entities = entities;
@@ -196,6 +314,15 @@ pub fn to_vrp_json(parsed: &ParsedRoutingQuery) -> serde_json::Value {
     }
     if let Some(s) = parsed.avg_speed_kmh {
         obj["avg_speed_kmh"] = serde_json::json!(s);
+    }
+    if let Some(ref city) = parsed.city {
+        obj["city"] = serde_json::json!(city);
+    }
+    if let Some(g) = parsed.generate_stops {
+        obj["generate_stops"] = serde_json::json!(g);
+    }
+    if parsed.is_drone {
+        obj["is_drone"] = serde_json::json!(true);
     }
     if let Some(ref o) = parsed.objective {
         obj["objective"] = serde_json::json!(o);
@@ -314,6 +441,128 @@ impl QwenNLParser {
     }
 }
 
+/// City boundaries for random coordinate generation.
+pub struct CityBounds {
+    pub min_lat: f64,
+    pub max_lat: f64,
+    pub min_lon: f64,
+    pub max_lon: f64,
+    pub depot_lat: f64,
+    pub depot_lon: f64,
+}
+
+/// Get boundaries for known cities.
+pub fn get_city_bounds(city: &str) -> Option<CityBounds> {
+    match city.to_lowercase().as_str() {
+        "montreal" => Some(CityBounds {
+            min_lat: 45.4,
+            max_lat: 45.8,
+            min_lon: -73.9,
+            max_lon: -73.5,
+            depot_lat: 45.5017,
+            depot_lon: -73.5673,
+        }),
+        "toronto" => Some(CityBounds {
+            min_lat: 43.58,
+            max_lat: 43.85,
+            min_lon: -79.6,
+            max_lon: -79.1,
+            depot_lat: 43.6511,
+            depot_lon: -79.3470,
+        }),
+        "vancouver" => Some(CityBounds {
+            min_lat: 49.15,
+            max_lat: 49.4,
+            min_lon: -123.3,
+            max_lon: -122.9,
+            depot_lat: 49.2827,
+            depot_lon: -123.1207,
+        }),
+        "calgary" => Some(CityBounds {
+            min_lat: 50.85,
+            max_lat: 51.25,
+            min_lon: -114.3,
+            max_lon: -113.8,
+            depot_lat: 51.0447,
+            depot_lon: -114.0719,
+        }),
+        "ottawa" => Some(CityBounds {
+            min_lat: 45.25,
+            max_lat: 45.6,
+            min_lon: -75.9,
+            max_lon: -75.4,
+            depot_lat: 45.4215,
+            depot_lon: -75.6972,
+        }),
+        "edmonton" => Some(CityBounds {
+            min_lat: 53.4,
+            max_lat: 53.7,
+            min_lon: -113.7,
+            max_lon: -113.2,
+            depot_lat: 53.5444,
+            depot_lon: -113.4909,
+        }),
+        "winnipeg" => Some(CityBounds {
+            min_lat: 49.75,
+            max_lat: 50.05,
+            min_lon: -97.4,
+            max_lon: -96.8,
+            depot_lat: 49.8951,
+            depot_lon: -97.1384,
+        }),
+        "quebec" | "quebec city" => Some(CityBounds {
+            min_lat: 46.7,
+            max_lat: 46.95,
+            min_lon: -71.45,
+            max_lon: -70.95,
+            depot_lat: 46.8139,
+            depot_lon: -71.2080,
+        }),
+        "halifax" => Some(CityBounds {
+            min_lat: 44.55,
+            max_lat: 44.75,
+            min_lon: -63.7,
+            max_lon: -63.4,
+            depot_lat: 44.6488,
+            depot_lon: -63.5752,
+        }),
+        _ => None,
+    }
+}
+
+/// Generate random coordinates within a city's boundaries.
+/// Returns (depot, stops) where depot is the city center and stops are random points.
+pub fn generate_city_coordinates(city: &str, num_stops: u32) -> Vec<(f64, f64)> {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    
+    if let Some(bounds) = get_city_bounds(city) {
+        let mut coordinates = Vec::new();
+        
+        // Add depot as first coordinate
+        coordinates.push((bounds.depot_lat, bounds.depot_lon));
+        
+        // Generate random stops
+        for _ in 0..num_stops {
+            let lat = rng.gen_range(bounds.min_lat..bounds.max_lat);
+            let lon = rng.gen_range(bounds.min_lon..bounds.max_lon);
+            coordinates.push((lat, lon));
+        }
+        
+        coordinates
+    } else {
+        // Fallback: generate around Montreal if city unknown
+        let mut coordinates = vec![(45.5017, -73.5673)];
+        let mut rng = rand::thread_rng();
+        for _ in 0..num_stops {
+            let lat = rng.gen_range(45.4..45.8);
+            let lon = rng.gen_range(-73.9..-73.5);
+            coordinates.push((lat, lon));
+        }
+        coordinates
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,10 +599,34 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_drone_montreal() {
+        let q = "run vrp on random coordinates in montreal using drone vrp";
+        let p = parse_query(q);
+        assert_eq!(p.variant, "drone_vrp");
+        assert!(p.is_drone);
+        assert_eq!(p.city, Some("montreal".to_string()));
+        assert_eq!(p.depot, Some((45.5017, -73.5673)));
+        assert!(p.generate_stops.is_some());
+    }
+
+    #[test]
     fn test_to_vrp_json() {
         let p = parse_query("Route 10 packages with 2 vans at 40.7,-74.0");
         let json = to_vrp_json(&p);
         assert_eq!(json["num_stops"], 10);
         assert_eq!(json["num_vehicles"], 2);
+    }
+
+    #[test]
+    fn test_city_bounds() {
+        let bounds = get_city_bounds("montreal").unwrap();
+        assert!((45.4..45.8).contains(&bounds.depot_lat));
+        assert!((-73.9..-73.5).contains(&bounds.depot_lon));
+    }
+
+    #[test]
+    fn test_generate_coordinates() {
+        let coords = generate_city_coordinates("montreal", 5);
+        assert_eq!(coords.len(), 6); // 1 depot + 5 stops
     }
 }

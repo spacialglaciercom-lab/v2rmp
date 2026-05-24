@@ -6,6 +6,7 @@ use crate::core::clean::{clean_geojson, CleanOptions};
 use crate::core::compile::CompileRequest;
 use crate::core::elevation::{FuelCalculator, LocalDem};
 use crate::core::extract::{BBoxRequest, ExtractRequest, ExtractSource, RoadClass};
+use crate::core::geo_types::BBox;
 use crate::core::optimize::{OnewayMode, OptimizeRequest, SolverMode, TurnPenalties};
 
 /// rmpca - Route optimization and data extraction
@@ -299,6 +300,26 @@ where
     })
 }
 
+fn deserialize_bbox_opt<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum BboxInput {
+        String(String),
+        Array([f64; 4]),
+    }
+
+    let opt = Option::<BboxInput>::deserialize(deserializer)?;
+    Ok(opt.map(|input| match input {
+        BboxInput::String(s) => s,
+        BboxInput::Array([min_lon, min_lat, max_lon, max_lat]) => {
+            format!("{},{},{},{}", min_lon, min_lat, max_lon, max_lat)
+        }
+    }))
+}
+
 fn default_output_dir() -> String {
     "routes/".to_string()
 }
@@ -368,6 +389,21 @@ struct VrpArgs {
     #[arg(long)]
     #[serde(default)]
     coordinates: Option<String>,
+
+    /// City name for coordinate generation (e.g., "montreal", "toronto")
+    #[arg(long)]
+    #[serde(default)]
+    city: Option<String>,
+
+    /// Number of random stops to generate (if no coordinates CSV provided)
+    #[arg(long, alias = "num_random")]
+    #[serde(default)]
+    generate_stops: Option<usize>,
+
+    /// Whether this is a drone VRP task
+    #[arg(long)]
+    #[serde(default)]
+    is_drone: bool,
 }
 
 // ── Extract ───────────────────────────────────────────────────────────
@@ -399,6 +435,20 @@ struct ExtractArgs {
     #[arg(long)]
     #[serde(default)]
     pbf: Option<String>,
+
+    /// Path to local PMTiles file (required for source=pmtiles)
+    #[arg(long)]
+    #[serde(default)]
+    pmtiles: Option<String>,
+
+    /// Tile zoom level for PMTiles extraction (default: 14)
+    #[arg(long, default_value = "14")]
+    #[serde(default = "default_pmtiles_zoom")]
+    zoom: u8,
+}
+
+fn default_pmtiles_zoom() -> u8 {
+    14
 }
 
 // ── Compile ───────────────────────────────────────────────────────────
@@ -549,6 +599,11 @@ struct OptimizeArgs {
     #[arg(long, default_value = "default")]
     #[serde(default = "default_solver", alias = "solver_id")]
     solver: String,
+
+    /// Bounding box to filter the network: MIN_LON,MIN_LAT,MAX_LON,MAX_LAT
+    #[arg(long, allow_hyphen_values = true)]
+    #[serde(default, deserialize_with = "deserialize_bbox_opt")]
+    bbox: Option<String>,
 }
 
 // ── Pipeline ──────────────────────────────────────────────────────────
@@ -637,7 +692,8 @@ fn parse_source(s: &str) -> Result<ExtractSource> {
     match s {
         "osm" => Ok(ExtractSource::Osm),
         "overture" => Ok(ExtractSource::Overture),
-        other => anyhow::bail!("Unknown source: {other}"),
+        "pmtiles" => Ok(ExtractSource::Pmtiles),
+        other => anyhow::bail!("Unknown source: {other} (overture|osm|pmtiles)"),
     }
 }
 
@@ -703,6 +759,8 @@ async fn run_extract_cmd(args: ExtractArgs, json: bool) -> Result<()> {
         road_classes,
         output_path: args.output.clone(),
         pbf_path: args.pbf.clone(),
+        pmtiles_path: args.pmtiles.clone(),
+        zoom: args.zoom,
     };
 
     let result = crate::core::extract::run_extract(&req).await?;
@@ -860,6 +918,10 @@ let req = OptimizeRequest {
     num_vehicles: args.vehicles,
     solver_id: args.solver,
     coordinates: None,
+    bbox: args.bbox.as_ref().map(|s| {
+        let (min_lon, min_lat, max_lon, max_lat) = parse_bbox(s).expect("Invalid bbox");
+        BBox { min_lon, min_lat, max_lon, max_lat }
+    }),
     };
 
     let result = crate::core::optimize::run_optimize(&req).await?;
@@ -908,15 +970,26 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
         args.coordinates
     );
 
-    // Parse all depots
-    let depots: Vec<(f64, f64)> = args
-        .depot
-        .iter()
-        .map(|s| parse_depot(s))
-        .collect::<Result<Vec<_>>>()?;
+    // Parse all depots or use city default
+    let depots: Vec<(f64, f64)> = if !args.depot.is_empty() {
+        args.depot
+            .iter()
+            .map(|s| parse_depot(s))
+            .collect::<Result<Vec<_>>>()?
+    } else if let Some(ref city) = args.city {
+        // Use city's default depot
+        if let Some(bounds) = crate::core::nlp::get_city_bounds(city) {
+            vec![(bounds.depot_lat, bounds.depot_lon)]
+        } else {
+            // Fallback to Montreal
+            vec![(45.5017, -73.5673)]
+        }
+    } else {
+        anyhow::bail!("At least one depot must be specified via --depot or --city");
+    };
 
     if depots.is_empty() {
-        anyhow::bail!("At least one depot must be specified via --depot");
+        anyhow::bail!("At least one depot must be specified via --depot or --city");
     }
 
     let mut stops = Vec::new();
@@ -930,19 +1003,49 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
         arrival_time: None,
     });
 
-    // 2. Load stops from coordinates CSV
+    // 2. Load stops from coordinates CSV or generate random stops
     if let Some(csv_path) = args.coordinates {
         let (csv_stops, _depot_indices) = crate::core::vrp::utils::parse_csv_stops(&csv_path)
             .map_err(|e| anyhow::anyhow!("CSV parse error: {}", e))?;
         stops.extend(csv_stops);
+    } else if let Some(city) = args.city {
+        // Generate random stops for the specified city
+        let num_stops = args.generate_stops.unwrap_or(10) as u32;
+        let coords = crate::core::nlp::generate_city_coordinates(&city, num_stops);
+        
+        for (i, (lat, lon)) in coords.into_iter().skip(1).enumerate() {
+            stops.push(VRPSolverStop {
+                lat,
+                lon,
+                label: format!("Stop_{}", i + 1),
+                demand: Some(1.0),
+                arrival_time: None,
+            });
+        }
+    } else if args.generate_stops.is_some() {
+        // Generate random stops without a specific city (use Montreal as default)
+        let num_stops = args.generate_stops.unwrap() as u32;
+        let coords = crate::core::nlp::generate_city_coordinates("montreal", num_stops);
+        
+        for (i, (lat, lon)) in coords.into_iter().skip(1).enumerate() {
+            stops.push(VRPSolverStop {
+                lat,
+                lon,
+                label: format!("Stop_{}", i + 1),
+                demand: Some(1.0),
+                arrival_time: None,
+            });
+        }
     } else {
-        anyhow::bail!("--coordinates CSV file is required for VRP to define the delivery stops");
+        anyhow::bail!("--coordinates CSV file or --city with --generate-stops is required for VRP to define the delivery stops");
     }
 
     let solver_id = args.algo.to_solver_id();
     let capacity = args.capacity.unwrap_or(100.0);
 
-    let matrix = crate::core::vrp::utils::build_haversine_matrix(&stops, 40.0);
+    // Use drone speed (36 km/h = 10 m/s) if this is a drone VRP
+    let avg_speed = if args.is_drone { 36.0 } else { 40.0 };
+    let matrix = crate::core::vrp::utils::build_haversine_matrix(&stops, avg_speed);
 
     #[cfg(feature = "ml")]
     let mut vrp_input = VRPSolverInput {
@@ -1025,6 +1128,8 @@ async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         road_classes: RoadClass::all_vehicle(),
         output_path: extract_path.clone(),
         pbf_path: args.pbf.clone(),
+        pmtiles_path: None,
+        zoom: 14,
     };
     let extract_result = crate::core::extract::run_extract(&extract_req)
         .await
@@ -1073,6 +1178,7 @@ async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
         num_vehicles: 1,
         solver_id: "clarke_wright".to_string(),
         coordinates: None,
+        bbox: None,
     };
     let optimize_result = crate::core::optimize::run_optimize(&optimize_req)
         .await
