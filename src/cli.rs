@@ -40,6 +40,8 @@ enum Commands {
     List(ListArgs),
     /// Execute a JSON-encoded task plan
     Agent(AgentArgs),
+    /// Refine the self-improving agent harness based on telemetry
+    Refine(RefineArgs),
     /// Start a headless, long-running JSON-RPC/STDIO server for frontend integrations
     Serve(ServeArgs),
     /// Generate embeddings for text using fastembed
@@ -404,6 +406,11 @@ struct VrpArgs {
     #[arg(long)]
     #[serde(default)]
     is_drone: bool,
+
+    /// Bounding box to filter the network or generate stops: MIN_LON,MIN_LAT,MAX_LON,MAX_LAT
+    #[arg(long, allow_hyphen_values = true)]
+    #[serde(default, deserialize_with = "deserialize_bbox_opt")]
+    bbox: Option<String>,
 }
 
 // ── Extract ───────────────────────────────────────────────────────────
@@ -1008,26 +1015,31 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
         let (csv_stops, _depot_indices) = crate::core::vrp::utils::parse_csv_stops(&csv_path)
             .map_err(|e| anyhow::anyhow!("CSV parse error: {}", e))?;
         stops.extend(csv_stops);
-    } else if let Some(city) = args.city {
-        // Generate random stops for the specified city
+    } else if args.generate_stops.is_some() || args.city.is_some() || args.bbox.is_some() {
         let num_stops = args.generate_stops.unwrap_or(10) as u32;
-        let coords = crate::core::nlp::generate_city_coordinates(&city, num_stops);
         
-        for (i, (lat, lon)) in coords.into_iter().skip(1).enumerate() {
-            stops.push(VRPSolverStop {
-                lat,
-                lon,
-                label: format!("Stop_{}", i + 1),
-                demand: Some(1.0),
-                arrival_time: None,
-            });
-        }
-    } else if args.generate_stops.is_some() {
-        // Generate random stops without a specific city (use Montreal as default)
-        let num_stops = args.generate_stops.unwrap() as u32;
-        let coords = crate::core::nlp::generate_city_coordinates("montreal", num_stops);
+        let coords = if let Some(ref bbox_str) = args.bbox {
+            let (_min_lon, min_lat, _max_lon, max_lat) = parse_bbox(bbox_str)?;
+            let (min_lon, _min_lat, max_lon, _max_lat) = parse_bbox(bbox_str)?;
+            
+            use rand::Rng;
+            let mut rng = rand::thread_rng();
+            let mut c = Vec::new();
+            for _ in 0..num_stops {
+                let lat = rng.gen_range(min_lat..max_lat);
+                let lon = rng.gen_range(min_lon..max_lon);
+                c.push((lat, lon));
+            }
+            c
+        } else {
+            let city = args.city.as_deref().unwrap_or("montreal");
+            crate::core::nlp::generate_city_coordinates(city, num_stops)
+                .into_iter()
+                .skip(1)
+                .collect()
+        };
         
-        for (i, (lat, lon)) in coords.into_iter().skip(1).enumerate() {
+        for (i, (lat, lon)) in coords.into_iter().enumerate() {
             stops.push(VRPSolverStop {
                 lat,
                 lon,
@@ -1037,7 +1049,7 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
             });
         }
     } else {
-        anyhow::bail!("--coordinates CSV file or --city with --generate-stops is required for VRP to define the delivery stops");
+        anyhow::bail!("--coordinates CSV file, --bbox, or --city with --generate-stops is required for VRP to define the delivery stops");
     }
 
     let solver_id = args.algo.to_solver_id();
@@ -1225,6 +1237,11 @@ async fn run_pipeline_cmd(args: PipelineArgs, json: bool) -> Result<()> {
 }
 
 async fn run_agent_cmd(args: AgentArgs, json: bool) -> Result<()> {
+    #[cfg(feature = "ml")]
+    let agent = V2RMPAgent::load_default().unwrap_or_else(|_| V2RMPAgent::new(None));
+    #[cfg(feature = "ml")]
+    tracing::info!("Agent active with prompt: {}", agent.prompt.lines().next().unwrap_or(""));
+
     let input: Box<dyn std::io::Read> = if args.task == "-" {
         Box::new(std::io::stdin())
     } else {
@@ -1598,6 +1615,71 @@ fn run_parse_query_cmd(args: ParseQueryArgs) -> Result<()> {
     Ok(())
 }
 
+#[derive(clap::Args)]
+struct RefineArgs {
+    /// Force retraining of the MLP selector even if thresholds not met
+    #[arg(long)]
+    retrain: bool,
+}
+
+#[cfg(feature = "ml")]
+use crate::core::ml::agent::V2RMPAgent;
+#[cfg(feature = "ml")]
+use crate::core::ml::telemetry::{default_history_path, TelemetryRecord};
+
+async fn run_refine_cmd(args: RefineArgs) -> Result<()> {
+    #[cfg(feature = "ml")]
+    {
+        tracing::info!("Starting agentic refinement...");
+        let mut agent = V2RMPAgent::load_default()?;
+        
+        let history_path = default_history_path();
+        if !history_path.exists() {
+            tracing::warn!("No telemetry history found at {:?}", history_path);
+            return Ok(());
+        }
+
+        let file = std::fs::File::open(history_path)?;
+        let reader = std::io::BufReader::new(file);
+        let mut records = Vec::new();
+        use std::io::BufRead;
+        for line in reader.lines() {
+            if let Ok(line) = line {
+                if let Ok(record) = serde_json::from_str::<TelemetryRecord>(&line) {
+                    records.push(record);
+                }
+            }
+        }
+
+        let updated = agent.refine(&records)?;
+        if updated {
+            tracing::info!("Agent harness refined! New rules added to memory and prompt.");
+            println!("Agent state updated successfully.");
+        } else {
+            tracing::info!("Agent harness is already optimal for the current dataset.");
+            println!("No refinements needed.");
+        }
+
+        if args.retrain {
+            tracing::info!("Triggering model retraining via refine.py...");
+            let status = std::process::Command::new("python3")
+                .arg("refine.py")
+                .arg("--retrain")
+                .status()?;
+            if status.success() {
+                println!("Neural models retrained.");
+            }
+        }
+    }
+    
+    #[cfg(not(feature = "ml"))]
+    {
+        anyhow::bail!("ML feature is required for refinement.");
+    }
+    
+    Ok(())
+}
+
 fn read_json_input<T: serde::de::DeserializeOwned>(path: &str) -> Result<T> {
     let input: Box<dyn std::io::Read> = if path == "-" {
         Box::new(std::io::stdin())
@@ -1622,6 +1704,7 @@ pub async fn run() -> Result<()> {
         Commands::Pipeline(args) => run_pipeline_cmd(args, cli.json).await,
         Commands::List(args) => run_list_cmd(args, cli.json),
         Commands::Agent(args) => run_agent_cmd(args, cli.json).await,
+        Commands::Refine(args) => run_refine_cmd(args).await,
         Commands::Serve(args) => run_serve_cmd(args).await,
         #[cfg(feature = "ml")]
         Commands::Embed(args) => run_embed_cmd(args, cli.json).await,

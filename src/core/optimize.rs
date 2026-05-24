@@ -8,7 +8,6 @@ use std::time::Instant;
 /// Filter nodes and edges to only those within a bounding box.
 /// Returns remapped (nodes, edges) where edge indices are renumbered from 0.
 /// If `bbox` is `None`, returns the originals unchanged.
-#[allow(dead_code)]
 pub fn filter_bbox(
     nodes: &[RmpNode],
     edges: &[RmpEdge],
@@ -97,6 +96,11 @@ pub struct OptimizeRequest {
     pub solver_id: String,
     /// VRP-only: path to CSV file containing stops.
     pub coordinates: Option<String>,
+    /// Optional bounding box to filter the network before solving.
+    /// Nodes/edges outside the bbox are excluded, and indices are remapped.
+    /// When `None`, the full network is used.
+    #[serde(default)]
+    pub bbox: Option<BBox>,
 }
 
 fn default_num_vehicles() -> usize {
@@ -388,12 +392,10 @@ pub fn solve_cpp(
 
         // 1. All-Pairs Shortest Paths between odd vertices
         let mut dist_matrix = vec![vec![f64::MAX; num_odd]; num_odd];
-        let mut path_matrix = vec![vec![Vec::new(); num_odd]; num_odd];
 
         for i in 0..num_odd {
             let u = odd_vertices[i];
             let mut dists = vec![f64::MAX; n];
-            let mut prev = vec![None; n];
             let mut heap = BinaryHeap::new();
 
             dists[u] = 0.0;
@@ -448,7 +450,6 @@ pub fn solve_cpp(
                     let next_cost = cost + edge.weight_m + penalty;
                     if next_cost < dists[edge.to as usize] {
                         dists[edge.to as usize] = next_cost;
-                        prev[edge.to as usize] = Some((position, edge.weight_m, edge.edge_idx));
                         heap.push(State {
                             cost: next_cost,
                             position: edge.to as usize,
@@ -463,14 +464,6 @@ pub fn solve_cpp(
                 if dists[v] < f64::MAX {
                     dist_matrix[i][j] = dists[v];
                     dist_matrix[j][i] = dists[v];
-                    
-                    let mut path = Vec::new();
-                    let mut curr = v;
-                    while let Some((p, weight, eidx)) = prev[curr] {
-                        path.push((p, curr, weight, eidx));
-                        curr = p;
-                    }
-                    path_matrix[i][j] = path;
                 }
             }
         }
@@ -550,9 +543,84 @@ pub fn solve_cpp(
 
         // Add the paths for all matched pairs into duplicate_edges
         for (u_idx, v_idx) in pairs {
-            let (i, j) = if u_idx < v_idx { (u_idx, v_idx) } else { (v_idx, u_idx) };
-            for &(p, c, weight, eidx) in &path_matrix[i][j] {
-                duplicate_edges.push((p, c, weight, eidx));
+            let u = odd_vertices[u_idx];
+            let v = odd_vertices[v_idx];
+
+            // Re-run Dijkstra from u to find the path to v
+            let mut dists = vec![f64::MAX; n];
+            let mut prev = vec![None; n];
+            let mut heap = BinaryHeap::new();
+
+            dists[u] = 0.0;
+            heap.push(State {
+                cost: 0.0,
+                position: u,
+                incoming_edge_idx: None,
+            });
+
+            while let Some(State {
+                cost,
+                position,
+                incoming_edge_idx,
+            }) = heap.pop()
+            {
+                if position == v {
+                    break;
+                }
+                if cost > dists[position] {
+                    continue;
+                }
+
+                for edge in &adj[position] {
+                    let mut penalty = 0.0;
+                    if let Some(prev_idx) = incoming_edge_idx {
+                        let prev_edge = &edges[prev_idx];
+                        let (p_from, p_to) = if prev_edge.to as usize == position {
+                            (prev_edge.from as usize, position)
+                        } else {
+                            (prev_edge.to as usize, position)
+                        };
+
+                        let b_in = bearing(
+                            nodes[p_from].lat,
+                            nodes[p_from].lon,
+                            nodes[p_to].lat,
+                            nodes[p_to].lon,
+                        );
+                        let b_out = bearing(
+                            nodes[position].lat,
+                            nodes[position].lon,
+                            nodes[edge.to as usize].lat,
+                            nodes[edge.to as usize].lon,
+                        );
+                        let delta = b_out - b_in;
+
+                        match classify_turn(delta) {
+                            "left" => penalty = penalties.left,
+                            "right" => penalty = penalties.right,
+                            "u_turn" => penalty = penalties.u_turn,
+                            _ => {}
+                        }
+                    }
+
+                    let next_cost = cost + edge.weight_m + penalty;
+                    if next_cost < dists[edge.to as usize] {
+                        dists[edge.to as usize] = next_cost;
+                        prev[edge.to as usize] = Some((position, edge.weight_m, edge.edge_idx));
+                        heap.push(State {
+                            cost: next_cost,
+                            position: edge.to as usize,
+                            incoming_edge_idx: Some(edge.edge_idx),
+                        });
+                    }
+                }
+            }
+
+            // Reconstruct path from v back to u
+            let mut curr = v;
+            while let Some((p, weight, eidx)) = prev[curr] {
+                duplicate_edges.push((p, curr, weight, eidx));
+                curr = p;
             }
         }
     }
@@ -676,6 +744,9 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
     }
     let (nodes, edges) = read_rmp_file(&file_data)?;
 
+    // Apply bbox filter if requested
+    let (nodes, edges) = filter_bbox(&nodes, &edges, req.bbox);
+
     let output = solve_cpp(&nodes, &edges, req.oneway_mode, req.depot, req.turn_penalties)?;
 
     if let Some(ref route_path) = req.route_file {
@@ -695,6 +766,43 @@ fn run_cpp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
 
     let mut result = output.summary;
     result.elapsed_ms = start.elapsed().as_millis() as u64;
+
+    // ── Telemetry ──────────────────────────────────────────────────────
+    #[cfg(feature = "ml")]
+    {
+        use crate::core::ml::telemetry::{log_telemetry, TelemetryRecord};
+        let record = TelemetryRecord {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            mode: "cpp".into(),
+            node_count: nodes.len(),
+            edge_count: edges.len(),
+            density: if nodes.is_empty() { 0.0 } else { edges.len() as f64 / nodes.len() as f64 },
+            is_3d: false,
+            has_turn_penalties: req.turn_penalties.left > 0.0
+                || req.turn_penalties.right > 0.0
+                || req.turn_penalties.u_turn > 0.0,
+            vehicle_count: 1,
+            depot_present: req.depot.is_some(),
+            oneway_mode: format!("{:?}", req.oneway_mode).to_lowercase(),
+            bbox: req.bbox.map(|b| (b.min_lon, b.min_lat, b.max_lon, b.max_lat)),
+            selected_solver: "cpp_default".into(),
+            runtime_ms: result.elapsed_ms,
+            success: true,
+            path_length_km: result.total_distance_km,
+            deadhead_km: result.deadhead_distance_km,
+            efficiency_pct: result.efficiency_pct,
+            error_message: None,
+            instance_features: None,
+            solver_id: None,
+            num_stops: None,
+            gap_to_bks: None,
+        };
+        if let Err(e) = log_telemetry(record) {
+            tracing::warn!("Failed to log CPP telemetry: {}", e);
+        }
+        check_retrain_trigger();
+    }
+
     Ok(result)
 }
 
@@ -708,6 +816,9 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
     let mut file_data = Vec::new();
     std::fs::File::open(&req.cache_file)?.read_to_end(&mut file_data)?;
     let (nodes, edges) = read_rmp_file(&file_data)?;
+
+    // Apply bbox filter if requested
+    let (nodes, edges) = filter_bbox(&nodes, &edges, req.bbox);
 
     if nodes.is_empty() {
         anyhow::bail!("No nodes found in .rmp file");
@@ -800,6 +911,44 @@ async fn run_vrp_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResul
         if let Err(e) = log_solve(entry, None) {
             tracing::warn!("Failed to log solve for feedback: {}", e);
         }
+    }
+
+    // ── Telemetry (VRP) ────────────────────────────────────────────────
+    #[cfg(feature = "ml")]
+    {
+        use crate::core::ml::telemetry::{log_telemetry, TelemetryRecord};
+        use crate::core::ml::features::InstanceFeatures;
+        let features = InstanceFeatures::from_input(&vrp_input);
+        let record = TelemetryRecord {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            mode: "vrp".into(),
+            node_count: nodes.len(),
+            edge_count: edges.len(),
+            density: if nodes.is_empty() { 0.0 } else { edges.len() as f64 / nodes.len() as f64 },
+            is_3d: false,
+            has_turn_penalties: req.turn_penalties.left > 0.0
+                || req.turn_penalties.right > 0.0
+                || req.turn_penalties.u_turn > 0.0,
+            vehicle_count: req.num_vehicles,
+            depot_present: req.depot.is_some(),
+            oneway_mode: format!("{:?}", req.oneway_mode).to_lowercase(),
+            bbox: req.bbox.map(|b| (b.min_lon, b.min_lat, b.max_lon, b.max_lat)),
+            selected_solver: req.solver_id.clone(),
+            runtime_ms: elapsed_ms,
+            success: true,
+            path_length_km: total_dist_km,
+            deadhead_km: 0.0,
+            efficiency_pct: 100.0,
+            error_message: None,
+            instance_features: Some(features.to_vector()),
+            solver_id: Some(req.solver_id.clone()),
+            num_stops: Some(stops.len().saturating_sub(1)),
+            gap_to_bks: None,
+        };
+        if let Err(e) = log_telemetry(record) {
+            tracing::warn!("Failed to log VRP telemetry: {}", e);
+        }
+        check_retrain_trigger();
     }
 
     // 5. Compute Stats
@@ -900,14 +1049,80 @@ pub fn write_gpx_cpp(path: &str, nodes: &[RmpNode], circuit: &[u32]) -> anyhow::
     Ok(())
 }
 
+// ── Retraining trigger ────────────────────────────────────────────────
+
+/// Check if the telemetry run count has reached a retraining threshold
+/// and log a reminder. Called after each successful telemetry write.
+#[cfg(feature = "ml")]
+fn check_retrain_trigger() {
+    if let Ok(count) = crate::core::ml::telemetry::telemetry_run_count() {
+        if count > 0 && count % 100 == 0 {
+            tracing::info!(
+                "Telemetry run count reached {}: consider running `python refine.py` for model retraining",
+                count
+            );
+        }
+    }
+}
+
 // ── Dispatcher ───────────────────────────────────────────────────────
 
 /// Run route optimization, dispatching to CPP or VRP based on `req.mode`.
 pub async fn run_optimize(req: &OptimizeRequest) -> anyhow::Result<OptimizeResult> {
-    match req.mode {
+    let result = match req.mode {
         SolverMode::Cpp => run_cpp_optimize(req),
         SolverMode::Vrp => run_vrp_optimize(req).await,
+    };
+
+    // Log error telemetry if the solve failed.
+    if let Err(ref e) = result {
+        #[cfg(feature = "ml")]
+        {
+            use crate::core::ml::telemetry::{log_telemetry, TelemetryRecord};
+            let record = TelemetryRecord {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                mode: match req.mode {
+                    SolverMode::Cpp => "cpp",
+                    SolverMode::Vrp => "vrp",
+                }.into(),
+                node_count: 0,
+                edge_count: 0,
+                density: 0.0,
+                is_3d: false,
+                has_turn_penalties: req.turn_penalties.left > 0.0
+                    || req.turn_penalties.right > 0.0
+                    || req.turn_penalties.u_turn > 0.0,
+                vehicle_count: if matches!(req.mode, SolverMode::Cpp) { 1 } else { req.num_vehicles },
+                depot_present: req.depot.is_some(),
+                oneway_mode: format!("{:?}", req.oneway_mode).to_lowercase(),
+                bbox: req.bbox.map(|b| (b.min_lon, b.min_lat, b.max_lon, b.max_lat)),
+                selected_solver: if matches!(req.mode, SolverMode::Cpp) {
+                    "cpp_default".into()
+                } else {
+                    req.solver_id.clone()
+                },
+                runtime_ms: 0,
+                success: false,
+                path_length_km: 0.0,
+                deadhead_km: 0.0,
+                efficiency_pct: 0.0,
+                error_message: Some(format!("{:#}", e)),
+                instance_features: None,
+                solver_id: if matches!(req.mode, SolverMode::Vrp) {
+                    Some(req.solver_id.clone())
+                } else {
+                    None
+                },
+                num_stops: None,
+                gap_to_bks: None,
+            };
+            if let Err(te) = log_telemetry(record) {
+                tracing::warn!("Failed to log error telemetry: {}", te);
+            }
+        }
     }
+
+    result
 }
 
 #[cfg(test)]
@@ -980,6 +1195,7 @@ mod tests {
             num_vehicles: 1,
             solver_id: "default".to_string(),
             coordinates: None,
+            bbox: None,
         };
         let _result = run_optimize(&req);
         // run_optimize is async but CPP is sync, so we need to use tokio
