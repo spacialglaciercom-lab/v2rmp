@@ -32,8 +32,13 @@ use v2rmp::core::compile::{CompileRequest, CompileResult};
 use v2rmp::core::elevation::local::LocalDem;
 use v2rmp::core::extract::{BBoxRequest, ExtractRequest, ExtractResult, ExtractSource, RoadClass};
 use v2rmp::core::optimize::{
-    OnewayMode, OptimizeRequest, OptimizeResult, SolverMode, TurnPenalties,
+    OnewayMode, OptimizeRequest, OptimizeResult, SolverMode, TurnPenalties, RmpNode, RmpEdge,
 };
+use v2rmp::core::geo_types::BBox;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
+use crc32fast::Hasher;
+use std::fs::File;
 use v2rmp::core::vrp::registry::solve_with;
 use v2rmp::core::vrp::types::{
     VRPSolverInput, VRPSolverOutput, VRPSolverStop, VrpObjective,
@@ -50,6 +55,8 @@ use v2rmp::core::ml::quality_predictor::{predict_quality};
 use v2rmp::core::ml::automl::{predict_hyperparams};
 #[cfg(feature = "ml")]
 use v2rmp::core::ml::feedback::{SolveLogEntry, log_solve};
+#[cfg(feature = "ml")]
+use v2rmp::core::ml::telemetry::{log_telemetry, TelemetryRecord};
 use v2rmp::core::ml_legacy::{RouteFeatures, score_route, route_feature_vector};
 #[cfg(feature = "ml")]
 use v2rmp::core::nlp::{parse_query, to_vrp_json};
@@ -198,6 +205,44 @@ fn tool_definitions() -> Vec<ToolDef> {
             }),
         },
         ToolDef {
+            name: "extract_pmtiles",
+            description: "Extract road network data from a local PMTiles archive. \
+                Opens a local .pmtiles file, queries vector tiles overlapping a bounding box, \
+                decodes Mapbox Vector Tile geometry back to GeoJSON, and writes a GeoJSON file. \
+                Fast local extraction — ideal for users who bring their own PMTiles data.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "pmtiles_path": {
+                        "type": "string",
+                        "description": "Path to local .pmtiles file"
+                    },
+                    "bbox": {
+                        "type": "object",
+                        "description": "Bounding box: {min_lon, min_lat, max_lon, max_lat}",
+                        "properties": {
+                            "min_lon": { "type": "number" },
+                            "min_lat": { "type": "number" },
+                            "max_lon": { "type": "number" },
+                            "max_lat": { "type": "number" }
+                        },
+                        "required": ["min_lon", "min_lat", "max_lon", "max_lat"]
+                    },
+                    "zoom": {
+                        "type": "integer",
+                        "description": "Tile zoom level to query (default: 14). Higher = finer granularity but more tiles.",
+                        "default": 14
+                    },
+                    "output_path": {
+                        "type": "string",
+                        "description": "Output GeoJSON file path (default: pmtiles-extract.geojson)",
+                        "default": "pmtiles-extract.geojson"
+                    }
+                },
+                "required": ["pmtiles_path", "bbox"]
+            }),
+        },
+        ToolDef {
             name: "compile",
             description: "Compile a GeoJSON road network file into the binary .rmp format. \
                 Optionally runs a cleaning pipeline and prunes disconnected subgraphs.",
@@ -286,6 +331,16 @@ fn tool_definitions() -> Vec<ToolDef> {
                         "type": "string",
                         "description": "VRP solver algorithm: default, clarke_wright, sweep, two_opt, or_opt",
                         "default": "default"
+                    },
+                    "bbox": {
+                        "type": "object",
+                        "description": "Optional bounding box to filter the network: {min_lon, min_lat, max_lon, max_lat}. When omitted, full network is used.",
+                        "properties": {
+                            "min_lon": { "type": "number" },
+                            "min_lat": { "type": "number" },
+                            "max_lon": { "type": "number" },
+                            "max_lat": { "type": "number" }
+                        }
                     }
                 },
                 "required": ["input"]
@@ -499,6 +554,56 @@ fn tool_definitions() -> Vec<ToolDef> {
             input_schema: json!({
                 "type": "object",
                 "properties": {}
+            }),
+        },
+        ToolDef {
+            name: "generate_cpp_instance",
+            description: "Generate a synthetic Chinese Postman Problem (CPP) test instance. Creates a grid-based road network with configurable properties. Part of the self-improving system for generating training data and test cases.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "grid_size": {
+                        "type": "integer",
+                        "description": "Number of nodes per side in the grid (default: 10)",
+                        "minimum": 2,
+                        "maximum": 100,
+                        "default": 10
+                    },
+                    "edge_density": {
+                        "type": "number",
+                        "description": "Probability of an edge existing between adjacent nodes (0.0-1.0, default: 0.7)",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.7
+                    },
+                    "seed": {
+                        "type": "integer",
+                        "description": "Random seed for reproducibility (default: random)",
+                        "minimum": 0
+                    },
+                    "oneway_probability": {
+                        "type": "number",
+                        "description": "Probability of an edge being one-way (0.0-1.0, default: 0.1)",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.1
+                    },
+                    "output_path": {
+                        "type": "string",
+                        "description": "Output .rmp file path (default: generated_cpp_instance.rmp)",
+                        "default": "generated_cpp_instance.rmp"
+                    },
+                    "bbox": {
+                        "type": "object",
+                        "description": "Bounding box to generate nodes within (optional, generates random bbox if not provided)",
+                        "properties": {
+                            "min_lon": { "type": "number" },
+                            "min_lat": { "type": "number" },
+                            "max_lon": { "type": "number" },
+                            "max_lat": { "type": "number" }
+                        }
+                    }
+                }
             }),
         },
         // ── Medium-priority tools ──────────────────────────────────────────
@@ -955,6 +1060,55 @@ fn tool_definitions() -> Vec<ToolDef> {
                 "required": ["stops", "solver_id", "total_distance_km"]
             }),
         },
+        ToolDef {
+            name: "v2rmp_suggest_solver",
+            description: "Suggest the best solver for a routing problem. Works for both \
+                CPP (Chinese Postman) and VRP (Vehicle Routing) modes. For VRP, uses the \
+                neural solver selector with learned model weights. For CPP, returns heuristic \
+                recommendations based on graph features.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["cpp", "vrp"],
+                        "description": "Problem mode: cpp for edge coverage, vrp for stop visits (default: vrp)"
+                    },
+                    "graph_features": {
+                        "type": "object",
+                        "description": "Graph-level features (required for CPP mode, optional for VRP mode)",
+                        "properties": {
+                            "node_count": { "type": "integer", "description": "Number of nodes" },
+                            "edge_count": { "type": "integer", "description": "Number of edges" },
+                            "oneway_mode": { "type": "string", "enum": ["respect", "ignore", "reverse"] },
+                            "depot_present": { "type": "boolean" },
+                            "has_turn_penalties": { "type": "boolean" }
+                        }
+                    },
+                    "stops": {
+                        "type": "array",
+                        "description": "Array of stops for VRP mode. First stop is depot.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "lat": { "type": "number" },
+                                "lon": { "type": "number" },
+                                "label": { "type": "string" },
+                                "demand": { "type": "number" }
+                            },
+                            "required": ["lat", "lon"]
+                        }
+                    },
+                    "num_vehicles": { "type": "integer", "default": 1 },
+                    "vehicle_capacity": { "type": "number", "default": 100.0 },
+                    "objective": {
+                        "type": "string",
+                        "enum": ["min_distance", "min_time", "balance_load", "min_vehicles"],
+                        "default": "min_distance"
+                    }
+                }
+            }),
+        },
     ]
 }
 
@@ -1035,7 +1189,66 @@ fn parse_solver_mode(args: &Value) -> SolverMode {
     }
 }
 
+fn parse_bbox_opt(args: &Value) -> Option<BBox> {
+    let bbox_obj = args.get("bbox")?;
+    let min_lon = bbox_obj.get("min_lon")?.as_f64()?;
+    let min_lat = bbox_obj.get("min_lat")?.as_f64()?;
+    let max_lon = bbox_obj.get("max_lon")?.as_f64()?;
+    let max_lat = bbox_obj.get("max_lat")?.as_f64()?;
+    Some(BBox { min_lon, min_lat, max_lon, max_lat })
+}
+
 // ── Tool handlers ───────────────────────────────────────────────────────────
+
+async fn handle_extract_pmtiles(args: &Value) -> Result<Value> {
+    use anyhow::Context;
+    use v2rmp::core::pmtiles;
+
+    let pmtiles_path = args
+        .get("pmtiles_path")
+        .and_then(|v| v.as_str())
+        .context("Missing 'pmtiles_path' parameter")?;
+    let bbox_req = parse_bbox(args)?;
+    let bbox = BBox {
+        min_lon: bbox_req.min_lon,
+        min_lat: bbox_req.min_lat,
+        max_lon: bbox_req.max_lon,
+        max_lat: bbox_req.max_lat,
+    };
+    let zoom = args
+        .get("zoom")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u8)
+        .unwrap_or(14);
+    let output_path = args
+        .get("output_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("pmtiles-extract.geojson")
+        .to_string();
+
+    tracing::info!(
+        "extract_pmtiles: path={}, bbox={:.4},{:.4},{:.4},{:.4}, zoom={}",
+        pmtiles_path, bbox.min_lon, bbox.min_lat, bbox.max_lon, bbox.max_lat, zoom
+    );
+
+    let fc = pmtiles::extract_bbox_to_geojson(pmtiles_path, &bbox, zoom).await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let geojson_str = serde_json::to_string_pretty(&fc)?;
+    std::fs::write(&output_path, &geojson_str)?;
+
+    Ok(json!({
+        "features": fc.features.len(),
+        "output_path": output_path,
+        "bbox": {
+            "min_lon": bbox.min_lon,
+            "min_lat": bbox.min_lat,
+            "max_lon": bbox.max_lon,
+            "max_lat": bbox.max_lat,
+        },
+        "zoom": zoom,
+    }))
+}
 
 async fn handle_extract_overture(args: &Value) -> Result<Value> {
     let bbox = parse_bbox(args)?;
@@ -1055,6 +1268,8 @@ async fn handle_extract_overture(args: &Value) -> Result<Value> {
         road_classes,
         output_path,
         pbf_path: None,
+        pmtiles_path: None,
+        zoom: 14,
     };
 
     let result: ExtractResult = v2rmp::core::extract::run_extract(&req).await?;
@@ -1080,6 +1295,8 @@ async fn handle_extract_osm(args: &Value) -> Result<Value> {
         road_classes,
         output_path,
         pbf_path,
+        pmtiles_path: None,
+        zoom: 14,
     };
 
     let result: ExtractResult = v2rmp::core::extract::run_extract(&req).await?;
@@ -1180,6 +1397,7 @@ let req = OptimizeRequest {
     num_vehicles,
     solver_id,
     coordinates: None,
+    bbox: parse_bbox_opt(args),
     };
 
     let result: OptimizeResult = v2rmp::core::optimize::run_optimize(&req).await?;
@@ -1264,6 +1482,7 @@ fn handle_clean(args: &Value) -> Result<Value> {
 // ── VRP Solve handler ────────────────────────────────────────────────────
 
 async fn handle_vrp_solve(args: &Value) -> Result<Value> {
+    let solve_start = std::time::Instant::now();
     let stops_val = args
         .get("stops")
         .and_then(|v| v.as_array())
@@ -1370,6 +1589,41 @@ async fn handle_vrp_solve(args: &Value) -> Result<Value> {
             "stops": stops_json,
         })
     }).collect();
+
+    // ── Telemetry for MCP vrp_solve ────────────────────────────────────
+    #[cfg(feature = "ml")]
+    {
+        let elapsed_ms = solve_start.elapsed().as_millis() as u64;
+        let total_dist_km: f64 = output.total_distance_km.parse().unwrap_or(0.0);
+        let features = v2rmp::core::ml::features::InstanceFeatures::from_input(&input);
+        let record = TelemetryRecord {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            mode: "vrp".into(),
+            node_count: 0,
+            edge_count: 0,
+            density: 0.0,
+            is_3d: false,
+            has_turn_penalties: false,
+            vehicle_count: num_vehicles,
+            depot_present: !input.locations.is_empty(),
+            oneway_mode: "respect".into(),
+            bbox: None,
+            selected_solver: solver_id.clone(),
+            runtime_ms: elapsed_ms,
+            success: true,
+            path_length_km: total_dist_km,
+            deadhead_km: 0.0,
+            efficiency_pct: 100.0,
+            error_message: None,
+            instance_features: Some(features.to_vector()),
+            solver_id: Some(solver_id.clone()),
+            num_stops: Some(input.locations.len().saturating_sub(1)),
+            gap_to_bks: None,
+        };
+        if let Err(e) = log_telemetry(record) {
+            tracing::warn!("Failed to log vrp_solve telemetry: {}", e);
+        }
+    }
 
     Ok(json!({
         "total_distance_km": output.total_distance_km,
@@ -1494,6 +1748,158 @@ fn handle_list_solvers(_args: &Value) -> Result<Value> {
 
     Ok(json!({
         "solvers": results
+    }))
+}
+
+// ── Generate CPP Instance handler ───────────────────────────────────────────
+
+fn handle_generate_cpp_instance(args: &Value) -> Result<Value> {
+    // Parse parameters
+    let grid_size = args.get("grid_size").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+    let edge_density = args.get("edge_density").and_then(|v| v.as_f64()).unwrap_or(0.7);
+    let seed_opt = args.get("seed").and_then(|v| v.as_u64());
+    let oneway_probability = args.get("oneway_probability").and_then(|v| v.as_f64()).unwrap_or(0.1);
+    let output_path = args.get("output_path").and_then(|v| v.as_str()).unwrap_or("generated_cpp_instance.rmp");
+    
+    // Parse optional bbox
+    let bbox = if let Some(bbox_val) = args.get("bbox") {
+        BBox {
+            min_lon: bbox_val.get("min_lon").and_then(|v| v.as_f64()).unwrap_or(-74.0),
+            min_lat: bbox_val.get("min_lat").and_then(|v| v.as_f64()).unwrap_or(40.0),
+            max_lon: bbox_val.get("max_lon").and_then(|v| v.as_f64()).unwrap_or(-73.0),
+            max_lat: bbox_val.get("max_lat").and_then(|v| v.as_f64()).unwrap_or(41.0),
+        }
+    } else {
+        // Default to Montreal area if no bbox provided
+        BBox {
+            min_lon: -74.0,
+            min_lat: 45.4,
+            max_lon: -73.5,
+            max_lat: 45.8,
+        }
+    };
+    
+    // Use seeded RNG for reproducibility
+    let mut rng = StdRng::seed_from_u64(seed_opt.unwrap_or(42));
+    
+    // Generate grid-based road network
+    let mut nodes: Vec<RmpNode> = Vec::new();
+    let mut edges: Vec<RmpEdge> = Vec::new();
+    
+    let lat_step = (bbox.max_lat - bbox.min_lat) / (grid_size as f64);
+    let lon_step = (bbox.max_lon - bbox.min_lon) / (grid_size as f64);
+    
+    // Create grid nodes
+    for i in 0..grid_size {
+        for j in 0..grid_size {
+            let lat = bbox.min_lat + (i as f64) * lat_step;
+            let lon = bbox.min_lon + (j as f64) * lon_step;
+            nodes.push(RmpNode { lat, lon });
+        }
+    }
+    
+    // Create edges between adjacent nodes
+    for i in 0..grid_size {
+        for j in 0..grid_size {
+            let node_idx = (i * grid_size + j) as u32;
+            
+            // Right neighbor
+            if j + 1 < grid_size && rng.gen::<f64>() < edge_density {
+                let lat1 = nodes[node_idx as usize].lat;
+                let lon1 = nodes[node_idx as usize].lon;
+                let lat2 = nodes[(node_idx + 1) as usize].lat;
+                let lon2 = nodes[(node_idx + 1) as usize].lon;
+                let dist_m = v2rmp::core::haversine_m(lat1, lon1, lat2, lon2);
+                let oneway = if rng.gen::<f64>() < oneway_probability { 1u8 } else { 0u8 };
+                edges.push(RmpEdge {
+                    from: node_idx,
+                    to: node_idx + 1,
+                    weight_m: dist_m,
+                    oneway,
+                });
+            }
+            
+            // Bottom neighbor
+            if i + 1 < grid_size && rng.gen::<f64>() < edge_density {
+                let lat1 = nodes[node_idx as usize].lat;
+                let lon1 = nodes[node_idx as usize].lon;
+                let lat2 = nodes[(node_idx + grid_size as u32) as usize].lat;
+                let lon2 = nodes[(node_idx + grid_size as u32) as usize].lon;
+                let dist_m = v2rmp::core::haversine_m(lat1, lon1, lat2, lon2);
+                let oneway = if rng.gen::<f64>() < oneway_probability { 1u8 } else { 0u8 };
+                edges.push(RmpEdge {
+                    from: node_idx,
+                    to: node_idx + grid_size as u32,
+                    weight_m: dist_m,
+                    oneway,
+                });
+            }
+        }
+    }
+    
+    // Write to .rmp file using binary format
+    // Format: [4 bytes magic] [4 bytes node_count] [4 bytes edge_count]
+    //         [nodes * 16 bytes (lat, lon as f64)] [edges * 17 bytes (from, to as u32, weight as f64, oneway as u8)]
+    //         [4 bytes CRC32 checksum]
+    let mut file = File::create(output_path)
+        .map_err(|e| anyhow::anyhow!("Failed to create file '{}': {}", output_path, e))?;
+    
+    // Magic bytes
+    file.write_all(b"RMP1")?;
+    
+    // Node count (u32 LE)
+    file.write_all(&(nodes.len() as u32).to_le_bytes())?;
+    
+    // Edge count (u32 LE)
+    file.write_all(&(edges.len() as u32).to_le_bytes())?;
+    
+    // Nodes
+    for node in &nodes {
+        file.write_all(&node.lat.to_le_bytes())?;
+        file.write_all(&node.lon.to_le_bytes())?;
+    }
+    
+    // Edges
+    for edge in &edges {
+        file.write_all(&edge.from.to_le_bytes())?;
+        file.write_all(&edge.to.to_le_bytes())?;
+        file.write_all(&edge.weight_m.to_le_bytes())?;
+        file.write_all(&[edge.oneway])?;
+    }
+    
+    // CRC32 checksum
+    let mut hasher = Hasher::new();
+    hasher.update(b"RMP1");
+    hasher.update(&(nodes.len() as u32).to_le_bytes());
+    hasher.update(&(edges.len() as u32).to_le_bytes());
+    for node in &nodes {
+        hasher.update(&node.lat.to_le_bytes());
+        hasher.update(&node.lon.to_le_bytes());
+    }
+    for edge in &edges {
+        hasher.update(&edge.from.to_le_bytes());
+        hasher.update(&edge.to.to_le_bytes());
+        hasher.update(&edge.weight_m.to_le_bytes());
+        hasher.update(&[edge.oneway]);
+    }
+    let checksum = hasher.finalize();
+    file.write_all(&checksum.to_le_bytes())?;
+    
+    Ok(json!({
+        "status": "success",
+        "output_path": output_path,
+        "nodes_generated": nodes.len(),
+        "edges_generated": edges.len(),
+        "grid_size": grid_size,
+        "edge_density": edge_density,
+        "oneway_edges": edges.iter().filter(|e| e.oneway == 1).count(),
+        "bbox": {
+            "min_lon": bbox.min_lon,
+            "min_lat": bbox.min_lat,
+            "max_lon": bbox.max_lon,
+            "max_lat": bbox.max_lat
+        },
+        "seed_used": seed_opt
     }))
 }
 
@@ -1965,6 +2371,8 @@ async fn handle_pipeline(args: &Value) -> Result<Value> {
         road_classes: RoadClass::all_vehicle(),
         output_path: extract_path.clone(),
         pbf_path,
+        pmtiles_path: None,
+        zoom: 14,
     };
     let extract_result = v2rmp::core::extract::run_extract(&extract_req).await?;
 
@@ -2002,6 +2410,7 @@ let optimize_req = OptimizeRequest {
     num_vehicles,
     solver_id,
     coordinates: None,
+    bbox: None,
 };
     let optimize_result = v2rmp::core::optimize::run_optimize(&optimize_req).await?;
 
@@ -2375,6 +2784,147 @@ async fn handle_get_valhalla_matrix(args: &Value) -> Result<Value> {
     }))
 }
 
+// ── v2rmp_suggest_solver handler ─────────────────────────────────────────
+
+fn handle_v2rmp_suggest_solver(args: &Value) -> Result<Value> {
+    let mode = args.get("mode").and_then(|v| v.as_str()).unwrap_or("vrp");
+
+    match mode {
+        "vrp" => {
+            // Parse stops
+            let stops_val = args
+                .get("stops")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow::anyhow!("Missing 'stops' parameter for VRP mode"))?;
+
+            if stops_val.is_empty() {
+                anyhow::bail!("At least one stop (the depot) is required");
+            }
+
+            let stops: Vec<VRPSolverStop> = stops_val
+                .iter()
+                .enumerate()
+                .map(|(i, s)| {
+                    let lat = s.get("lat").and_then(|v| v.as_f64())
+                        .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lat'", i))?;
+                    let lon = s.get("lon").and_then(|v| v.as_f64())
+                        .ok_or_else(|| anyhow::anyhow!("Stop {} missing 'lon'", i))?;
+                    let label = s.get("label").and_then(|v| v.as_str())
+                        .unwrap_or_else(|| "")
+                        .to_string();
+                    let demand = s.get("demand").and_then(|v| v.as_f64());
+                    Ok(VRPSolverStop {
+                        lat,
+                        lon,
+                        label: if label.is_empty() { format!("Stop {}", i) } else { label },
+                        demand,
+                        arrival_time: None,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            let num_vehicles = args.get("num_vehicles").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+            let vehicle_capacity = args.get("vehicle_capacity").and_then(|v| v.as_f64()).unwrap_or(100.0);
+            let objective = match args.get("objective").and_then(|v| v.as_str()).unwrap_or("min_distance") {
+                "min_time" => VrpObjective::MinTime,
+                "balance_load" => VrpObjective::BalanceLoad,
+                "min_vehicles" => VrpObjective::MinVehicles,
+                _ => VrpObjective::MinDistance,
+            };
+
+            let input = VRPSolverInput {
+                locations: stops,
+                num_vehicles,
+                vehicle_capacity,
+                objective,
+                matrix: None,
+                service_time_secs: None,
+                use_time_windows: false,
+                window_open: None,
+                window_close: None,
+                hyperparams: None,
+            };
+
+            // Try to use the standalone solver selector first
+            #[cfg(feature = "ml")]
+            {
+                use v2rmp::core::ml::solver_selector_standalone::SolverSelectorWeights;
+                
+                // Try to load weights from default location
+                if let Ok(weights) = SolverSelectorWeights::from_json(v2rmp::core::ml::default_weights_path()) {
+                    let features = v2rmp::core::ml::features::InstanceFeatures::from_input(&input);
+                    let pred = weights.predict_from_features(&features);
+                    
+                    if pred.error_message.is_none() {
+                        let all_scores_json: Vec<Value> = pred.all_scores.iter().map(|(id, score)| {
+                            json!({"solver_id": id, "score": score})
+                        }).collect();
+
+                        return Ok(json!({
+                            "solver": pred.recommended,
+                            "confidence": pred.confidence,
+                            "runner_up": pred.runner_up.map(|(id, score)| json!({"solver_id": id, "score": score})),
+                            "all_scores": all_scores_json,
+                            "model_used": pred.model_used,
+                            "mode": "vrp",
+                            "features_extracted": true,
+                        }));
+                    }
+                }
+            }
+
+            // Fallback to heuristic-based selection
+            let num_stops = input.locations.len().saturating_sub(1);
+            let recommended = if num_stops <= 10 {
+                "default".to_string()
+            } else if num_stops <= 50 {
+                "clarke_wright".to_string()
+            } else if num_stops <= 200 {
+                "sweep".to_string()
+            } else {
+                "two_opt".to_string()
+            };
+
+            Ok(json!({
+                "solver": recommended,
+                "confidence": 0.5,
+                "model_used": false,
+                "mode": "vrp",
+                "heuristic": true,
+            }))
+        }
+        "cpp" => {
+            // Use graph features for CPP mode
+            let graph_features = args.get("graph_features")
+                .ok_or_else(|| anyhow::anyhow!("Missing 'graph_features' for CPP mode"))?;
+
+            let node_count = graph_features.get("node_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let edge_count = graph_features.get("edge_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let _oneway_mode = graph_features.get("oneway_mode").and_then(|v| v.as_str()).unwrap_or("respect");
+            let _depot_present = graph_features.get("depot_present").and_then(|v| v.as_bool()).unwrap_or(false);
+            let _has_turn_penalties = graph_features.get("has_turn_penalties").and_then(|v| v.as_bool()).unwrap_or(false);
+
+            // Heuristic for CPP: use default for small graphs, specialized for large
+            let recommended = if node_count <= 100 {
+                "cpp_default".to_string()
+            } else if node_count <= 1000 {
+                "cpp_heuristic".to_string()
+            } else {
+                "cpp_large".to_string()
+            };
+
+            Ok(json!({
+                "solver": recommended,
+                "confidence": 0.5,
+                "model_used": false,
+                "mode": "cpp",
+                "heuristic": true,
+            }))
+        }
+        _ => anyhow::bail!("Invalid mode: {}", mode),
+    }
+}
+
 // ── Main loop ───────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -2450,6 +3000,7 @@ async fn main() -> Result<()> {
                 let result = match name {
                     "extract_overture" => handle_extract_overture(&args).await,
                     "extract_osm" => handle_extract_osm(&args).await,
+                    "extract_pmtiles" => handle_extract_pmtiles(&args).await,
                     "compile" => handle_compile(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
@@ -2465,6 +3016,9 @@ async fn main() -> Result<()> {
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
                     "list_solvers" => handle_list_solvers(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .map(|v| v),
+                    "generate_cpp_instance" => handle_generate_cpp_instance(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
                     "haversine_distance" => handle_haversine_distance(&args)
@@ -2531,6 +3085,9 @@ async fn main() -> Result<()> {
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
                     "submit_feedback" => handle_submit_feedback(&args)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                        .map(|v| v),
+                    "v2rmp_suggest_solver" => handle_v2rmp_suggest_solver(&args)
                         .map_err(|e| anyhow::anyhow!("{e}"))
                         .map(|v| v),
                     other => {
