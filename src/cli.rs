@@ -911,24 +911,29 @@ async fn run_optimize_cmd(args: OptimizeArgs, json: bool) -> Result<()> {
             }
         );
     }
-let req = OptimizeRequest {
-    cache_file: args.input.clone(),
-    route_file: args.output.clone(),
-    turn_penalties: TurnPenalties {
-        left: args.left_penalty,
-        right: args.right_penalty,
-        u_turn: args.uturn_penalty,
-    },
-    depot,
-    oneway_mode,
-    mode,
-    num_vehicles: args.vehicles,
-    solver_id: args.solver,
-    coordinates: None,
-    bbox: args.bbox.as_ref().map(|s| {
-        let (min_lon, min_lat, max_lon, max_lat) = parse_bbox(s).expect("Invalid bbox");
-        BBox { min_lon, min_lat, max_lon, max_lat }
-    }),
+    let req = OptimizeRequest {
+        cache_file: args.input.clone(),
+        route_file: args.output.clone(),
+        turn_penalties: TurnPenalties {
+            left: args.left_penalty,
+            right: args.right_penalty,
+            u_turn: args.uturn_penalty,
+        },
+        depot,
+        oneway_mode,
+        mode,
+        num_vehicles: args.vehicles,
+        solver_id: args.solver,
+        coordinates: None,
+        bbox: args.bbox.as_ref().map(|s| {
+            let (min_lon, min_lat, max_lon, max_lat) = parse_bbox(s).expect("Invalid bbox");
+            BBox {
+                min_lon,
+                min_lat,
+                max_lon,
+                max_lat,
+            }
+        }),
     };
 
     let result = crate::core::optimize::run_optimize(&req).await?;
@@ -1017,11 +1022,11 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
         stops.extend(csv_stops);
     } else if args.generate_stops.is_some() || args.city.is_some() || args.bbox.is_some() {
         let num_stops = args.generate_stops.unwrap_or(10) as u32;
-        
+
         let coords = if let Some(ref bbox_str) = args.bbox {
             let (_min_lon, min_lat, _max_lon, max_lat) = parse_bbox(bbox_str)?;
             let (min_lon, _min_lat, max_lon, _max_lat) = parse_bbox(bbox_str)?;
-            
+
             use rand::Rng;
             let mut rng = rand::thread_rng();
             let mut c = Vec::new();
@@ -1038,7 +1043,7 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
                 .skip(1)
                 .collect()
         };
-        
+
         for (i, (lat, lon)) in coords.into_iter().enumerate() {
             stops.push(VRPSolverStop {
                 lat,
@@ -1094,7 +1099,8 @@ async fn run_vrp_cmd(args: VrpArgs, _json: bool) -> Result<()> {
         vrp_input.hyperparams = Some(predict_hyperparams(&features));
     }
 
-    let output = crate::core::vrp::registry::solve_with(solver_id, &vrp_input).await
+    let output = crate::core::vrp::registry::solve_with(solver_id, &vrp_input)
+        .await
         .map_err(|e| anyhow::anyhow!("VRP Solver error: {}", e))?;
 
     std::fs::create_dir_all(&args.output_dir)?;
@@ -1240,7 +1246,10 @@ async fn run_agent_cmd(args: AgentArgs, json: bool) -> Result<()> {
     #[cfg(feature = "ml")]
     let agent = V2RMPAgent::load_default().unwrap_or_else(|_| V2RMPAgent::new(None));
     #[cfg(feature = "ml")]
-    tracing::info!("Agent active with prompt: {}", agent.prompt.lines().next().unwrap_or(""));
+    tracing::info!(
+        "Agent active with prompt: {}",
+        agent.prompt.lines().next().unwrap_or("")
+    );
 
     let input: Box<dyn std::io::Read> = if args.task == "-" {
         Box::new(std::io::stdin())
@@ -1329,7 +1338,12 @@ async fn run_embed_cmd(args: EmbedArgs, json: bool) -> Result<()> {
         output_json(&embeddings)?;
     } else {
         for (i, emb) in embeddings.iter().enumerate() {
-            tracing::info!("Embedding {}: dimension {}, first few values: {:?}", i, emb.len(), &emb[..5.min(emb.len())]);
+            tracing::info!(
+                "Embedding {}: dimension {}, first few values: {:?}",
+                i,
+                emb.len(),
+                &emb[..5.min(emb.len())]
+            );
         }
     }
 
@@ -1337,6 +1351,7 @@ async fn run_embed_cmd(args: EmbedArgs, json: bool) -> Result<()> {
 }
 
 #[cfg(not(feature = "ml"))]
+#[allow(dead_code)]
 async fn run_embed_cmd(_args: EmbedArgs, _json: bool) -> Result<()> {
     anyhow::bail!("ML feature is not enabled. Cannot generate embeddings.");
 }
@@ -1437,21 +1452,35 @@ fn run_elevation_cmd(args: ElevationArgs, json: bool) -> Result<()> {
             } else {
                 println!("Route Elevation Profile:");
                 println!("  Distance: {:.2} km", profile.distance_km);
-                println!("  Elevation: {:.1} - {:.1} m (avg {:.1} m)", profile.min_elevation, profile.max_elevation, profile.avg_elevation);
-                println!("  Ascent: {:.1} m, Descent: {:.1} m", profile.total_ascent, profile.total_descent);
+                println!(
+                    "  Elevation: {:.1} - {:.1} m (avg {:.1} m)",
+                    profile.min_elevation, profile.max_elevation, profile.avg_elevation
+                );
+                println!(
+                    "  Ascent: {:.1} m, Descent: {:.1} m",
+                    profile.total_ascent, profile.total_descent
+                );
                 println!("  Sample points: {}", profile.points.len());
             }
         }
 
         ElevationCommand::Stats(s) => {
             let (min_lon, min_lat, max_lon, max_lat) = parse_bbox(&s.bbox)?;
-            let bbox = crate::core::elevation::BBox { min_lon, min_lat, max_lon, max_lat };
+            let bbox = crate::core::elevation::BBox {
+                min_lon,
+                min_lat,
+                max_lon,
+                max_lat,
+            };
             let stats = dem.bbox_stats(bbox, s.step)?;
             if json {
                 output_json(&stats)?;
             } else {
                 println!("Elevation Stats:");
-                println!("  Range: {:.1} - {:.1} m (avg {:.1} m)", stats.min_elevation, stats.max_elevation, stats.avg_elevation);
+                println!(
+                    "  Range: {:.1} - {:.1} m (avg {:.1} m)",
+                    stats.min_elevation, stats.max_elevation, stats.avg_elevation
+                );
                 println!("  Coverage: {:.1}%", stats.coverage_percent);
                 println!("  Valid pixels: {}", stats.pixel_count);
             }
@@ -1464,8 +1493,14 @@ fn run_elevation_cmd(args: ElevationArgs, json: bool) -> Result<()> {
             } else {
                 println!("DEM Info:");
                 println!("  Size: {} x {} pixels", info.width, info.height);
-                println!("  BBox: [{:.4}, {:.4}, {:.4}, {:.4}]", info.bbox.min_lon, info.bbox.min_lat, info.bbox.max_lon, info.bbox.max_lat);
-                println!("  Pixel size: {:.6} x {:.6}", info.pixel_size_x, info.pixel_size_y);
+                println!(
+                    "  BBox: [{:.4}, {:.4}, {:.4}, {:.4}]",
+                    info.bbox.min_lon, info.bbox.min_lat, info.bbox.max_lon, info.bbox.max_lat
+                );
+                println!(
+                    "  Pixel size: {:.6} x {:.6}",
+                    info.pixel_size_x, info.pixel_size_y
+                );
                 println!("  NoData: {:?}", info.nodata);
             }
         }
@@ -1492,13 +1527,13 @@ fn run_elevation_cmd(args: ElevationArgs, json: bool) -> Result<()> {
 // ── New ML command handlers ────────────────────────────────────────────
 
 #[cfg(feature = "ml")]
-use crate::core::ml::features::InstanceFeatures;
+use crate::core::ml::automl::predict_hyperparams;
 #[cfg(feature = "ml")]
-use crate::core::ml::selector::{predict_solver, default_model_path};
+use crate::core::ml::features::InstanceFeatures;
 #[cfg(feature = "ml")]
 use crate::core::ml::quality_predictor::predict_quality;
 #[cfg(feature = "ml")]
-use crate::core::ml::automl::predict_hyperparams;
+use crate::core::ml::selector::{default_model_path, predict_solver};
 use crate::core::nlp::{parse_query, to_vrp_json};
 use crate::core::vrp::types::{VRPSolverInput, VRPSolverStop, VrpObjective};
 
@@ -1525,13 +1560,18 @@ async fn run_predict_solver_cmd(args: PredictSolverArgs) -> Result<()> {
         service_time_secs: None,
         use_time_windows: false,
         window_open: None,
-        window_close: None, hyperparams: None,
+        window_close: None,
+        hyperparams: None,
     };
     let pred = predict_solver(&input, Some(&default_model_path()))?;
     if args.json {
         output_json(&pred)?;
     } else {
-        println!("Recommended solver: {} (confidence: {:.2}%)", pred.recommended, pred.confidence * 100.0);
+        println!(
+            "Recommended solver: {} (confidence: {:.2}%)",
+            pred.recommended,
+            pred.confidence * 100.0
+        );
         if let Some((ref id, score)) = pred.runner_up {
             println!("Runner-up: {} ({:.2}%)", id, score as f64 * 100.0);
         }
@@ -1554,7 +1594,8 @@ async fn run_predict_quality_cmd(args: PredictQualityArgs) -> Result<()> {
         service_time_secs: None,
         use_time_windows: false,
         window_open: None,
-        window_close: None, hyperparams: None,
+        window_close: None,
+        hyperparams: None,
     };
     let features = InstanceFeatures::from_input(&input);
     let pred = predict_quality(&features);
@@ -1562,7 +1603,10 @@ async fn run_predict_quality_cmd(args: PredictQualityArgs) -> Result<()> {
         output_json(&pred)?;
     } else {
         println!("Predicted gap to optimal: {:.1}%", pred.predicted_gap_pct);
-        println!("Predicted tour length:    {:.1} km", pred.predicted_tour_length_km);
+        println!(
+            "Predicted tour length:    {:.1} km",
+            pred.predicted_tour_length_km
+        );
         println!("Confidence:               {:.2}", pred.confidence);
     }
     Ok(())
@@ -1580,7 +1624,8 @@ async fn run_tune_hyperparams_cmd(args: TuneHyperparamsArgs) -> Result<()> {
         service_time_secs: None,
         use_time_windows: false,
         window_open: None,
-        window_close: None, hyperparams: None,
+        window_close: None,
+        hyperparams: None,
     };
     let features = InstanceFeatures::from_input(&input);
     let params = predict_hyperparams(&features);
@@ -1632,7 +1677,7 @@ async fn run_refine_cmd(args: RefineArgs) -> Result<()> {
     {
         tracing::info!("Starting agentic refinement...");
         let mut agent = V2RMPAgent::load_default()?;
-        
+
         let history_path = default_history_path();
         if !history_path.exists() {
             tracing::warn!("No telemetry history found at {:?}", history_path);
@@ -1643,11 +1688,9 @@ async fn run_refine_cmd(args: RefineArgs) -> Result<()> {
         let reader = std::io::BufReader::new(file);
         let mut records = Vec::new();
         use std::io::BufRead;
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                if let Ok(record) = serde_json::from_str::<TelemetryRecord>(&line) {
-                    records.push(record);
-                }
+        for line in reader.lines().map_while(Result::ok) {
+            if let Ok(record) = serde_json::from_str::<TelemetryRecord>(&line) {
+                records.push(record);
             }
         }
 
@@ -1670,14 +1713,14 @@ async fn run_refine_cmd(args: RefineArgs) -> Result<()> {
                 println!("Neural models retrained.");
             }
         }
+        Ok(())
     }
-    
+
     #[cfg(not(feature = "ml"))]
     {
+        let _ = args;
         anyhow::bail!("ML feature is required for refinement.");
     }
-    
-    Ok(())
 }
 
 fn read_json_input<T: serde::de::DeserializeOwned>(path: &str) -> Result<T> {

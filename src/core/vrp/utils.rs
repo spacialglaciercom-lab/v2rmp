@@ -72,14 +72,24 @@ pub fn build_graph_matrix(
     let n_stops = stops.len();
     let n_nodes = nodes.len();
     if n_stops == 0 || n_nodes == 0 {
-        return vec![vec![DistCell { distance: 0.0, time: 0.0 }; n_stops]; n_stops];
+        return vec![
+            vec![
+                DistCell {
+                    distance: 0.0,
+                    time: 0.0
+                };
+                n_stops
+            ];
+            n_stops
+        ];
     }
 
     // 1. Build adjacency list
     let mut adj = vec![Vec::new(); n_nodes];
     for (i, edge) in edges.iter().enumerate() {
+        #[allow(unused_mut)]
         let mut weight = edge.weight_m;
-        
+
         // Apply learned embedding if available
         #[cfg(feature = "ml")]
         if let Some(embs) = embeddings {
@@ -98,32 +108,47 @@ pub fn build_graph_matrix(
     }
 
     // 2. Map stops to nearest nodes
-    let stop_nodes: Vec<usize> = stops.iter().map(|stop| {
-        let mut best_node = 0;
-        let mut best_dist = f64::MAX;
-        for (i, node) in nodes.iter().enumerate() {
-            let d = haversine_m(stop.lat, stop.lon, node.lat, node.lon);
-            if d < best_dist {
-                best_dist = d;
-                best_node = i;
+    let stop_nodes: Vec<usize> = stops
+        .iter()
+        .map(|stop| {
+            let mut best_node = 0;
+            let mut best_dist = f64::MAX;
+            for (i, node) in nodes.iter().enumerate() {
+                let d = haversine_m(stop.lat, stop.lon, node.lat, node.lon);
+                if d < best_dist {
+                    best_dist = d;
+                    best_node = i;
+                }
             }
-        }
-        best_node
-    }).collect();
+            best_node
+        })
+        .collect();
 
     // 3. Dijkstra from each stop node
-    let mut matrix = vec![vec![DistCell { distance: 0.0, time: 0.0 }; n_stops]; n_stops];
-    
+    let mut matrix = vec![
+        vec![
+            DistCell {
+                distance: 0.0,
+                time: 0.0
+            };
+            n_stops
+        ];
+        n_stops
+    ];
+
     for i in 0..n_stops {
         let start_node = stop_nodes[i];
         let dists = dijkstra(start_node, &adj, n_nodes);
-        
+
         for j in 0..n_stops {
             let target_node = stop_nodes[j];
             let d_m = dists[target_node];
             let d_km = d_m / 1000.0;
             let time_sec = (d_km / avg_speed_kmh) * 3600.0;
-            matrix[i][j] = DistCell { distance: d_km, time: time_sec };
+            matrix[i][j] = DistCell {
+                distance: d_km,
+                time: time_sec,
+            };
         }
     }
 
@@ -131,8 +156,8 @@ pub fn build_graph_matrix(
 }
 
 fn dijkstra(start: usize, adj: &[Vec<(usize, f64)>], n: usize) -> Vec<f64> {
-    use std::collections::BinaryHeap;
     use std::cmp::Ordering;
+    use std::collections::BinaryHeap;
 
     #[derive(Copy, Clone, PartialEq)]
     struct State {
@@ -142,7 +167,10 @@ fn dijkstra(start: usize, adj: &[Vec<(usize, f64)>], n: usize) -> Vec<f64> {
     impl Eq for State {}
     impl Ord for State {
         fn cmp(&self, other: &Self) -> Ordering {
-            other.cost.partial_cmp(&self.cost).unwrap_or(Ordering::Equal)
+            other
+                .cost
+                .partial_cmp(&self.cost)
+                .unwrap_or(Ordering::Equal)
         }
     }
     impl PartialOrd for State {
@@ -155,16 +183,24 @@ fn dijkstra(start: usize, adj: &[Vec<(usize, f64)>], n: usize) -> Vec<f64> {
     let mut heap = BinaryHeap::new();
 
     dists[start] = 0.0;
-    heap.push(State { cost: 0.0, position: start });
+    heap.push(State {
+        cost: 0.0,
+        position: start,
+    });
 
     while let Some(State { cost, position }) = heap.pop() {
-        if cost > dists[position] { continue; }
+        if cost > dists[position] {
+            continue;
+        }
 
         for (next, weight) in &adj[position] {
             let next_cost = cost + weight;
             if next_cost < dists[*next] {
                 dists[*next] = next_cost;
-                heap.push(State { cost: next_cost, position: *next });
+                heap.push(State {
+                    cost: next_cost,
+                    position: *next,
+                });
             }
         }
     }
@@ -192,18 +228,13 @@ pub async fn get_valhalla_matrix(locations: &[VRPSolverStop]) -> Result<DistMatr
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
-    let resp = client
-        .post(url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| {
-            if e.is_timeout() {
-                "Valhalla request timed out after 15 seconds (network may be unavailable)".to_string()
-            } else {
-                format!("Valhalla request failed: {e}")
-            }
-        })?;
+    let resp = client.post(url).json(&body).send().await.map_err(|e| {
+        if e.is_timeout() {
+            "Valhalla request timed out after 15 seconds (network may be unavailable)".to_string()
+        } else {
+            format!("Valhalla request failed: {e}")
+        }
+    })?;
 
     if !resp.status().is_success() {
         return Err(format!("Valhalla HTTP {}", resp.status()));
@@ -361,11 +392,7 @@ pub fn nearest_neighbor_route(
 }
 
 /// 2-opt improvement: iteratively reverse segments to reduce total distance.
-pub fn two_opt_improve(
-    matrix: &DistMatrix,
-    route_indices: &[usize],
-    max_iter: u32,
-) -> Vec<usize> {
+pub fn two_opt_improve(matrix: &DistMatrix, route_indices: &[usize], max_iter: u32) -> Vec<usize> {
     let n = route_indices.len();
     if n <= 3 {
         return route_indices.to_vec();
@@ -432,7 +459,9 @@ pub fn build_sweep_routes(
         let lb = &locations[b];
         let angle_a = (la.lat - depot.lat).atan2(la.lon - depot.lon);
         let angle_b = (lb.lat - depot.lat).atan2(lb.lon - depot.lon);
-        angle_a.partial_cmp(&angle_b).unwrap_or(std::cmp::Ordering::Equal)
+        angle_a
+            .partial_cmp(&angle_b)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     let per_route = (indices.len() as f64 / num_vehicles as f64).ceil() as usize;
@@ -441,9 +470,13 @@ pub fn build_sweep_routes(
     for v in 0..num_vehicles {
         let start = v * per_route;
         let end = std::cmp::min(start + per_route, indices.len());
-        if start >= indices.len() { break; }
+        if start >= indices.len() {
+            break;
+        }
         let segment = &indices[start..end];
-        if segment.is_empty() { continue; }
+        if segment.is_empty() {
+            continue;
+        }
 
         let mut route = vec![0];
         let mut remaining: std::collections::HashSet<usize> = segment.iter().copied().collect();
@@ -468,8 +501,6 @@ pub fn build_sweep_routes(
     route_indices
 }
 
-
-
 /// Parse a CSV file of coordinates into VRP solver stops.
 ///
 /// Supported column sets:
@@ -479,7 +510,9 @@ pub fn build_sweep_routes(
 /// The `type` column accepts "depot" or "stop" (default: "stop").
 /// If no depot is present, the first row becomes the depot.
 /// The `demand` column is optional; defaults to 1.0 for stops, 0.0 for depots.
-pub fn parse_csv_stops(csv_path: &str) -> Result<(Vec<crate::core::vrp::types::VRPSolverStop>, Vec<usize>), String> {
+pub fn parse_csv_stops(
+    csv_path: &str,
+) -> Result<(Vec<crate::core::vrp::types::VRPSolverStop>, Vec<usize>), String> {
     use std::io::Read;
     let mut file = std::fs::File::open(csv_path)
         .map_err(|e| format!("Cannot open CSV '{}': {}", csv_path, e))?;
@@ -492,29 +525,49 @@ pub fn parse_csv_stops(csv_path: &str) -> Result<(Vec<crate::core::vrp::types::V
         .trim(csv::Trim::All)
         .from_reader(content.as_bytes());
 
-    let headers = reader.headers()
+    let headers = reader
+        .headers()
         .map_err(|e| format!("Failed to read CSV headers: {}", e))?
         .clone();
 
-    let lat_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("lat") || h.eq_ignore_ascii_case("latitude"))
+    let lat_idx = headers
+        .iter()
+        .position(|h| h.eq_ignore_ascii_case("lat") || h.eq_ignore_ascii_case("latitude"))
         .ok_or("CSV must have a 'lat' column")?;
-    let lon_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("lon") || h.eq_ignore_ascii_case("lng") || h.eq_ignore_ascii_case("longitude"))
+    let lon_idx = headers
+        .iter()
+        .position(|h| {
+            h.eq_ignore_ascii_case("lon")
+                || h.eq_ignore_ascii_case("lng")
+                || h.eq_ignore_ascii_case("longitude")
+        })
         .ok_or("CSV must have a 'lon' column")?;
-    let label_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("label") || h.eq_ignore_ascii_case("name") || h.eq_ignore_ascii_case("id"));
-    let demand_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("demand"));
-    let type_idx = headers.iter().position(|h| h.eq_ignore_ascii_case("type") || h.eq_ignore_ascii_case("role"));
+    let label_idx = headers.iter().position(|h| {
+        h.eq_ignore_ascii_case("label")
+            || h.eq_ignore_ascii_case("name")
+            || h.eq_ignore_ascii_case("id")
+    });
+    let demand_idx = headers
+        .iter()
+        .position(|h| h.eq_ignore_ascii_case("demand"));
+    let type_idx = headers
+        .iter()
+        .position(|h| h.eq_ignore_ascii_case("type") || h.eq_ignore_ascii_case("role"));
 
     let mut stops = Vec::new();
     let mut depot_indices = Vec::new();
 
     for (row_num, result) in reader.records().enumerate() {
-        let record = result.map_err(|e| format!("CSV parse error at row {}: {}", row_num + 2, e))?;
+        let record =
+            result.map_err(|e| format!("CSV parse error at row {}: {}", row_num + 2, e))?;
 
-        let lat: f64 = record.get(lat_idx)
+        let lat: f64 = record
+            .get(lat_idx)
             .ok_or_else(|| format!("Missing lat at row {}", row_num + 2))?
             .parse()
             .map_err(|e| format!("Invalid lat at row {}: {}", row_num + 2, e))?;
-        let lon: f64 = record.get(lon_idx)
+        let lon: f64 = record
+            .get(lon_idx)
             .ok_or_else(|| format!("Missing lon at row {}", row_num + 2))?
             .parse()
             .map_err(|e| format!("Invalid lon at row {}: {}", row_num + 2, e))?;

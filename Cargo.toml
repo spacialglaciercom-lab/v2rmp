@@ -1,6 +1,6 @@
 [package]
 name = "v2rmp"
-version = "0.4.8"
+version = "0.4.10"
 edition = "2021"
 description = "rmpca — Route Optimization TUI & Agent Engine with neural solver selection (HuggingFace: aerialblancaservices/v2rmp-routing-ml)"
 license = "MIT OR Apache-2.0"
@@ -39,6 +39,20 @@ exclude = [
     "MCP_TOOLS_PLAN.md",
     "formal_verification_spec.md",
     "index.html",
+    "montreal_overture.rmp",
+    "mountain_profile.json",
+    "plateau_task/",
+    "old_montreal*",
+    "test_overture*",
+    "test_sweep*",
+    "test_small*",
+    "test_500*",
+    "stops_500.json",
+    "mountain_coords.json",
+    "mountain_stops.json",
+    "mountain_task.json",
+    "task_20.json",
+    "task_stops*",
 ]
 
 [[bin]]
@@ -100,12 +114,13 @@ candle-transformers = { version = "0.10", optional = true }
 tokenizers = { version = "0.22", optional = true }
 hf-hub = { version = "0.5", default-features = false, features = ["ureq"], optional = true }
 
-# Extraction (object_store + parquet + geo + pmtiles)
+# Extraction (object_store + parquet + arrow + datafusion + pmtiles)
 object_store = { version = "0.11", features = ["aws"], optional = true }
 pmtiles = { version = "0.21", optional = true }
 mvt-reader = { version = "2.0", optional = true }
 parquet = { version = "54", features = ["async"], optional = true }
 arrow = { version = "54", optional = true }
+datafusion = { version = "45", optional = true }
 futures-util = "0.3"
 geo-types = "0.7"
 geo-traits = "0.2"
@@ -113,13 +128,14 @@ geo = "0.28"
 geojson = "0.24"
 wkb = "0.8"
 tokio = { version = "1", default-features = false, features = ["sync", "macros", "rt-multi-thread"] }
+url = "2"
 sqlx = { version = "0.8", features = ["runtime-tokio", "tls-native-tls", "postgres", "chrono", "json"], optional = true }
 sha2 = "0.10"
 hex = "0.4"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 crc32fast = "1.4"
-petgraph = "0.6"
+petgraph = "0.7"
 rstar = "0.12"
 ordered-float = "4.2"
 gdal = { version = "0.18", features = ["bindgen"], optional = true }
@@ -153,5 +169,6 @@ codegen-units = 16
 default = ["cli", "extract"]
 cli = ["ratatui", "crossterm", "extract"]
 gui = ["eframe", "egui", "rfd", "wasm-bindgen-futures"]
-extract = ["object_store", "parquet", "arrow", "osmpbf", "gdal", "dirs", "shellexpand", "sqlx", "pmtiles", "mvt-reader"]
+extract = ["osmpbf", "gdal", "dirs", "shellexpand", "sqlx", "pmtiles", "mvt-reader", "overture-remote"]
+overture-remote = ["object_store", "parquet", "arrow", "datafusion"]
 ml = ["tokenizers", "candle-core", "candle-nn", "candle-transformers", "hf-hub"]
