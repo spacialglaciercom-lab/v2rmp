@@ -134,6 +134,15 @@ echo "[PROMOTE] Copying validated models to models/ ..."
 cp "$OUT_DIR"/*.safetensors "${REPO_ROOT}/models/"
 echo "  OK"
 
+# --- upload to huggingface ---------------------------------------------------
+echo ""
+echo "[UPLOAD] Uploading models to Hugging Face Hub ..."
+REPO_ID="aerialblancaservices/v2rmp-routing-ml"
+hf upload "$REPO_ID" "${REPO_ROOT}/models/" --include "*.safetensors" --commit-message "Automatic model update from CI pipeline" || {
+    echo "WARNING: Hugging Face upload failed, but models were promoted locally."
+}
+echo "  OK"
+
 # --- write report ------------------------------------------------------------
 REPORT="${OUT_DIR}/training_report.md"
 cat > "$REPORT" <<EOF
@@ -141,7 +150,7 @@ cat > "$REPORT" <<EOF
 
 | Field | Value |
 |-------|-------|
-| Timestamp | $(date -Is) |
+| Timestamp | $(date +"%Y-%m-%dT%H:%M:%S%z") |
 | Data | $DATA ($DATA_LINES rows) |
 | Extra data | $EXTRA |
 | Epochs | $EPOCHS |
